@@ -2,6 +2,7 @@ import Photos
 import UIKit
 import UniformTypeIdentifiers
 import ImageIO
+import AVFoundation
 
 /// Everything XA takes goes into an "XA" album in Photos. iOS won't let a camera replace
 /// Photos, so the contact sheet is a view onto that album.
@@ -45,6 +46,11 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
 
     func photoLibraryDidChange(_ changeInstance: PHChange) {
         DispatchQueue.main.async { self.reload() }
+    }
+
+    static func clock(_ seconds: Double) -> String {
+        let s = Int(seconds.rounded(.down))
+        return String(format: "%d:%02d", s / 60, s % 60)
     }
 
     /// Days, newest first, for the roll.
@@ -136,6 +142,37 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
         images.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: o) { img, _ in done(img) }
     }
 
+    func save(video url: URL, completion: ((Bool) -> Void)? = nil) {
+        let existing = album()
+        PHPhotoLibrary.shared().performChanges({
+            let req = PHAssetCreationRequest.forAsset()
+            let o = PHAssetResourceCreationOptions(); o.shouldMoveFile = true
+            req.addResource(with: .video, fileURL: url, options: o)
+            guard let ph = req.placeholderForCreatedAsset else { return }
+            if let existing {
+                PHAssetCollectionChangeRequest(for: existing)?.addAssets([ph] as NSArray)
+            } else {
+                PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: Self.title).addAssets([ph] as NSArray)
+            }
+        }, completionHandler: { ok, _ in DispatchQueue.main.async { completion?(ok) } })
+    }
+
+    func playerItem(_ asset: PHAsset, _ done: @escaping (AVPlayerItem?) -> Void) {
+        let o = PHVideoRequestOptions(); o.isNetworkAccessAllowed = true; o.deliveryMode = .automatic
+        PHImageManager.default().requestPlayerItem(forVideo: asset, options: o) { item, _ in DispatchQueue.main.async { done(item) } }
+    }
+
+    /// A video's file, for sending.
+    func exportVideo(_ asset: PHAsset, _ done: @escaping (URL?) -> Void) {
+        guard let res = PHAssetResource.assetResources(for: asset).first(where: { $0.type == .video || $0.type == .fullSizeVideo }) else { done(nil); return }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(res.originalFilename)
+        try? FileManager.default.removeItem(at: url)
+        let o = PHAssetResourceRequestOptions(); o.isNetworkAccessAllowed = true
+        PHAssetResourceManager.default().writeData(for: res, toFile: url, options: o) { err in
+            DispatchQueue.main.async { done(err == nil ? url : nil) }
+        }
+    }
+
     /// Straight to Recently Deleted; iOS asks first.
     func delete(_ asset: PHAsset, _ done: ((Bool) -> Void)? = nil) {
         PHPhotoLibrary.shared().performChanges({
@@ -145,6 +182,15 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
 
     /// What the file says about itself, as label/value rows.
     func metadata(_ asset: PHAsset, _ done: @escaping ([(String, String)]) -> Void) {
+        if asset.mediaType == .video {
+            let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .short
+            var rows: [(String, String)] = []
+            if let date = asset.creationDate { rows.append(("Taken", df.string(from: date))) }
+            rows.append(("Length", Library.clock(asset.duration)))
+            rows.append(("Size", "\(asset.pixelWidth) × \(asset.pixelHeight)"))
+            done(rows)
+            return
+        }
         data(asset) { d, uti in
             var rows: [(String, String)] = []
             let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .short

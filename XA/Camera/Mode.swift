@@ -6,15 +6,24 @@ import CoreImage.CIFilterBuiltins
 /// DIGI is a 2003 point-and-shoot: a small file, cheap processing, sims, looks, shapes, a date back.
 /// PRO is the iPhone at its best: full resolution, full processing, saved untouched.
 enum CaptureMode: String, CaseIterable, Identifiable, Codable {
-    case digi, pro
+    case digi, pro, video
 
     var id: String { rawValue }
-    var title: String { self == .digi ? "DIGI" : "PRO" }
+    var title: String {
+        switch self {
+        case .digi: return "DIGI"
+        case .pro: return "PRO"
+        case .video: return "VIDEO"
+        }
+    }
+
+    /// Whether the viewfinder runs through the darkroom (everything but PRO).
+    var developed: Bool { self != .pro }
 
     /// Largest photo asked of the sensor. DIGI reads out 12MP fast and shrinks it after.
-    var maxSensorPixels: Int { self == .digi ? 12_600_000 : Int.max }
+    var maxSensorPixels: Int { self == .pro ? Int.max : 12_600_000 }
 
-    var prioritization: AVCapturePhotoOutput.QualityPrioritization { self == .digi ? .speed : .quality }
+    var prioritization: AVCapturePhotoOutput.QualityPrioritization { self == .pro ? .quality : .speed }
 
     static func megapixels(_ s: CGSize) -> Int {
         let px: CGFloat = s.width * s.height

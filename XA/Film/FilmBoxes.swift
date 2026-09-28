@@ -2,12 +2,13 @@ import SwiftUI
 
 /// Something that has a box: a sim, a look or a shape.
 enum FilmItem: Hashable, Identifiable {
-    case sim(Sim), look(Look), shape(FrameShape)
+    case sim(Sim), look(Look), shape(FrameShape), video(VideoLook)
     var id: String {
         switch self {
         case .sim(let s): return "sim-\(s.id)"
         case .look(let l): return "look-\(l.rawValue)"
         case .shape(let s): return "shape-\(s.rawValue)"
+        case .video(let v): return "video-\(v.rawValue)"
         }
     }
     var title: String {
@@ -15,6 +16,7 @@ enum FilmItem: Hashable, Identifiable {
         case .sim(let s): return s.title
         case .look(let l): return l.title
         case .shape(let s): return s.title
+        case .video(let v): return v.title
         }
     }
 }
@@ -117,6 +119,7 @@ struct FilmBox: View {
         switch item {
         case .look(let l): LookBox(look: l)
         case .shape(let s): ShapeBox(shape: s)
+        case .video(let v): TapeBox(look: v)
         case .sim(let s):
             if s.isPreset { PresetSimBox(sim: s) } else { CustomBox(design: s.box, name: s.name, iso: s.iso, exposures: s.exposures) }
         }
@@ -542,6 +545,110 @@ struct CustomBox: View {
         case .band: Rectangle().fill(b).frame(width: 160, height: 26).tl(0, 58)
         case .stamp: RoundedRectangle(cornerRadius: 0).strokeBorder(b, lineWidth: 2).frame(width: 148, height: 94).tl(6, 6)
         case .plain: EmptyView()
+        }
+    }
+}
+
+/// Video looks come on tape: a cassette, a cartridge, a clapperboard.
+private struct TapeBox: View {
+    let look: VideoLook
+    var body: some View {
+        switch look {
+        case .clean: dv
+        case .super8: super8
+        case .vhs: vhs
+        case .pocket: pocket
+        case .trails: trails
+        case .stopMotion: clapper
+        case .datamosh: mosh
+        }
+    }
+
+    private func reels(_ c: Color, _ hub: Color) -> some View {
+        HStack(spacing: 34) {
+            ForEach(0..<2, id: \.self) { _ in
+                ZStack { Circle().fill(c).frame(width: 26, height: 26); Circle().fill(hub).frame(width: 10, height: 10) }
+            }
+        }
+    }
+
+    private var dv: some View {
+        let f = "ChakraPetch-Bold"
+        return BoxCanvas(bg: Color(hex: "#2A2A2C")) {
+            Rectangle().fill(Color(hex: "#111111")).frame(width: 140, height: 36).tl(10, 52)
+            reels(Color(hex: "#3A3A3C"), Color(hex: "#111111")).tl(34, 57)
+            T("XA", f, 11, XA.orange, 2).tl(10, 8)
+            T("HD 60", f, 26, .white).tl(10, 20)
+            T("CLEAN", "ChakraPetch-SemiBold", 9, XA.dim, 2).tr(10, 12)
+        }
+    }
+
+    private var super8: some View {
+        let f = "BebasNeue-Regular"
+        return BoxCanvas(bg: Color(hex: "#F2B51E")) {
+            Rectangle().fill(Color(hex: "#111111")).frame(width: 160, height: 30).tl(0, 60)
+            HStack(spacing: 6) { ForEach(0..<16, id: \.self) { _ in Rectangle().fill(Color(hex: "#F2B51E")).frame(width: 4, height: 6) } }.tl(6, 72)
+            T("XA", f, 14, Color(hex: "#111111"), 2).tl(10, 6)
+            T("SUPER 8", f, 34, Color(hex: "#111111"), 1).tl(10, 18)
+            T("50 FT · 18 FPS", f, 11, Color(hex: "#111111"), 1).tr(10, 10)
+        }
+    }
+
+    private var vhs: some View {
+        let f = "RobotoCondensed-Bold"
+        return BoxCanvas(bg: Color(hex: "#0B0B0C")) {
+            Rectangle().fill(Color(hex: "#F4F1EA")).frame(width: 140, height: 34).tl(10, 8)
+            T("XA  T-120", f, 18, Color(hex: "#111111")).tl(18, 13)
+            HStack(spacing: 2) { ForEach(["#D8412F", "#F2B51E", "#3F9A45", "#1B4FA0"], id: \.self) { Rectangle().fill(Color(hex: $0)).frame(width: 8, height: 26) } }.tr(18, 12)
+            Rectangle().fill(Color(hex: "#1C1C1E")).frame(width: 110, height: 40).tl(25, 52)
+            reels(Color(hex: "#4A4A4C"), Color(hex: "#0B0B0C")).tl(38, 59)
+            T("VHS", f, 10, .white, 2).bl(10, 6)
+        }
+    }
+
+    private var pocket: some View {
+        let f = "Silkscreen-Regular"
+        return BoxCanvas(bg: Color(hex: "#8BAC0F")) {
+            Rectangle().fill(Color(hex: "#306230")).frame(width: 160, height: 18).tl(0, 0)
+            T("POCKET CAM", f, 10, Color(hex: "#9BBC0F"), 1).tl(10, 3)
+            Rectangle().fill(Color(hex: "#0F380F")).frame(width: 64, height: 50).tl(10, 28)
+            Circle().fill(Color(hex: "#9BBC0F")).frame(width: 30).tl(27, 38)
+            T("12", f, 26, Color(hex: "#0F380F")).tr(10, 26)
+            T("FPS", f, 10, Color(hex: "#0F380F")).tr(10, 58)
+            T("4 GREENS", f, 8, Color(hex: "#0F380F"), 1).bl(84, 8)
+        }
+    }
+
+    private var trails: some View {
+        let f = "Orbitron-ExtraBold"
+        return BoxCanvas(bg: Color(hex: "#1B0B3A")) {
+            ForEach(0..<5, id: \.self) { i in
+                Circle().fill(Color(hex: "#E24DA0").opacity(0.2 + Double(i) * 0.18)).frame(width: 26).tl(CGFloat(60 + i * 16), 50)
+            }
+            T("TRAILS", f, 20, .white, 1).tl(10, 10)
+            T("LONG TAPE", f, 8, Color(hex: "#FFE08A"), 2).tl(10, 36)
+        }
+    }
+
+    private var clapper: some View {
+        let f = "Anton-Regular"
+        return BoxCanvas(bg: Color(hex: "#111111")) {
+            HStack(spacing: 0) { ForEach(0..<8, id: \.self) { i in Rectangle().fill(i % 2 == 0 ? Color.white : Color(hex: "#111111")).frame(width: 20, height: 22) } }
+                .rotationEffect(.degrees(-6)).tl(-4, 4)
+            T("STOP MOTION", f, 22, .white, 1).tl(10, 36)
+            T("SCENE 1 · TAKE 6 · 6 FPS", f, 9, XA.dim, 1).bl(10, 10)
+        }
+    }
+
+    private var mosh: some View {
+        let f = "PressStart2P-Regular"
+        return BoxCanvas(bg: Color(hex: "#0B0B0C")) {
+            ForEach(0..<14, id: \.self) { i in
+                let colors = ["#E24DA0", "#00A6D6", "#FFD23F", "#3F9A45"]
+                Rectangle().fill(Color(hex: colors[i % 4])).frame(width: CGFloat(10 + (i * 7) % 30), height: 8).tl(CGFloat((i * 37) % 140), CGFloat(50 + (i * 13) % 44))
+            }
+            T("DATA", f, 16, Color(hex: "#00A6D6")).tl(12, 10)
+            T("MOSH", f, 16, Color(hex: "#E24DA0")).tl(10, 28)
         }
     }
 }

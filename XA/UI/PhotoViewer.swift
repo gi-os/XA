@@ -1,6 +1,7 @@
 import SwiftUI
 import Photos
 import UniformTypeIdentifiers
+import AVKit
 
 /// The photo viewer: swipe between photos, a thumbnail row to slide along, pinch to zoom,
 /// info, edit, send and delete.
@@ -78,6 +79,7 @@ struct PhotoViewer: View {
             } else { icon("square.and.arrow.up", "Send").opacity(0.4) }
             Spacer()
             Button { editing = asset } label: { icon("slider.horizontal.3", "Edit") }
+                .disabled(asset?.mediaType == .video).opacity(asset?.mediaType == .video ? 0.3 : 1)
             Spacer()
             Button { info = true } label: { icon("info.circle", "Info") }
             Spacer()
@@ -120,6 +122,10 @@ struct PhotoViewer: View {
         file = nil
         guard let a = asset else { return }
         let id = a.localIdentifier
+        if a.mediaType == .video {
+            library.exportVideo(a) { url in if id == current { file = url } }
+            return
+        }
         library.data(a) { d, uti in
             guard let d, id == current else { return }
             let ext = (uti.flatMap { UTType($0)?.preferredFilenameExtension }) ?? "jpg"
@@ -138,11 +144,18 @@ private struct PhotoPage: View {
     let library: Library
     @Binding var zoomed: Bool
     @State private var img: UIImage?
+    @State private var player: AVPlayer?
     var body: some View {
         ZStack {
-            if let img { ZoomableImage(image: img, zoomed: $zoomed) } else { ProgressView().tint(.white) }
+            if asset.mediaType == .video {
+                if let player { VideoPlayer(player: player).onDisappear { player.pause() } } else { ProgressView().tint(.white) }
+            } else if let img { ZoomableImage(image: img, zoomed: $zoomed) } else { ProgressView().tint(.white) }
         }
-        .onAppear { if img == nil { library.full(asset) { img = $0 } } }
+        .onAppear {
+            if asset.mediaType == .video {
+                if player == nil { library.playerItem(asset) { item in if let item { player = AVPlayer(playerItem: item) } } }
+            } else if img == nil { library.full(asset) { img = $0 } }
+        }
         .onChange(of: asset.modificationDate) { _, _ in library.full(asset) { img = $0 } }
     }
 }

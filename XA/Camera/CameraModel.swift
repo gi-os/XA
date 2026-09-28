@@ -23,6 +23,10 @@ enum ProControl: String, CaseIterable, Identifiable {
 /// (the sim, the look, the shape, the date back, the encode, the save) drains through a queue
 /// behind the live viewfinder.
 final class CameraModel: NSObject, ObservableObject {
+    // VIDEO
+    @Published var videoLook: VideoLook = .clean { didSet { UserDefaults.standard.set(videoLook.rawValue, forKey: "videoLook"); lock.lock(); _videoLook = videoLook; lock.unlock() } }
+    @Published private(set) var recording = false
+    @Published private(set) var recordSeconds: Double = 0
     @Published var mode: CaptureMode = .digi { didSet { modeChanged(oldValue) } }
     @Published var stack = Stack(simID: "nocturne") { didSet { stackChanged() } }
     @Published private(set) var authorized: Bool?
@@ -54,6 +58,14 @@ final class CameraModel: NSObject, ObservableObject {
     var fallbackFolder: URL?
 
     private let photoOutput = AVCapturePhotoOutput()
+    private let audioOutput = AVCaptureAudioDataOutput()
+    private let audioQueue = DispatchQueue(label: "xa.audio")
+    private var audioInput: AVCaptureDeviceInput?
+    private var _videoLook: VideoLook = .clean
+    private var _wantRecord = false
+    private var _recorder: VideoRecorder?
+    private let fx = VideoFX()
+    private var recordTimer: Timer?
     private let videoOutput = AVCaptureVideoDataOutput()
     private let sessionQueue = DispatchQueue(label: "xa.session")
     private let frameQueue = DispatchQueue(label: "xa.frames")
@@ -88,13 +100,14 @@ final class CameraModel: NSObject, ObservableObject {
         self.settings = settings
         super.init()
         if let s: Stack = AppSettings.load("stack") { stack = s }
+        if let v = VideoLook(rawValue: UserDefaults.standard.integer(forKey: "videoLook")) { videoLook = v; _videoLook = v }
         let last = CaptureMode(rawValue: UserDefaults.standard.string(forKey: "mode") ?? "") ?? .digi
         switch settings.openIn {
         case .last: mode = last
         case .digi: mode = .digi
         case .pro: mode = .pro
         }
-        _toDigi = mode == .digi
+        _toDigi = mode.developed
         syncFrameSettings()
     }
 
@@ -133,13 +146,17 @@ final class CameraModel: NSObject, ObservableObject {
     private func modeChanged(_ old: CaptureMode) {
         UserDefaults.standard.set(mode.rawValue, forKey: "mode")
         if old != mode {
-            lock.lock(); _switchPending = true; _switchStart = CACurrentMediaTime(); _toDigi = mode == .digi; lock.unlock()
+            lock.lock(); _switchPending = true; _switchStart = CACurrentMediaTime(); _toDigi = mode.developed; lock.unlock()
+            if old == .video && recording { stopRecording() }
         }
         syncFrameSettings()
         guard old != mode, input != nil else { return }
         let m = mode
         publishPhotoSize(m)
-        sessionQueue.async { self.applyProOnQueue(m) }
+        sessionQueue.async {
+            self.applyProOnQueue(m)
+            if m == .video { self.addAudioIfNeeded() }
+        }
         // Camera Control is rebuilt once the fade is over, so it cannot stall the feed during it.
         sessionQueue.asyncAfter(deadline: .now() + 0.7) {
             guard self.mode == m, let dev = self.device else { return }
@@ -275,6 +292,11 @@ final class CameraModel: NSObject, ObservableObject {
             let first: AVCaptureControl = settings.digiSlide == .sim ? simPicker : lookPicker
             let second: AVCaptureControl = settings.digiSlide == .sim ? lookPicker : simPicker
             for c in [first, second] where session.canAddControl(c) { session.addControl(c) }
+        } else if m == .video {
+            let looks = AVCaptureIndexPicker("Look", symbolName: "film", localizedIndexTitles: VideoLook.allCases.map { $0.title.capitalized })
+            looks.selectedIndex = videoLook.rawValue
+            looks.setActionQueue(.main) { [weak self] i in self?.videoLook = VideoLook(rawValue: i) ?? .clean }
+            for c in [looks, zoom] as [AVCaptureControl] where session.canAddControl(c) { session.addControl(c) }
         } else {
             let bias = AVCaptureSystemExposureBiasSlider(device: dev) { [weak self] b in
                 DispatchQueue.main.async { if self?.ev != b { self?.ev = b } }
@@ -463,10 +485,68 @@ final class CameraModel: NSObject, ObservableObject {
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
+    // MARK: video
+
+    /// The microphone joins the session the first time VIDEO is used.
+    private func addAudioIfNeeded() {
+        guard audioInput == nil else { return }
+        let add = {
+            guard let mic = AVCaptureDevice.default(for: .audio), let inp = try? AVCaptureDeviceInput(device: mic) else { return }
+            self.session.beginConfiguration()
+            if self.session.canAddInput(inp) { self.session.addInput(inp); self.audioInput = inp }
+            if self.session.canAddOutput(self.audioOutput) {
+                self.session.addOutput(self.audioOutput)
+                self.audioOutput.setSampleBufferDelegate(self, queue: self.audioQueue)
+            }
+            self.session.commitConfiguration()
+        }
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: add()
+        case .notDetermined: AVCaptureDevice.requestAccess(for: .audio) { ok in if ok { self.sessionQueue.async { add() } } }
+        default: break
+        }
+    }
+
+    func toggleRecording() { recording ? stopRecording() : startRecording() }
+
+    private func startRecording() {
+        guard !recording else { return }
+        fx.reset()
+        lock.lock(); _wantRecord = true; lock.unlock()
+        recording = true
+        recordSeconds = 0
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        recordTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.lock.lock(); let d = self._recorder?.duration ?? 0; self.lock.unlock()
+            self.recordSeconds = d
+        }
+    }
+
+    func stopRecording() {
+        guard recording else { return }
+        recordTimer?.invalidate(); recordTimer = nil
+        lock.lock(); let r = _recorder; _recorder = nil; _wantRecord = false; lock.unlock()
+        recording = false
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        guard let r else { return }
+        developing += 1
+        r.finish { url in
+            DispatchQueue.main.async {
+                self.developing = max(0, self.developing - 1)
+                guard let url else { return }
+                if let lib = self.library { lib.save(video: url) } else if let dir = self.fallbackFolder {
+                    try? FileManager.default.moveItem(at: url, to: dir.appendingPathComponent(url.lastPathComponent))
+                }
+            }
+        }
+    }
+
     // MARK: shooting
 
     func shoot() {
         guard authorized == true, input != nil else { return }
+        if mode == .video { toggleRecording(); return }
         let m = mode
         let settingsP: AVCapturePhotoSettings
         if m == .pro && settings.proFormat == .heif && photoOutput.availablePhotoCodecTypes.contains(.hevc) {
@@ -563,8 +643,13 @@ final class CameraModel: NSObject, ObservableObject {
     }
 }
 
-extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate {
+extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        if output === audioOutput {
+            lock.lock(); let r = _recorder; lock.unlock()
+            r?.append(audio: sampleBuffer)
+            return
+        }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let raw = CIImage(cvPixelBuffer: pb)
         let e = raw.extent
@@ -579,7 +664,24 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
         lock.lock()
         if _switchPending { _switchPending = false; _switchStart = CACurrentMediaTime() }
+        let vlook = _videoLook
         lock.unlock()
+        if m == .video {
+            let t = turn
+            let upright = Self.rotated(src, clockwise: t)
+            var base = upright
+            if let sim = FilmCatalog.sim(dev.stack.simID), !sim.isNeutral { base = SimEngine.apply(sim, to: base, preview: true) }
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            let frame = fx.apply(vlook, to: base, time: pts.seconds, date: Date())
+            lock.lock()
+            if _wantRecord && _recorder == nil { _recorder = VideoRecorder(size: frame.extent.size, audio: audioInput != nil) }
+            let r = _recorder
+            lock.unlock()
+            r?.append(frame, at: pts)
+            let shown = t == 0 ? frame : Self.rotated(frame, clockwise: 360 - t)
+            preview?.show(shown, pixelated: vlook == .pocket)
+            return
+        }
         let img: CIImage
         let amount = digiAmount()
         if amount <= 0 {

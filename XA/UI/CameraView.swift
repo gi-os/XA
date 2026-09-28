@@ -18,9 +18,14 @@ struct CameraView: View {
                 // Double-tap flips between the back and front cameras; a single tap folds the film rows.
                 .onTapGesture(count: 2) { camera.flip(); UIImpactFeedbackGenerator(style: .light).impactOccurred() }
                 .onTapGesture { if filmOpen { withAnimation(.snappy) { filmOpen = false } } }
-            if camera.mode == .digi {
+            switch camera.mode {
+            case .digi:
                 if filmOpen { FilmControls(camera: camera, open: $filmOpen, onFilm: onFilm).transition(.opacity) }
-            } else { ProRows(camera: camera) }
+            case .video:
+                VideoRows(camera: camera, onFilm: onFilm)
+            case .pro:
+                ProRows(camera: camera)
+            }
             VStack(spacing: 8) {
                 ModeRow(camera: camera, settings: settings, filmOpen: $filmOpen, onCustomize: onCustomize)
                 ShutterRow(camera: camera, settings: settings, onRoll: onRoll)
@@ -46,7 +51,13 @@ struct CameraView: View {
             return
         }
         withAnimation(.snappy) {
-            if horizontal { camera.stepSim(dx < 0 ? 1 : -1) } else { camera.stepLook(dy < 0 ? 1 : -1) }
+            if horizontal { camera.stepSim(dx < 0 ? 1 : -1) }
+            else if camera.mode == .video {
+                let all = VideoLook.allCases, n = all.count
+                let i = all.firstIndex(of: camera.videoLook) ?? 0
+                camera.videoLook = all[((i + (dy < 0 ? 1 : -1)) % n + n) % n]
+                UISelectionFeedbackGenerator().selectionChanged()
+            } else { camera.stepLook(dy < 0 ? 1 : -1) }
         }
     }
 
@@ -235,6 +246,49 @@ struct FilmStrip: View {
     }
 }
 
+// MARK: VIDEO
+
+/// Video looks as tapes and cartridges, and the sim they are shot through.
+private struct VideoRows: View {
+    @ObservedObject var camera: CameraModel
+    var onFilm: () -> Void
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                Text("SIM").font(XA.display(10)).foregroundStyle(XA.faint)
+                Button(action: onFilm) {
+                    Text(FilmCatalog.sim(camera.stack.simID)?.title ?? Sim.neutral.title).font(XA.display(12)).foregroundStyle(XA.orange)
+                        .padding(.horizontal, 10).padding(.vertical, 5).background(XA.fill)
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                Text("SWIPE ↑↓ FOR LOOKS").font(XA.display(10)).foregroundStyle(XA.faint)
+            }
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(VideoLook.allCases) { l in
+                            let on = camera.videoLook == l
+                            Button { camera.videoLook = l } label: {
+                                FilmBox(item: .video(l), width: 80)
+                                    .overlay(Rectangle().strokeBorder(on ? XA.orange : .clear, lineWidth: 2).padding(-3))
+                                    .opacity(on ? 1 : 0.82)
+                            }
+                            .buttonStyle(.plain)
+                            .id(l)
+                            .accessibilityLabel(l.title)
+                        }
+                    }
+                    .padding(.vertical, 3).padding(.horizontal, 2)
+                }
+                .onChange(of: camera.videoLook) { _, l in withAnimation { proxy.scrollTo(l, anchor: .center) } }
+            }
+            .frame(height: 59)
+        }
+        .frame(height: 94)
+    }
+}
+
 // MARK: PRO
 
 private struct ProRows: View {
@@ -352,14 +406,14 @@ private struct ModeRow: View {
         HStack {
             RoundButton(action: onCustomize) { Image(systemName: "slider.horizontal.3").font(.system(size: 18)) }
                 .accessibilityLabel("Customize")
-                .frame(width: 80, alignment: .leading)
-            Spacer()
+                .frame(width: 64, alignment: .leading)
+            Spacer(minLength: 4)
             HStack(spacing: 2) {
                 ForEach(CaptureMode.allCases) { m in
                     let on = camera.mode == m
                     Button { withAnimation(.snappy) { camera.mode = m } } label: {
-                        Text(m.title).font(XA.display(18)).tracking(0.6)
-                            .padding(.horizontal, 18).padding(.vertical, 7)
+                        Text(m.title).font(XA.display(16)).tracking(0.5)
+                            .padding(.horizontal, 12).padding(.vertical, 7)
                             .foregroundStyle(on ? (m == .digi ? Color(red: 0.16, green: 0.08, blue: 0) : .black) : Color.white.opacity(0.82))
                             .background(on ? (m == .digi ? XA.orange : Color.white) : Color.clear, in: Capsule())
                     }
@@ -369,14 +423,17 @@ private struct ModeRow: View {
             .padding(3).background(XA.fill, in: Capsule())
             Spacer()
             Group {
-                if camera.mode == .digi && !filmOpen {
+                if camera.mode == .video {
+                    Text(camera.recording ? "REC" : "HD").font(XA.mono(12)).foregroundStyle(camera.recording ? Color.red : .white)
+                        .padding(.horizontal, 10).frame(minWidth: 44, minHeight: 44).background(XA.fill, in: Capsule())
+                } else if camera.mode == .digi && !filmOpen {
                     FannedFilm(stack: camera.stack) { withAnimation(.snappy) { filmOpen = true } }
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 } else {
                     mpMenu
                 }
             }
-            .frame(width: 80, alignment: .trailing)
+            .frame(width: 72, alignment: .trailing)
         }
     }
 
@@ -415,10 +472,22 @@ private struct ShutterRow: View {
         HStack(spacing: 28) {
             if settings.showRollButton { rollButton } else { Color.clear.frame(width: 50, height: 50) }
             Button { camera.shoot() } label: {
-                Capsule().fill(Color.white).frame(width: 118, height: 40)
+                if camera.mode == .video {
+                    ZStack {
+                        Capsule().fill(camera.recording ? Color.red : Color.white)
+                        if camera.recording {
+                            Text(Library.clock(camera.recordSeconds)).font(XA.mono(16)).foregroundStyle(.white)
+                        } else {
+                            Circle().fill(Color.red).frame(width: 22, height: 22)
+                        }
+                    }
+                    .frame(width: 118, height: 40)
+                } else {
+                    Capsule().fill(Color.white).frame(width: 118, height: 40)
+                }
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Take picture")
+            .accessibilityLabel(camera.mode == .video ? (camera.recording ? "Stop recording" : "Record") : "Take picture")
             if settings.showFlipButton {
                 RoundButton(size: 50, action: { camera.flip() }) { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 20, weight: .medium)) }
                     .accessibilityLabel("Switch camera")

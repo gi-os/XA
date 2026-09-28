@@ -35,7 +35,7 @@ struct LockedCameraView: View {
                 .overlay { if camera.flash { Color.white.opacity(0.7) } }
             if camera.mode == .digi { StackRow(stack: camera.stack, onTap: {}) }
             HStack(spacing: 2) {
-                ForEach(CaptureMode.allCases) { m in
+                ForEach([CaptureMode.digi, .pro]) { m in
                     let on = camera.mode == m
                     Button { camera.mode = m } label: {
                         Text(m.title).font(XA.display(18))
@@ -74,7 +74,8 @@ struct LockedCameraView: View {
 
     private func loadContext() async {
         guard let ctx = try? await XACaptureIntent.appContext else { return }
-        camera.mode = CaptureMode(rawValue: ctx.mode) ?? .digi
+        let m = CaptureMode(rawValue: ctx.mode) ?? .digi
+        camera.mode = m == .video ? .digi : m
         camera.stack = Stack(simID: ctx.simID, look: Look(rawValue: ctx.look) ?? .none, shape: FrameShape(rawValue: ctx.shape) ?? .none)
         settings.digiMegapixels = ctx.digiMegapixels
         settings.crunch = ctx.crunch

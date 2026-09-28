@@ -1,6 +1,7 @@
 import XCTest
 import CoreImage
 import ImageIO
+import AVFoundation
 @testable import XA
 
 final class FilmTests: XCTestCase {
@@ -177,5 +178,40 @@ final class FilmTests: XCTestCase {
     func testEveryFilmHasABox() {
         XCTAssertEqual(FilmCatalog.looks.count, Look.allCases.count)
         XCTAssertEqual(FilmCatalog.shapes.count, FrameShape.allCases.count - 1)
+    }
+
+    // MARK: video
+
+    func testEveryVideoLookRendersTwiceInARow() {
+        let src = CIImage(color: CIColor(red: 0.6, green: 0.4, blue: 0.2)).cropped(to: CGRect(x: 0, y: 0, width: 360, height: 480))
+        for l in VideoLook.allCases {
+            let fx = VideoFX()
+            for i in 0..<3 {
+                let out = fx.apply(l, to: src, time: Double(i) / 30, date: Date())
+                XCTAssertEqual(out.extent, src.extent, "\(l.title)")
+                XCTAssertNotNil(Looks.context.createCGImage(out, from: out.extent), "\(l.title)")
+            }
+        }
+    }
+
+    func testHeldLooksRepeatFrames() {
+        let fx = VideoFX()
+        let a = CIImage(color: .red).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+        let b = CIImage(color: .blue).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+        let first = fx.apply(.stopMotion, to: a, time: 0, date: Date())
+        let second = fx.apply(.stopMotion, to: b, time: 0.05, date: Date())
+        XCTAssertTrue(first === second, "within a sixth of a second the frame is held")
+    }
+
+    func testTheRecorderWritesAMovie() {
+        guard let r = VideoRecorder(size: CGSize(width: 320, height: 240), audio: false) else { return XCTFail("no writer") }
+        let img = CIImage(color: .green).cropped(to: CGRect(x: 0, y: 0, width: 320, height: 240))
+        for i in 0..<15 { r.append(img, at: CMTime(value: CMTimeValue(i), timescale: 30)) }
+        let done = expectation(description: "finished")
+        var url: URL?
+        r.finish { url = $0; done.fulfill() }
+        wait(for: [done], timeout: 20)
+        XCTAssertNotNil(url)
+        if let url { XCTAssertGreaterThan((try? Data(contentsOf: url))?.count ?? 0, 1000) }
     }
 }

@@ -106,6 +106,12 @@ private struct Thumb: View {
         Color.black
             .aspectRatio(3 / 4, contentMode: .fit)
             .overlay { if let img { Image(uiImage: img).resizable().scaledToFit() } }
+            .overlay(alignment: .bottomTrailing) {
+                if asset.mediaType == .video {
+                    Text(Library.clock(asset.duration)).font(XA.mono(10)).padding(.horizontal, 4).padding(.vertical, 2)
+                        .background(Color.black.opacity(0.6)).padding(4)
+                }
+            }
             .clipped()
             .onAppear { library.thumbnail(asset, side: 320) { img = $0 } }
     }
