@@ -117,10 +117,14 @@ final class FilmTests: XCTestCase {
         Looks.context.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 100, y: 100, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
         XCTAssertEqual(px[0], px[1], accuracy: 0.001)
         XCTAssertEqual(px[1], px[2], accuracy: 0.001)
-        var avg = [Float](repeating: 0, count: 4)
-        let f = CIFilter(name: "CIAreaAverage", parameters: [kCIInputImageKey: out, kCIInputExtentKey: CIVector(cgRect: out.extent)])!.outputImage!
-        Looks.context.render(f, toBitmap: &avg, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
-        XCTAssertEqual(avg[0], px.isEmpty ? 0 : 0.5, accuracy: 0.08, "grain should not brighten or darken the picture")
+        func average(_ img: CIImage) -> Float {
+            var v = [Float](repeating: 0, count: 4)
+            let f = CIFilter(name: "CIAreaAverage", parameters: [kCIInputImageKey: img, kCIInputExtentKey: CIVector(cgRect: img.extent)])!.outputImage!
+            Looks.context.render(f, toBitmap: &v, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+            return v[0]
+        }
+        // Same working space on both sides, so this compares like with like.
+        XCTAssertEqual(average(out), average(src), accuracy: 0.03, "grain should not brighten or darken the picture")
     }
 
     func testSwipingThroughFilmsWraps() {
