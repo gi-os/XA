@@ -3,23 +3,26 @@ import CoreImage.CIFilterBuiltins
 
 /// The filters, in Core Image. Each one runs on the live viewfinder and again on the full
 /// photograph, so what you see is what gets saved.
-enum Look: Int, CaseIterable, Identifiable {
+enum Look: Int, CaseIterable, Identifiable, Codable {
     case none, film, sixteen, gameboy, dither, halftone, thermal, purikura
 
     var id: Int { rawValue }
 
     var title: String {
         switch self {
-        case .none: return "NONE"
-        case .film: return "FILM"
-        case .sixteen: return "16 COLOR"
-        case .gameboy: return "GAME BOY"
-        case .dither: return "DITHER"
-        case .halftone: return "HALFTONE"
-        case .thermal: return "THERMAL"
-        case .purikura: return "PURIKURA"
+        case .none: return "CLEAN"
+        case .film: return "GRAIN"
+        case .sixteen: return "SIXTEEN"
+        case .gameboy: return "POCKET"
+        case .dither: return "1-BIT"
+        case .halftone: return "PRESS"
+        case .thermal: return "HEAT"
+        case .purikura: return "BOOTH"
         }
     }
+
+    /// Black and white, so a date back on top goes neutral too (Roll's light-reports#25).
+    var mono: Bool { self == .dither }
 
     /// Pixel filters are worked at a small width and blown back up with no smoothing.
     var pixelWidth: CGFloat? {

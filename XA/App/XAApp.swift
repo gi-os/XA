@@ -1,4 +1,7 @@
 import SwiftUI
+import LockedCameraCapture
+import AppIntents
+import UniformTypeIdentifiers
 
 @main
 struct XAApp: App {
@@ -7,13 +10,23 @@ struct XAApp: App {
     }
 }
 
-/// Camera alone on a regular iPhone and on the iPhone Duo's outer display. On a wide window
-/// (the Duo's inner display, or landscape) the roll sits beside the viewfinder.
+/// Camera alone on a regular iPhone. On a wide window the roll sits beside the viewfinder.
+/// Pull down on the camera and the roll comes into view; flick up and the shutter is back.
 struct RootView: View {
-    @StateObject private var camera = CameraModel()
+    @StateObject private var settings: AppSettings
+    @StateObject private var camera: CameraModel
     @StateObject private var library = Library()
     @State private var showRoll = false
+    @State private var showCustomize = false
+    @State private var showFilm = false
+    @State private var pull: CGFloat = 0
     @Environment(\.scenePhase) private var phase
+
+    init() {
+        let s = AppSettings()
+        _settings = StateObject(wrappedValue: s)
+        _camera = StateObject(wrappedValue: CameraModel(settings: s))
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -21,17 +34,76 @@ struct RootView: View {
             Group {
                 if wide {
                     HStack(spacing: 0) {
-                        CameraView(camera: camera, onRoll: {}).frame(width: geo.size.width * 0.55)
+                        camView.frame(width: geo.size.width * 0.55)
                         ContactSheet(library: library)
                     }
                 } else {
-                    CameraView(camera: camera, onRoll: { showRoll = true })
+                    camView
+                        .offset(y: max(0, pull) * 0.4)
+                        .simultaneousGesture(DragGesture(minimumDistance: 24).onChanged { v in
+                            if v.translation.height > 0 && abs(v.translation.height) > abs(v.translation.width) * 1.5 { pull = v.translation.height }
+                        }.onEnded { v in
+                            if v.translation.height > 120 && abs(v.translation.height) > abs(v.translation.width) { showRoll = true }
+                            withAnimation(.snappy) { pull = 0 }
+                        })
                         .fullScreenCover(isPresented: $showRoll) { ContactSheet(library: library, onClose: { showRoll = false }) }
                 }
             }
         }
+        .background(Color.black.ignoresSafeArea())
         .statusBarHidden()
-        .onAppear { camera.library = library; camera.start() }
+        .sheet(isPresented: $showCustomize) { CustomizeView(settings: settings, camera: camera) }
+        .sheet(isPresented: $showFilm, onDismiss: { camera.rebuildControls() }) { FilmPicker(camera: camera) }
+        .onAppear {
+            camera.library = library
+            camera.onStackChange = { pushContext() }
+            camera.start()
+            pushContext()
+        }
         .onChange(of: phase) { _, p in if p == .active { camera.resume() } else if p == .background { camera.stop() } }
+        .onChange(of: settings.date) { _, _ in camera.syncFrameSettings(); pushContext() }
+        .onChange(of: settings.digiMegapixels) { _, _ in camera.syncFrameSettings(); pushContext() }
+        .task { await ingestLockScreenShots() }
+    }
+
+    private var camView: some View {
+        CameraView(camera: camera, settings: settings, onRoll: { showRoll = true }, onCustomize: { showCustomize = true }, onFilm: { showFilm = true })
+    }
+
+    /// The Lock Screen camera cannot read the app's settings; they travel in the intent context.
+    private func pushContext() {
+        var c = XAContext()
+        c.mode = camera.mode.rawValue
+        c.simID = camera.stack.simID
+        c.look = camera.stack.look.rawValue
+        c.shape = camera.stack.shape.rawValue
+        c.digiMegapixels = settings.digiMegapixels
+        c.crunch = settings.crunch
+        c.dateStyle = settings.date.style.rawValue
+        c.datePlacement = settings.date.placement.rawValue
+        c.dateFormat = settings.date.format.rawValue
+        c.dateTime = settings.date.time
+        Task { try? await XACaptureIntent.updateAppContext(c) }
+    }
+
+    /// Pictures the Lock Screen camera could not put in Photos wait in its session folders.
+    private func ingestLockScreenShots() async {
+        for await update in LockedCameraCaptureManager.shared.sessionContentUpdates {
+            switch update {
+            case .initial(let urls): for u in urls { ingest(u) }
+            case .added(let u): ingest(u)
+            default: break
+            }
+        }
+    }
+
+    private func ingest(_ dir: URL) {
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        for f in files {
+            guard let data = try? Data(contentsOf: f) else { continue }
+            let type = UTType(filenameExtension: f.pathExtension) ?? .jpeg
+            library.save(data: data, type: type)
+        }
+        Task { try? await LockedCameraCaptureManager.shared.invalidateSessionContent(at: dir) }
     }
 }

@@ -1,41 +1,127 @@
 import AVFoundation
 import CoreImage
+import CoreImage.CIFilterBuiltins
 import UIKit
+import UniformTypeIdentifiers
+
+/// The PRO strip's five dials.
+enum ProControl: String, CaseIterable, Identifiable {
+    case wb, ev, shutter, iso, focus
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .wb: return "WB"
+        case .ev: return "EV"
+        case .shutter: return "S"
+        case .iso: return "ISO"
+        case .focus: return "FOCUS"
+        }
+    }
+}
 
 /// The camera. A shutter that never waits: the press takes the picture and everything slow
-/// (the filter at full size, the date back, the encode, the save) drains through a queue
+/// (the sim, the look, the shape, the date back, the encode, the save) drains through a queue
 /// behind the live viewfinder.
 final class CameraModel: NSObject, ObservableObject {
-    @Published var look: Look = .film { didSet { UserDefaults.standard.set(look.rawValue, forKey: "look") } }
-    @Published var dateBack = true { didSet { UserDefaults.standard.set(dateBack, forKey: "dateBack") } }
+    @Published var mode: CaptureMode = .digi { didSet { modeChanged(oldValue) } }
+    @Published var stack = Stack(simID: "nocturne") { didSet { stackChanged() } }
     @Published private(set) var authorized: Bool?
     @Published private(set) var front = false
     @Published private(set) var developing = 0
     @Published private(set) var flash = false
     @Published private(set) var hasCameraControl = false
     @Published private(set) var lastShot: UIImage?
+    @Published private(set) var lenses: [Lens] = []
+    @Published private(set) var zoom: CGFloat = 1
+    @Published private(set) var photoSize: CGSize = .zero
+    @Published private(set) var histogram: [Float] = []
+
+    // PRO dials. nil means auto.
+    @Published var proControl: ProControl = .ev
+    @Published var ev: Float = 0 { didSet { if ev != oldValue { applyPro() } } }
+    @Published var shutterIndex: Int? { didSet { if shutterIndex != oldValue { applyPro() } } }
+    @Published var isoIndex: Int? { didSet { if isoIndex != oldValue { applyPro() } } }
+    @Published var wbIndex: Int = 0 { didSet { if wbIndex != oldValue { applyPro() } } }
+    @Published var focusIndex: Int? { didSet { if focusIndex != oldValue { applyPro() } } }
 
     let session = AVCaptureSession()
+    let settings: AppSettings
     weak var preview: PreviewView?
     var library: Library?
+    /// Where the Lock Screen camera saves when Photos is not available to it.
+    var fallbackFolder: URL?
 
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let sessionQueue = DispatchQueue(label: "xa.session")
     private let frameQueue = DispatchQueue(label: "xa.frames")
-    private let developQueue = DispatchQueue(label: "xa.develop")
+    private let developQueue = DispatchQueue(label: "xa.develop", qos: .userInitiated)
     private var device: AVCaptureDevice?
     private var input: AVCaptureDeviceInput?
     private var rotation: AVCaptureDevice.RotationCoordinator?
-    private var picker: AVCaptureIndexPicker?
-    private var currentLook: Look = .film
+    private var frontFlag = false
+    private var frameCount = 0
 
-    override init() {
+    // Read on the frame queue.
+    private let lock = NSLock()
+    private var _frameMode: CaptureMode = .digi
+    private var _develop = DevelopSettings()
+    private var _latest: CIImage?
+
+    init(settings: AppSettings) {
+        self.settings = settings
         super.init()
-        if let l = Look(rawValue: UserDefaults.standard.integer(forKey: "look")), UserDefaults.standard.object(forKey: "look") != nil { look = l }
-        if UserDefaults.standard.object(forKey: "dateBack") != nil { dateBack = UserDefaults.standard.bool(forKey: "dateBack") }
-        currentLook = look
+        if let s: Stack = AppSettings.load("stack") { stack = s }
+        let last = CaptureMode(rawValue: UserDefaults.standard.string(forKey: "mode") ?? "") ?? .digi
+        switch settings.openIn {
+        case .last: mode = last
+        case .digi: mode = .digi
+        case .pro: mode = .pro
+        }
+        syncFrameSettings()
     }
+
+    /// The last viewfinder frame, small, for the editors' previews.
+    var latestFrame: CIImage? { lock.lock(); defer { lock.unlock() }; return _latest }
+
+    func syncFrameSettings() {
+        var d = DevelopSettings()
+        d.stack = stack
+        d.megapixels = settings.digiMegapixels
+        d.noise = settings.noise
+        d.date = settings.date
+        lock.lock(); _develop = d; _frameMode = mode; lock.unlock()
+    }
+
+    private func frameState() -> (CaptureMode, DevelopSettings) {
+        lock.lock(); defer { lock.unlock() }
+        return (_frameMode, _develop)
+    }
+
+    private func stackChanged() {
+        if let data = try? JSONEncoder().encode(stack) { UserDefaults.standard.set(data, forKey: "stack") }
+        syncFrameSettings()
+        onStackChange?()
+    }
+    var onStackChange: (() -> Void)?
+
+    private func modeChanged(_ old: CaptureMode) {
+        UserDefaults.standard.set(mode.rawValue, forKey: "mode")
+        syncFrameSettings()
+        guard old != mode, input != nil else { return }
+        let m = mode
+        sessionQueue.async {
+            guard let dev = self.device else { return }
+            self.session.beginConfiguration()
+            self.setupPhotoOutput(dev, m)
+            self.addControls(dev, m)
+            self.session.commitConfiguration()
+            self.applyProOnQueue(m)
+        }
+        onStackChange?()
+    }
+
+    // MARK: session
 
     func start() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -52,17 +138,19 @@ final class CameraModel: NSObject, ObservableObject {
     func stop() { sessionQueue.async { if self.session.isRunning { self.session.stopRunning() } } }
     func resume() { sessionQueue.async { if !self.session.isRunning && self.input != nil { self.session.startRunning() } } }
 
-    func setLook(_ l: Look) {
-        look = l
-        frameQueue.async { self.currentLook = l }
-        picker?.selectedIndex = l.rawValue
+    private static func backCamera() -> AVCaptureDevice? {
+        let kinds: [AVCaptureDevice.DeviceType] = [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
+        for k in kinds { if let d = AVCaptureDevice.default(k, for: .video, position: .back) { return d } }
+        return nil
     }
 
     private func configure() {
+        guard input == nil else { return }
         session.beginConfiguration()
         session.sessionPreset = .photo
-        guard let dev = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
-              let inp = try? AVCaptureDeviceInput(device: dev), session.canAddInput(inp) else { session.commitConfiguration(); return }
+        guard let dev = Self.backCamera(), let inp = try? AVCaptureDeviceInput(device: dev), session.canAddInput(inp) else {
+            session.commitConfiguration(); return
+        }
         session.addInput(inp)
         device = dev; input = inp
         if session.canAddOutput(photoOutput) { session.addOutput(photoOutput) }
@@ -70,41 +158,88 @@ final class CameraModel: NSObject, ObservableObject {
         videoOutput.alwaysDiscardsLateVideoFrames = true
         videoOutput.setSampleBufferDelegate(self, queue: frameQueue)
         if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
-        setupPhotoOutput(dev)
-        addControls(dev)
-        session.commitConfiguration()
-        applyRotation()
-        session.startRunning()
-    }
-
-    private func setupPhotoOutput(_ dev: AVCaptureDevice) {
-        // 12MP: the full-sensor readout is what makes a phone camera feel slow.
-        let dims = dev.activeFormat.supportedMaxPhotoDimensions
-        if let d = dims.filter({ Int($0.width) * Int($0.height) <= 12_600_000 }).max(by: { $0.width * $0.height < $1.width * $1.height }) ?? dims.first {
-            photoOutput.maxPhotoDimensions = d
-        }
-        photoOutput.maxPhotoQualityPrioritization = .balanced
+        photoOutput.maxPhotoQualityPrioritization = .quality
         if photoOutput.isResponsiveCaptureSupported { photoOutput.isResponsiveCaptureEnabled = true }
         if photoOutput.isFastCapturePrioritizationSupported { photoOutput.isFastCapturePrioritizationEnabled = true }
         if photoOutput.isZeroShutterLagSupported { photoOutput.isZeroShutterLagEnabled = true }
+        let m = mode
+        setupPhotoOutput(dev, m)
+        addControls(dev, m)
+        session.commitConfiguration()
+        setupLenses(dev)
+        applyRotation()
+        session.startRunning()
+        applyProOnQueue(m)
     }
 
-    /// Camera Control: slide to change filter, the way the LP3 wheel did.
-    private func addControls(_ dev: AVCaptureDevice) {
+    private func setupPhotoOutput(_ dev: AVCaptureDevice, _ m: CaptureMode) {
+        let dims = dev.activeFormat.supportedMaxPhotoDimensions
+        let fit = dims.filter { Int($0.width) * Int($0.height) <= m.maxSensorPixels }
+        if let d = fit.max(by: { Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height) }) ?? dims.first {
+            photoOutput.maxPhotoDimensions = d
+            let s = CGSize(width: CGFloat(d.width), height: CGFloat(d.height))
+            DispatchQueue.main.async { self.photoSize = s }
+        }
+    }
+
+    private func setupLenses(_ dev: AVCaptureDevice) {
+        let sw: [CGFloat] = dev.virtualDeviceSwitchOverVideoZoomFactors.map { CGFloat(truncating: $0) }
+        let mult: CGFloat = dev.displayVideoZoomFactorMultiplier
+        let maxZ: CGFloat = min(dev.activeFormat.videoMaxZoomFactor, 20)
+        let stops = Lenses.stops(switchOvers: sw, maxZoom: maxZ, multiplier: mult)
+        let main = Lenses.main(switchOvers: sw, multiplier: mult)
+        if (try? dev.lockForConfiguration()) != nil {
+            dev.videoZoomFactor = min(main, maxZ)
+            dev.unlockForConfiguration()
+        }
+        DispatchQueue.main.async { self.lenses = stops; self.zoom = main }
+    }
+
+    /// Camera Control. DIGI: slide through sims or looks. PRO: exposure or zoom.
+    private func addControls(_ dev: AVCaptureDevice, _ m: CaptureMode) {
         guard session.supportsControls else { return }
         for c in session.controls { session.removeControl(c) }
-        let p = AVCaptureIndexPicker("Filter", symbolName: "camera.filters", localizedIndexTitles: Look.allCases.map { $0.title.capitalized })
-        p.selectedIndex = look.rawValue
-        p.setActionQueue(.main) { [weak self] i in
-            guard let self, let l = Look(rawValue: i) else { return }
-            self.look = l
-            self.frameQueue.async { self.currentLook = l }
+        let zoom = AVCaptureSystemZoomSlider(device: dev) { [weak self] z in
+            DispatchQueue.main.async { self?.zoom = z }
         }
-        if session.canAddControl(p) { session.addControl(p); picker = p }
-        let zoom = AVCaptureSystemZoomSlider(device: dev)
-        if session.canAddControl(zoom) { session.addControl(zoom) }
+        if m == .digi {
+            let sims = FilmCatalog.sims
+            let simTitles = ["No sim"] + sims.map { $0.title.capitalized }
+            let simPicker = AVCaptureIndexPicker("Sim", symbolName: "film", localizedIndexTitles: simTitles)
+            let current = stack.simID.flatMap { id in sims.firstIndex { $0.id == id } }.map { $0 + 1 } ?? 0
+            simPicker.selectedIndex = current
+            simPicker.setActionQueue(.main) { [weak self] i in
+                guard let self else { return }
+                self.stack.simID = i == 0 ? nil : sims[min(sims.count - 1, i - 1)].id
+            }
+            let lookPicker = AVCaptureIndexPicker("Look", symbolName: "camera.filters", localizedIndexTitles: Look.allCases.map { $0.title.capitalized })
+            lookPicker.selectedIndex = stack.look.rawValue
+            lookPicker.setActionQueue(.main) { [weak self] i in
+                self?.stack.look = Look(rawValue: i) ?? .none
+            }
+            let first: AVCaptureControl = settings.digiSlide == .sim ? simPicker : lookPicker
+            let second: AVCaptureControl = settings.digiSlide == .sim ? lookPicker : simPicker
+            for c in [first, second] where session.canAddControl(c) { session.addControl(c) }
+        } else {
+            let bias = AVCaptureSystemExposureBiasSlider(device: dev) { [weak self] b in
+                DispatchQueue.main.async { if self?.ev != b { self?.ev = b } }
+            }
+            let order: [AVCaptureControl] = settings.proSlide == .exposure ? [bias, zoom] : [zoom, bias]
+            for c in order where session.canAddControl(c) { session.addControl(c) }
+        }
+        if m == .digi, session.canAddControl(zoom) { session.addControl(zoom) }
         session.setControlsDelegate(self, queue: sessionQueue)
         DispatchQueue.main.async { self.hasCameraControl = true }
+    }
+
+    func rebuildControls() {
+        let m = mode
+        sessionQueue.async {
+            guard let dev = self.device else { return }
+            self.session.beginConfiguration()
+            self.addControls(dev, m)
+            self.session.commitConfiguration()
+        }
     }
 
     private func applyRotation() {
@@ -121,65 +256,240 @@ final class CameraModel: NSObject, ObservableObject {
     func flip() {
         sessionQueue.async {
             guard let old = self.input else { return }
-            let pos: AVCaptureDevice.Position = self.front ? .back : .front
-            guard let dev = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: pos),
-                  let inp = try? AVCaptureDeviceInput(device: dev) else { return }
+            let toFront = !self.frontFlag
+            let dev: AVCaptureDevice? = toFront ? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) : Self.backCamera()
+            guard let dev, let inp = try? AVCaptureDeviceInput(device: dev) else { return }
             self.session.beginConfiguration()
             self.session.removeInput(old)
             if self.session.canAddInput(inp) { self.session.addInput(inp); self.input = inp; self.device = dev } else { self.session.addInput(old) }
-            self.setupPhotoOutput(self.device!)
-            self.addControls(self.device!)
+            let m = self.mode
+            if let d = self.device { self.setupPhotoOutput(d, m); self.addControls(d, m) }
             self.session.commitConfiguration()
-            DispatchQueue.main.async { self.front = pos == .front }
-            self.frontFlag = pos == .front
+            self.frontFlag = toFront
+            if let d = self.device { self.setupLenses(d) }
+            DispatchQueue.main.async { self.front = toFront }
             self.applyRotation()
+            self.applyProOnQueue(m)
         }
     }
-    private var frontFlag = false
+
+    func setZoom(_ f: CGFloat) {
+        sessionQueue.async {
+            guard let dev = self.device, (try? dev.lockForConfiguration()) != nil else { return }
+            let z = min(max(f, dev.minAvailableVideoZoomFactor), dev.maxAvailableVideoZoomFactor)
+            dev.ramp(toVideoZoomFactor: z, withRate: 14)
+            dev.unlockForConfiguration()
+            DispatchQueue.main.async { self.zoom = z }
+        }
+    }
+
+    // MARK: PRO exposure, white balance, focus
+
+    private func applyPro() {
+        let m = mode
+        sessionQueue.async { self.applyProOnQueue(m) }
+    }
+
+    private func applyProOnQueue(_ m: CaptureMode) {
+        guard let dev = device, (try? dev.lockForConfiguration()) != nil else { return }
+        defer { dev.unlockForConfiguration() }
+        let pro = m == .pro
+        let (sIdx, iIdx, wb, fIdx, bias) = DispatchQueue.main.sync { (shutterIndex, isoIndex, wbIndex, focusIndex, ev) }
+        // Exposure.
+        if pro && (sIdx != nil || iIdx != nil) && dev.isExposureModeSupported(.custom) {
+            let meteredShutter = Int64(dev.exposureDuration.seconds * 1e9)
+            let meteredIso = Int(dev.iso)
+            let fmt = dev.activeFormat
+            let lo = Int64(fmt.minExposureDuration.seconds * 1e9)
+            let hi = Int64(min(fmt.maxExposureDuration.seconds, 1) * 1e9)
+            let r = Exposure.rebalance(meteredShutter: max(meteredShutter, 1), meteredIso: max(meteredIso, 1),
+                                       heldShutter: sIdx.map { Exposure.shutterAt($0) }, heldIso: iIdx.map { Exposure.isoAt($0) },
+                                       shutterRange: max(lo, 1)...max(hi, max(lo, 1)), isoRange: Int(fmt.minISO)...Int(fmt.maxISO))
+            let duration = CMTime(value: r.shutter, timescale: 1_000_000_000)
+            dev.setExposureModeCustom(duration: duration, iso: Float(r.iso), completionHandler: nil)
+        } else if dev.isExposureModeSupported(.continuousAutoExposure) {
+            dev.exposureMode = .continuousAutoExposure
+            let b = pro ? bias : 0
+            let clamped = min(max(b, dev.minExposureTargetBias), dev.maxExposureTargetBias)
+            dev.setExposureTargetBias(clamped, completionHandler: nil)
+        }
+        // White balance.
+        if pro && wb > 0 && dev.isLockingWhiteBalanceWithCustomDeviceGainsSupported {
+            let k = Exposure.whiteBalance[min(wb, Exposure.whiteBalance.count - 1)].kelvin
+            var g = dev.deviceWhiteBalanceGains(for: AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: k, tint: 0))
+            let mx = dev.maxWhiteBalanceGain
+            g.redGain = min(max(g.redGain, 1), mx)
+            g.greenGain = min(max(g.greenGain, 1), mx)
+            g.blueGain = min(max(g.blueGain, 1), mx)
+            dev.setWhiteBalanceModeLocked(with: g, completionHandler: nil)
+        } else if dev.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+            dev.whiteBalanceMode = .continuousAutoWhiteBalance
+        }
+        // Focus.
+        if pro, let f = fIdx, dev.isLockingFocusWithCustomLensPositionSupported {
+            dev.setFocusModeLocked(lensPosition: Float(f) / 10, completionHandler: nil)
+        } else if dev.isFocusModeSupported(.continuousAutoFocus) {
+            dev.focusMode = .continuousAutoFocus
+        }
+    }
+
+    /// Labels for the strip.
+    func label(_ c: ProControl) -> String {
+        switch c {
+        case .wb: return Exposure.whiteBalance[min(wbIndex, Exposure.whiteBalance.count - 1)].label
+        case .ev: return String(format: "%+.1f", ev)
+        case .shutter: return shutterIndex.map { Exposure.shutterLabel(Exposure.shutterAt($0)) } ?? "AUTO"
+        case .iso: return isoIndex.map { "\(Exposure.isoAt($0))" } ?? "AUTO"
+        case .focus: return focusIndex.map { $0 == 10 ? "∞" : String(format: "MF.%d", $0) } ?? "AF"
+        }
+    }
+
+    /// Number of positions on the dial for a control, and the current one. Position 0 is auto.
+    func dial(_ c: ProControl) -> (count: Int, index: Int) {
+        switch c {
+        case .wb: return (Exposure.whiteBalance.count, wbIndex)
+        case .ev: return (13, Int(((ev + 2) * 3).rounded()))
+        case .shutter: return (Exposure.shutterStops.count + 1, (shutterIndex ?? -1) + 1)
+        case .iso: return (Exposure.isoStops.count + 1, (isoIndex ?? -1) + 1)
+        case .focus: return (12, (focusIndex ?? -1) + 1)
+        }
+    }
+
+    func setDial(_ c: ProControl, _ i: Int) {
+        let n = dial(c).count
+        let v = min(max(i, 0), n - 1)
+        switch c {
+        case .wb: wbIndex = v
+        case .ev: ev = Float(v) / 3 - 2
+        case .shutter: shutterIndex = v == 0 ? nil : v - 1
+        case .iso: isoIndex = v == 0 ? nil : v - 1
+        case .focus: focusIndex = v == 0 ? nil : v - 1
+        }
+    }
+
+    // MARK: shooting
 
     func shoot() {
-        guard authorized == true else { return }
-        let settings = AVCapturePhotoSettings()
-        settings.photoQualityPrioritization = .speed
-        settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
+        guard authorized == true, input != nil else { return }
+        let m = mode
+        let settingsP: AVCapturePhotoSettings
+        if m == .pro && settings.proFormat == .heif && photoOutput.availablePhotoCodecTypes.contains(.hevc) {
+            settingsP = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
+        } else {
+            settingsP = AVCapturePhotoSettings()
+        }
+        let want = m.prioritization
+        settingsP.photoQualityPrioritization = want.rawValue <= photoOutput.maxPhotoQualityPrioritization.rawValue ? want : photoOutput.maxPhotoQualityPrioritization
+        settingsP.maxPhotoDimensions = photoOutput.maxPhotoDimensions
         if let c = photoOutput.connection(with: .video), let rc = rotation {
             let a = rc.videoRotationAngleForHorizonLevelCapture
             if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
         }
-        let meta = Shot(look: look, dateBack: dateBack, date: Date())
-        pending[settings.uniqueID] = meta
-        photoOutput.capturePhoto(with: settings, delegate: self)
+        syncFrameSettings()
+        let (_, dev) = frameState()
+        pending[settingsP.uniqueID] = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date())
+        photoOutput.capturePhoto(with: settingsP, delegate: self)
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         flash = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { self.flash = false }
         developing += 1
     }
 
-    private struct Shot { let look: Look; let dateBack: Bool; let date: Date }
+    private struct Shot { let mode: CaptureMode; let develop: DevelopSettings; let crunch: Double; let date: Date }
     private var pending: [Int64: Shot] = [:]
 
     private func develop(_ data: Data, _ shot: Shot) {
         developQueue.async {
             defer { DispatchQueue.main.async { self.developing = max(0, self.developing - 1) } }
-            guard var img = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return }
-            img = Looks.apply(shot.look, to: img, outputWidth: shot.look.pixelWidth != nil ? 1600 : nil)
-            if shot.dateBack { img = DateBack.stamp(img, date: shot.date) }
-            guard let cs = CGColorSpace(name: CGColorSpace.sRGB),
-                  let jpeg = Looks.context.jpegRepresentation(of: img, colorSpace: cs, options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.92]) else { return }
-            let thumb = Looks.context.createCGImage(img.transformed(by: CGAffineTransform(scaleX: 160 / img.extent.width, y: 160 / img.extent.width)), from: CGRect(x: 0, y: 0, width: 160, height: 160 * img.extent.height / img.extent.width))
+            guard let src = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return }
+            var out: Data?
+            var type: UTType = .jpeg
+            var thumbSource = src
+            if shot.mode == .pro {
+                // Saved exactly as the camera made it.
+                out = data
+                type = self.settings.proFormat == .heif ? .heic : .jpeg
+            } else {
+                let (img, alpha) = Darkroom.develop(src, shot.develop, date: shot.date, preview: false)
+                thumbSource = img
+                guard let cs = CGColorSpace(name: CGColorSpace.sRGB) else { return }
+                if alpha {
+                    out = Looks.context.pngRepresentation(of: img, format: .RGBA8, colorSpace: cs)
+                    type = .png
+                } else {
+                    let q = CGFloat(shot.crunch)
+                    out = Looks.context.jpegRepresentation(of: img, colorSpace: cs, options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: q])
+                }
+            }
+            guard let out else { return }
+            let e = thumbSource.extent
+            let k: CGFloat = 200 / max(e.width, 1)
+            let small = thumbSource.transformed(by: CGAffineTransform(scaleX: k, y: k))
+            let thumb = Looks.context.createCGImage(small, from: small.extent)
             DispatchQueue.main.async {
                 if let thumb { self.lastShot = UIImage(cgImage: thumb) }
-                self.library?.save(jpeg: jpeg)
+                if let lib = self.library {
+                    lib.save(data: out, type: type) { ok in
+                        if !ok { self.writeFallback(out, type) }
+                    }
+                } else {
+                    self.writeFallback(out, type)
+                }
             }
         }
+    }
+
+    private func writeFallback(_ data: Data, _ type: UTType) {
+        guard let dir = fallbackFolder else { return }
+        let ext = type.preferredFilenameExtension ?? "jpg"
+        let url = dir.appendingPathComponent("XA-\(Int(Date().timeIntervalSince1970 * 1000)).\(ext)")
+        try? data.write(to: url)
+    }
+
+    // MARK: histogram
+
+    private func updateHistogram(_ img: CIImage) {
+        let f = CIFilter.areaHistogram()
+        f.inputImage = img
+        f.extent = img.extent
+        f.count = 48
+        f.scale = 1
+        guard let out = f.outputImage else { return }
+        var px = [Float](repeating: 0, count: 48 * 4)
+        Looks.context.render(out, toBitmap: &px, rowBytes: 48 * 4 * MemoryLayout<Float>.size, bounds: CGRect(x: 0, y: 0, width: 48, height: 1), format: .RGBAf, colorSpace: nil)
+        var bins = [Float](repeating: 0, count: 48)
+        for i in 0..<48 { bins[i] = max(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]) }
+        let mx = max(bins.max() ?? 1, 0.0001)
+        let norm = bins.map { $0 / mx }
+        DispatchQueue.main.async { self.histogram = norm }
     }
 }
 
 extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let img = Looks.apply(currentLook, to: CIImage(cvPixelBuffer: pb))
-        let pixel = currentLook.pixelWidth != nil
+        let raw = CIImage(cvPixelBuffer: pb)
+        let e = raw.extent
+        let k: CGFloat = min(1, 1080 / max(e.width, 1))
+        let src = raw.transformed(by: CGAffineTransform(scaleX: k, y: k))
+        let (m, dev) = frameState()
+        frameCount += 1
+        if frameCount % 10 == 0 {
+            let s: CGFloat = 640 / max(src.extent.width, 1)
+            let small = src.transformed(by: CGAffineTransform(scaleX: s, y: s))
+            lock.lock(); _latest = small; lock.unlock()
+        }
+        let img: CIImage
+        if m == .pro {
+            img = src
+            if frameCount % 6 == 0 {
+                let s: CGFloat = 160 / max(src.extent.width, 1)
+                updateHistogram(src.transformed(by: CGAffineTransform(scaleX: s, y: s)))
+            }
+        } else {
+            img = Darkroom.develop(src, dev, date: Date(), preview: true).0
+        }
+        let pixel = m == .digi && dev.stack.look.pixelWidth != nil
         DispatchQueue.main.async { [weak self] in self?.preview?.show(img, pixelated: pixel) }
     }
 }
@@ -187,9 +497,10 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate {
 extension CameraModel: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         let id = photo.resolvedSettings.uniqueID
+        let data = photo.fileDataRepresentation()
         DispatchQueue.main.async {
             guard let shot = self.pending.removeValue(forKey: id) else { return }
-            guard error == nil, let data = photo.fileDataRepresentation() else { self.developing = max(0, self.developing - 1); return }
+            guard error == nil, let data else { self.developing = max(0, self.developing - 1); return }
             self.develop(data, shot)
         }
     }

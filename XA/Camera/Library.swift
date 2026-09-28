@@ -1,5 +1,6 @@
 import Photos
 import UIKit
+import UniformTypeIdentifiers
 
 /// Everything XA takes goes into an "XA" album in Photos. iOS won't let a camera replace
 /// Photos, so the contact sheet is a view onto that album.
@@ -45,12 +46,37 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
         DispatchQueue.main.async { self.reload() }
     }
 
-    func save(jpeg: Data, completion: ((Bool) -> Void)? = nil) {
+    /// Days, newest first, for the roll.
+    var days: [(title: String, assets: [PHAsset])] {
+        let cal = Calendar.current
+        var out: [(String, [PHAsset])] = []
+        var current: Date?
+        var bucket: [PHAsset] = []
+        let fmt = DateFormatter()
+        fmt.dateFormat = "EEEE d MMM"
+        func title(_ d: Date) -> String {
+            if cal.isDateInToday(d) { return "TODAY" }
+            if cal.isDateInYesterday(d) { return "YESTERDAY" }
+            return fmt.string(from: d).uppercased()
+        }
+        for a in assets {
+            let d = cal.startOfDay(for: a.creationDate ?? Date())
+            if let c = current, c != d { out.append((title(c), bucket)); bucket = [] }
+            current = d
+            bucket.append(a)
+        }
+        if let c = current, !bucket.isEmpty { out.append((title(c), bucket)) }
+        return out
+    }
+
+    func save(data: Data, type: UTType, completion: ((Bool) -> Void)? = nil) {
         let write = {
             let existing = self.album()
             PHPhotoLibrary.shared().performChanges({
                 let req = PHAssetCreationRequest.forAsset()
-                req.addResource(with: .photo, data: jpeg, options: nil)
+                let o = PHAssetResourceCreationOptions()
+                o.uniformTypeIdentifier = type.identifier
+                req.addResource(with: .photo, data: data, options: o)
                 guard let ph = req.placeholderForCreatedAsset else { return }
                 if let existing {
                     PHAssetCollectionChangeRequest(for: existing)?.addAssets([ph] as NSArray)
@@ -60,7 +86,9 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
             }, completionHandler: { ok, _ in DispatchQueue.main.async { completion?(ok) } })
         }
         if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .notDetermined {
-            PHPhotoLibrary.requestAuthorization(for: .readWrite) { _ in DispatchQueue.main.async { self.authorized = true; PHPhotoLibrary.shared().register(self); write() } }
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { _ in
+                DispatchQueue.main.async { self.authorized = true; PHPhotoLibrary.shared().register(self); write() }
+            }
         } else { write() }
     }
 
@@ -72,5 +100,11 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     func full(_ asset: PHAsset, _ done: @escaping (UIImage?) -> Void) {
         let o = PHImageRequestOptions(); o.deliveryMode = .highQualityFormat; o.isNetworkAccessAllowed = true
         images.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: o) { img, _ in done(img) }
+    }
+
+    /// The original file, for sharing a shaped PNG with its transparency intact.
+    func data(_ asset: PHAsset, _ done: @escaping (Data?, String?) -> Void) {
+        let o = PHImageRequestOptions(); o.isNetworkAccessAllowed = true; o.version = .current
+        PHImageManager.default().requestImageDataAndOrientation(for: asset, options: o) { d, uti, _, _ in done(d, uti) }
     }
 }

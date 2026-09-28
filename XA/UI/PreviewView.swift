@@ -3,7 +3,7 @@ import CoreImage
 import SwiftUI
 import AVKit
 
-/// The viewfinder: filtered Core Image frames drawn straight into a Metal view, aspect-filled.
+/// The viewfinder: developed Core Image frames drawn straight into a Metal view.
 final class PreviewView: MTKView {
     private let ci: CIContext
     private let queue: MTLCommandQueue?
@@ -36,7 +36,8 @@ final class PreviewView: MTKView {
         let ds = drawableSize
         let e = img.extent
         guard e.width > 0, e.height > 0 else { return }
-        let s = max(ds.width / e.width, ds.height / e.height)
+        // Fit, not fill: an instant print is square and must not be cropped.
+        let s = min(ds.width / e.width, ds.height / e.height)
         var src = pixelated ? img.samplingNearest() : img
         src = src.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY))
             .transformed(by: CGAffineTransform(scaleX: s, y: s))

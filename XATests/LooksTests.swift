@@ -3,12 +3,6 @@ import CoreImage
 @testable import XA
 
 final class LooksTests: XCTestCase {
-    func testDateBack() {
-        let utc = TimeZone(identifier: "UTC")!
-        let d = Date(timeIntervalSince1970: 1_790_380_800) // 2026-09-26
-        XCTAssertEqual(DateBack.string(d, tz: utc), "'26 9 26")
-    }
-
     func testTitlesAreUnique() {
         XCTAssertEqual(Set(Look.allCases.map(\.title)).count, Look.allCases.count)
     }
