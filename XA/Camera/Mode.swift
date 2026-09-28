@@ -26,13 +26,16 @@ enum CaptureMode: String, CaseIterable, Identifiable, Codable {
 /// highlights, a little too much color, a sharpening halo, blotchy color noise and a
 /// JPEG squeezed too hard.
 enum Digicam {
-    /// Long edge for each resolution setting: 1MP 1152, 2MP 1600, 3MP 2048, 5MP 2592.
+    /// Long edge for each resolution setting: 1MP 1152, 2MP 1600, 3MP 2048, 5MP 2592,
+    /// 8MP 3264, 12MP the sensor's own 4032.
     static func longEdge(megapixels: Int) -> CGFloat {
         switch megapixels {
         case ...1: return 1152
         case 2: return 1600
         case 3: return 2048
-        default: return 2592
+        case 4...5: return 2592
+        case 6...8: return 3264
+        default: return 4032
         }
     }
 

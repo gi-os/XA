@@ -1,6 +1,7 @@
 import Photos
 import UIKit
 import UniformTypeIdentifiers
+import ImageIO
 
 /// Everything XA takes goes into an "XA" album in Photos. iOS won't let a camera replace
 /// Photos, so the contact sheet is a view onto that album.
@@ -92,12 +93,45 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
         } else { write() }
     }
 
+    /// Shaped pictures are PNGs with empty pixels; Photos' own thumbnails flatten them, so they
+    /// are decoded from the file to keep the transparency.
+    func isTransparent(_ asset: PHAsset) -> Bool {
+        PHAssetResource.assetResources(for: asset).contains { $0.uniformTypeIdentifier == UTType.png.identifier }
+    }
+
+    private func decode(_ data: Data, maxSide: CGFloat?) -> UIImage? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        if let maxSide {
+            let o: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                      kCGImageSourceThumbnailMaxPixelSize: maxSide,
+                                      kCGImageSourceCreateThumbnailWithTransform: true]
+            guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, o as CFDictionary) else { return nil }
+            return UIImage(cgImage: cg)
+        }
+        guard let cg = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+        return UIImage(cgImage: cg)
+    }
+
     func thumbnail(_ asset: PHAsset, side: CGFloat, _ done: @escaping (UIImage?) -> Void) {
+        if isTransparent(asset) {
+            data(asset) { d, _ in
+                let img = d.flatMap { self.decode($0, maxSide: side * 2) }
+                DispatchQueue.main.async { done(img) }
+            }
+            return
+        }
         let o = PHImageRequestOptions(); o.deliveryMode = .opportunistic; o.isNetworkAccessAllowed = true
         images.requestImage(for: asset, targetSize: CGSize(width: side, height: side), contentMode: .aspectFill, options: o) { img, _ in done(img) }
     }
 
     func full(_ asset: PHAsset, _ done: @escaping (UIImage?) -> Void) {
+        if isTransparent(asset) {
+            data(asset) { d, _ in
+                let img = d.flatMap { self.decode($0, maxSide: nil) }
+                DispatchQueue.main.async { done(img) }
+            }
+            return
+        }
         let o = PHImageRequestOptions(); o.deliveryMode = .highQualityFormat; o.isNetworkAccessAllowed = true
         images.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: o) { img, _ in done(img) }
     }

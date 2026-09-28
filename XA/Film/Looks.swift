@@ -4,7 +4,7 @@ import CoreImage.CIFilterBuiltins
 /// The filters, in Core Image. Each one runs on the live viewfinder and again on the full
 /// photograph, so what you see is what gets saved.
 enum Look: Int, CaseIterable, Identifiable, Codable {
-    case none, film, sixteen, gameboy, dither, halftone, thermal, purikura
+    case none, film, sixteen, gameboy, dither, halftone, thermal, purikura, gbcolor
 
     var id: Int { rawValue }
 
@@ -18,6 +18,7 @@ enum Look: Int, CaseIterable, Identifiable, Codable {
         case .halftone: return "PRESS"
         case .thermal: return "HEAT"
         case .purikura: return "BOOTH"
+        case .gbcolor: return "POCKET COLOR"
         }
     }
 
@@ -30,6 +31,7 @@ enum Look: Int, CaseIterable, Identifiable, Codable {
         case .sixteen: return 320
         case .gameboy: return 160
         case .dither: return 360
+        case .gbcolor: return 128
         default: return nil
         }
     }
@@ -53,7 +55,7 @@ enum Looks {
             return (f.outputImage ?? input).cropped(to: extent)
         case .thermal: return cube(thermalCube, input).cropped(to: extent)
         case .purikura: return purikura(input)
-        case .sixteen, .gameboy, .dither:
+        case .sixteen, .gameboy, .dither, .gbcolor:
             let w = look.pixelWidth!
             let k = w / extent.width
             var small = input.transformed(by: CGAffineTransform(scaleX: k, y: k))
@@ -67,6 +69,11 @@ enum Looks {
                 small = grey(small)
                 small = dither(small, 0.6)
                 small = cube(oneBitCube, small)
+            case .gbcolor:
+                // Roll's GB Color: the Game Boy Camera's grid with fifteen-bit colour, five
+                // levels a channel, a hard contrast push and that screen's slightly sour cast.
+                small = dither(small, 0.26)
+                small = cube(gbColorCube, small)
             default:
                 small = dither(small, 0.25)
                 small = cube(sixteenCube, small)
@@ -94,16 +101,18 @@ enum Looks {
         return f.outputImage ?? i
     }
 
+    /// Grain: a consumer colour negative. Warm, soft in the highlights, lifted blacks, and real
+    /// grain: clumped, monochrome and strongest in the midtones, the way silver halide is.
     private static func film(_ input: CIImage) -> CIImage {
         let e = input.extent
-        let cc = CIFilter.colorControls(); cc.inputImage = input; cc.saturation = 1.18; cc.contrast = 1.08
-        let tone = CIFilter.toneCurve(); tone.inputImage = cc.outputImage
-        tone.point0 = CGPoint(x: 0, y: 0.07); tone.point1 = CGPoint(x: 0.25, y: 0.23); tone.point2 = CGPoint(x: 0.5, y: 0.52)
-        tone.point3 = CGPoint(x: 0.75, y: 0.80); tone.point4 = CGPoint(x: 1, y: 0.95)
-        let warm = CIFilter.temperatureAndTint(); warm.inputImage = tone.outputImage
-        warm.neutral = CIVector(x: 6500, y: 0); warm.targetNeutral = CIVector(x: 5900, y: 12)
-        let vig = CIFilter.vignette(); vig.inputImage = warm.outputImage; vig.intensity = 0.7; vig.radius = Float(max(e.width, e.height) / 900)
-        return grain((vig.outputImage ?? input).cropped(to: e), 0.07)
+        let warm = CIFilter.temperatureAndTint(); warm.inputImage = input
+        warm.neutral = CIVector(x: 6500, y: 0); warm.targetNeutral = CIVector(x: 5700, y: 8)
+        let tone = CIFilter.toneCurve(); tone.inputImage = warm.outputImage
+        tone.point0 = CGPoint(x: 0, y: 0.06); tone.point1 = CGPoint(x: 0.25, y: 0.23); tone.point2 = CGPoint(x: 0.5, y: 0.52)
+        tone.point3 = CGPoint(x: 0.75, y: 0.8); tone.point4 = CGPoint(x: 1, y: 0.94)
+        let cc = CIFilter.colorControls(); cc.inputImage = tone.outputImage; cc.saturation = 1.06; cc.contrast = 1.02
+        let vig = CIFilter.vignette(); vig.inputImage = cc.outputImage?.cropped(to: e); vig.intensity = 0.45; vig.radius = Float(max(e.width, e.height) / 700)
+        return FilmGrain.apply((vig.outputImage ?? input).cropped(to: e), amount: 0.6, size: 0.45)
     }
 
     private static func purikura(_ input: CIImage) -> CIImage {
@@ -113,15 +122,6 @@ enum Looks {
         let tint = CIFilter.colorMatrix(); tint.inputImage = cc.outputImage
         tint.biasVector = CIVector(x: 0.05, y: 0.0, z: 0.04, w: 0)
         return (tint.outputImage ?? input).cropped(to: e)
-    }
-
-    private static func grain(_ i: CIImage, _ amount: CGFloat) -> CIImage {
-        guard let noise = CIFilter.randomGenerator().outputImage else { return i }
-        let m = CIFilter.colorMatrix(); m.inputImage = noise
-        m.rVector = CIVector(x: 0, y: 1, z: 0, w: 0); m.gVector = CIVector(x: 0, y: 1, z: 0, w: 0); m.bVector = CIVector(x: 0, y: 1, z: 0, w: 0)
-        m.aVector = CIVector(x: 0, y: 0, z: 0, w: 0); m.biasVector = CIVector(x: 0, y: 0, z: 0, w: amount)
-        let over = CIFilter.sourceOverCompositing(); over.inputImage = m.outputImage?.cropped(to: i.extent); over.backgroundImage = i
-        return (over.outputImage ?? i).cropped(to: i.extent)
     }
 
     // MARK: color cubes
@@ -187,6 +187,16 @@ enum Looks {
 
     static let sixteenCube = makeCube { nearest($0, in: sixteen) }
     static let gameboyCube = makeCube { gameboy[min(3, Int(luma($0) * 4))] }
+    static let gbColorCube = makeCube { c in
+        func q(_ v: Float) -> Float {
+            let pushed: Float = min(0.999, max(0, (v - 0.5) * 1.3 + 0.5))
+            return floor(pushed * 5) / 4
+        }
+        let r: Float = min(1, q(c.0) * 0.98)
+        let g: Float = min(1, q(c.1) * 1.02)
+        let b: Float = min(1, q(c.2) * 0.90)
+        return (r, g, b)
+    }
     static let oneBitDark: RGB = (0.06, 0.06, 0.1)
     static let oneBitLight: RGB = (0.97, 0.94, 0.78)
     static let oneBitCube = makeCube { luma($0) < 0.5 ? oneBitDark : oneBitLight }

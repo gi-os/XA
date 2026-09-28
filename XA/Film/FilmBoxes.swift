@@ -42,20 +42,23 @@ private struct BoxCanvas<Content: View>: View {
     let bg: Color
     @ViewBuilder var content: () -> Content
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            Rectangle().fill(bg)
-            content()
-        }
-        .frame(width: 160, height: 106)
-        .clipped()
+        Rectangle().fill(bg)
+            .frame(width: 160, height: 106)
+            .overlay(alignment: .topLeading) {
+                // Decorations wider than the box grow the stack to the right and down only,
+                // never shifting the box itself.
+                ZStack(alignment: .topLeading) {
+                    Color.clear.frame(width: 160, height: 106)
+                    content()
+                }
+                .frame(width: 160, height: 106, alignment: .topLeading)
+            }
+            .clipped()
     }
 }
 
 struct HeartShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let k = min(rect.width / 24, rect.height / 22)
-        return Path(Shapes.heart(scale: k, offset: CGPoint(x: rect.midX - 12 * k, y: rect.midY - 11 * k)))
-    }
+    func path(in rect: CGRect) -> Path { Path(Shapes.heart(in: rect)) }
 }
 
 struct FrameShapeView: Shape {
@@ -131,6 +134,32 @@ private struct LookBox: View {
         case .halftone: press
         case .thermal: heat
         case .purikura: booth
+        case .gbcolor: pocketColor
+        }
+    }
+
+    private var pocketColor: some View {
+        let f = "Silkscreen-Regular", body = Color(hex: "#5B3F9E")
+        let levels: [Double] = [0, 0.25, 0.5, 0.75, 1]
+        return BoxCanvas(bg: body) {
+            ZStack(alignment: .topLeading) {
+                Rectangle().fill(Color(hex: "#1E2A1E"))
+                VStack(spacing: 1) {
+                    ForEach(0..<5, id: \.self) { r in
+                        HStack(spacing: 1) {
+                            ForEach(0..<5, id: \.self) { c in
+                                Rectangle().fill(Color(red: levels[c], green: levels[4 - r] * 0.9, blue: levels[(c + r) % 5] * 0.85)).frame(width: 9, height: 9)
+                            }
+                        }
+                    }
+                }
+                .tl(8, 6)
+                T("56", f, 22, Color(hex: "#FFD23F")).tr(8, 6)
+                T("COLORS", f, 8, .white).tr(8, 34)
+            }
+            .frame(width: 140, height: 60).border(Color.white.opacity(0.85), width: 3).tl(10, 8)
+            T("POCKET COLOR", f, 11, .white).bl(10, 9)
+            HStack(spacing: 6) { Circle().fill(Color(hex: "#E24DA0")).frame(width: 11); Circle().fill(Color(hex: "#E24DA0")).frame(width: 11).offset(y: -5) }.br(12, 12)
         }
     }
 

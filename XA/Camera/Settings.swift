@@ -11,6 +11,9 @@ final class AppSettings: ObservableObject {
     private let d = UserDefaults.standard
 
     @Published var digiMegapixels: Int { didSet { d.set(digiMegapixels, forKey: "digiMP") } }
+    /// 0 means the biggest the sensor makes.
+    @Published var proMegapixels: Int { didSet { d.set(proMegapixels, forKey: "proMP") } }
+    static let digiOptions = [1, 2, 3, 5, 8, 12]
     @Published var crunch: Double { didSet { d.set(crunch, forKey: "crunch") } }
     @Published var noise: Double { didSet { d.set(noise, forKey: "noise") } }
     @Published var date: DateConfig { didSet { save(date, "dateConfig") } }
@@ -22,6 +25,7 @@ final class AppSettings: ObservableObject {
 
     init() {
         digiMegapixels = d.object(forKey: "digiMP") as? Int ?? 2
+        proMegapixels = d.object(forKey: "proMP") as? Int ?? 0
         crunch = d.object(forKey: "crunch") as? Double ?? 0.6
         noise = d.object(forKey: "noise") as? Double ?? 0.5
         date = AppSettings.load("dateConfig") ?? DateConfig()

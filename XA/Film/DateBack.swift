@@ -390,12 +390,11 @@ enum DateBack {
                 return
             }
             if config.placement == .follow, shape == .crush {
-                let pw: CGFloat = min(size.width * 0.92, size.height * 0.92 * 24 / 22)
-                let k: CGFloat = pw / 24 * 0.9
-                let c = CGPoint(x: frame.midX, y: frame.midY)
-                func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: c.x + (x - 12) * k, y: c.y + (y - 11) * k) }
-                let pts = cubic(P(12.2, 19.4), P(15.8, 16.9), P(19.6, 13.4), P(21.2, 9.2))
-                decorate(face, ctx) { drawAlong(text, face: face, walker: PathWalker(points: pts), fraction: 0.5, ctx: ctx) }
+                // Up the right-hand curve, from the point toward the lobe, just inside the edge.
+                let inset: CGFloat = 0.92 * 0.86
+                func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { Shapes.heartPoint(x, y, in: frame, fill: inset) }
+                let pts = cubic(P(50, 88), P(78, 66), P(98, 48), P(98, 28))
+                decorate(face, ctx) { drawAlong(text, face: face, walker: PathWalker(points: pts), fraction: 0.42, ctx: ctx) }
                 return
             }
             let box = shape.path(in: frame)?.boundingBox ?? frame

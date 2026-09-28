@@ -35,6 +35,8 @@ final class CameraModel: NSObject, ObservableObject {
     @Published private(set) var zoom: CGFloat = 1
     @Published private(set) var photoSize: CGSize = .zero
     @Published private(set) var histogram: [Float] = []
+    /// Photo sizes PRO can ask the sensor for, in megapixels, smallest first.
+    @Published private(set) var proOptions: [Int] = []
 
     // PRO dials. nil means auto.
     @Published var proControl: ProControl = .ev
@@ -61,6 +63,10 @@ final class CameraModel: NSObject, ObservableObject {
     private var rotation: AVCaptureDevice.RotationCoordinator?
     private var frontFlag = false
     private var frameCount = 0
+    private var previewAngle: CGFloat = 90
+    private var angleObservation: NSKeyValueObservation?
+    /// How far the photo will be turned from the viewfinder frame, clockwise, in degrees.
+    private var _turn: CGFloat = 0
 
     // Read on the frame queue.
     private let lock = NSLock()
@@ -174,11 +180,32 @@ final class CameraModel: NSObject, ObservableObject {
 
     private func setupPhotoOutput(_ dev: AVCaptureDevice, _ m: CaptureMode) {
         let dims = dev.activeFormat.supportedMaxPhotoDimensions
-        let fit = dims.filter { Int($0.width) * Int($0.height) <= m.maxSensorPixels }
+        func mp(_ d: CMVideoDimensions) -> Int { CaptureMode.megapixels(CGSize(width: CGFloat(d.width), height: CGFloat(d.height))) }
+        let options = Array(Set(dims.map(mp))).sorted()
+        var fit = dims.filter { Int($0.width) * Int($0.height) <= m.maxSensorPixels }
+        if m == .pro {
+            let want = settings.proMegapixels
+            if want > 0 {
+                let chosen = dims.filter { mp($0) <= want }
+                if !chosen.isEmpty { fit = chosen }
+            }
+        }
         if let d = fit.max(by: { Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height) }) ?? dims.first {
             photoOutput.maxPhotoDimensions = d
             let s = CGSize(width: CGFloat(d.width), height: CGFloat(d.height))
-            DispatchQueue.main.async { self.photoSize = s }
+            DispatchQueue.main.async { self.photoSize = s; self.proOptions = options }
+        }
+    }
+
+    /// Re-read the resolution settings.
+    func applyResolution() {
+        syncFrameSettings()
+        let m = mode
+        sessionQueue.async {
+            guard let dev = self.device else { return }
+            self.session.beginConfiguration()
+            self.setupPhotoOutput(dev, m)
+            self.session.commitConfiguration()
         }
     }
 
@@ -246,11 +273,30 @@ final class CameraModel: NSObject, ObservableObject {
         guard let dev = device else { return }
         let rc = AVCaptureDevice.RotationCoordinator(device: dev, previewLayer: nil)
         rotation = rc
+        // The viewfinder stays upright for the portrait UI; the photograph turns with the phone.
+        let portrait: CGFloat = 90
         if let c = videoOutput.connection(with: .video) {
-            let a = rc.videoRotationAngleForHorizonLevelCapture
+            let a = c.isVideoRotationAngleSupported(portrait) ? portrait : rc.videoRotationAngleForHorizonLevelCapture
             if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
+            previewAngle = a
             if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = frontFlag }
         }
+        angleObservation = rc.observe(\.videoRotationAngleForHorizonLevelCapture, options: [.initial, .new]) { [weak self] rc, _ in
+            guard let self else { return }
+            var t = rc.videoRotationAngleForHorizonLevelCapture - self.previewAngle
+            while t < 0 { t += 360 }
+            while t >= 360 { t -= 360 }
+            self.lock.lock(); self._turn = t; self.lock.unlock()
+        }
+    }
+
+    private var turn: CGFloat { lock.lock(); defer { lock.unlock() }; return _turn }
+
+    /// Turn a frame clockwise by a multiple of 90°, keeping it at the origin.
+    static func rotated(_ img: CIImage, clockwise deg: CGFloat) -> CIImage {
+        guard deg != 0 else { return img }
+        let r = img.transformed(by: CGAffineTransform(rotationAngle: -deg * .pi / 180))
+        return r.transformed(by: CGAffineTransform(translationX: -r.extent.minX, y: -r.extent.minY))
     }
 
     func flip() {
@@ -365,6 +411,24 @@ final class CameraModel: NSObject, ObservableObject {
         case .iso: isoIndex = v == 0 ? nil : v - 1
         case .focus: focusIndex = v == 0 ? nil : v - 1
         }
+    }
+
+    // MARK: swiping through films
+
+    func stepSim(_ by: Int) {
+        let ids: [String?] = [nil] + FilmCatalog.sims.map { $0.id }
+        let i = ids.firstIndex(where: { $0 == stack.simID }) ?? 0
+        let n = ids.count
+        stack.simID = ids[((i + by) % n + n) % n]
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    func stepLook(_ by: Int) {
+        let all = Look.allCases
+        let i = all.firstIndex(of: stack.look) ?? 0
+        let n = all.count
+        stack.look = all[((i + by) % n + n) % n]
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 
     // MARK: shooting
@@ -487,7 +551,12 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate {
                 updateHistogram(src.transformed(by: CGAffineTransform(scaleX: s, y: s)))
             }
         } else {
-            img = Darkroom.develop(src, dev, date: Date(), preview: true).0
+            // Develop the frame the way the photograph will be turned, so the date back and the
+            // shape sit where they will on the print, then turn it back for the viewfinder.
+            let t = turn
+            let upright = Self.rotated(src, clockwise: t)
+            let developed = Darkroom.develop(upright, dev, date: Date(), preview: true).0
+            img = t == 0 ? developed : Self.rotated(developed, clockwise: 360 - t)
         }
         let pixel = m == .digi && dev.stack.look.pixelWidth != nil
         DispatchQueue.main.async { [weak self] in self?.preview?.show(img, pixelated: pixel) }

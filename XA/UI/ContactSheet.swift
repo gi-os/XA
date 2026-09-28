@@ -6,8 +6,10 @@ import UniformTypeIdentifiers
 struct ContactSheet: View {
     @ObservedObject var library: Library
     var onClose: (() -> Void)?
+    /// Live drag distance while pulling the roll down, so the layer follows the finger.
+    var onDrag: ((CGFloat) -> Void)?
     @State private var open: Opened?
-    @State private var drag: CGFloat = 0
+    @State private var atTop = true
 
     private let cols = Array(repeating: GridItem(.flexible(), spacing: 3), count: 3)
 
@@ -49,17 +51,17 @@ struct ContactSheet: View {
                     }
                     .padding(.bottom, 40)
                 }
+                .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y + $0.contentInsets.top <= 2 }) { _, top in atTop = top }
             }
         }
         .background(Color.black.ignoresSafeArea())
         .foregroundStyle(.white)
         .preferredColorScheme(.dark)
-        .offset(y: min(0, drag))
-        .gesture(DragGesture(minimumDistance: 30).onChanged { v in
-            if v.translation.height < 0 && abs(v.translation.height) > abs(v.translation.width) { drag = v.translation.height }
+        .simultaneousGesture(DragGesture(minimumDistance: 20).onChanged { v in
+            guard atTop, v.translation.height > 0, abs(v.translation.height) > abs(v.translation.width) else { return }
+            onDrag?(v.translation.height)
         }.onEnded { v in
-            if v.translation.height < -120 { onClose?() }
-            withAnimation(.snappy) { drag = 0 }
+            if atTop && v.translation.height > 120 && abs(v.translation.height) > abs(v.translation.width) { onClose?() } else { onDrag?(0) }
         })
         .fullScreenCover(item: $open) { o in
             FullPhoto(asset: o.asset, library: library)
@@ -94,9 +96,9 @@ private struct Thumb: View {
     @State private var img: UIImage?
 
     var body: some View {
-        Checker(size: 6)
+        Color.black
             .aspectRatio(3 / 4, contentMode: .fit)
-            .overlay { if let img { Image(uiImage: img).resizable().scaledToFill() } }
+            .overlay { if let img { Image(uiImage: img).resizable().scaledToFit() } }
             .clipped()
             .onAppear { library.thumbnail(asset, side: 320) { img = $0 } }
     }
@@ -108,11 +110,12 @@ private struct FullPhoto: View {
     @Environment(\.dismiss) private var dismiss
     @State private var img: UIImage?
     @State private var file: URL?
+    @State private var zoomed = false
 
     var body: some View {
         ZStack {
-            Checker(size: 14).ignoresSafeArea()
-            if let img { Image(uiImage: img).resizable().scaledToFit() } else { ProgressView() }
+            Color.black.ignoresSafeArea()
+            if let img { ZoomableImage(image: img, zoomed: $zoomed).ignoresSafeArea() } else { ProgressView() }
             VStack {
                 HStack {
                     RoundButton(action: { dismiss() }) { Image(systemName: "xmark").font(.system(size: 16, weight: .semibold)) }
@@ -120,7 +123,7 @@ private struct FullPhoto: View {
                     Spacer()
                 }
                 Spacer()
-                if let file {
+                if let file, !zoomed {
                     ShareLink(item: file) {
                         Label("SEND", systemImage: "square.and.arrow.up").font(XA.display(15))
                             .padding(.horizontal, 20).padding(.vertical, 11).background(XA.orange).foregroundStyle(.black)
@@ -130,7 +133,7 @@ private struct FullPhoto: View {
             .padding(16)
         }
         .foregroundStyle(.white)
-        .gesture(DragGesture().onEnded { v in if v.translation.height > 120 { dismiss() } })
+        .simultaneousGesture(DragGesture().onEnded { v in if !zoomed && v.translation.height > 120 { dismiss() } })
         .onAppear {
             library.full(asset) { img = $0 }
             library.data(asset) { d, uti in
@@ -139,6 +142,66 @@ private struct FullPhoto: View {
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent("XA-\(asset.localIdentifier.prefix(8)).\(ext)")
                 try? d.write(to: url)
                 file = url
+            }
+        }
+    }
+}
+
+/// Pinch to zoom, double-tap to zoom in and out, pan when zoomed.
+struct ZoomableImage: UIViewRepresentable {
+    let image: UIImage
+    @Binding var zoomed: Bool
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let sv = UIScrollView()
+        sv.delegate = context.coordinator
+        sv.minimumZoomScale = 1
+        sv.maximumZoomScale = 8
+        sv.showsHorizontalScrollIndicator = false
+        sv.showsVerticalScrollIndicator = false
+        sv.contentInsetAdjustmentBehavior = .never
+        sv.backgroundColor = .clear
+        let iv = UIImageView(image: image)
+        iv.contentMode = .scaleAspectFit
+        iv.isUserInteractionEnabled = true
+        iv.backgroundColor = .clear
+        sv.addSubview(iv)
+        context.coordinator.imageView = iv
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.doubleTap(_:)))
+        tap.numberOfTapsRequired = 2
+        sv.addGestureRecognizer(tap)
+        return sv
+    }
+
+    func updateUIView(_ sv: UIScrollView, context: Context) {
+        context.coordinator.imageView?.image = image
+        DispatchQueue.main.async {
+            if sv.zoomScale == 1 { context.coordinator.imageView?.frame = sv.bounds }
+        }
+    }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        let parent: ZoomableImage
+        weak var imageView: UIImageView?
+        init(_ p: ZoomableImage) { parent = p }
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+
+        func scrollViewDidZoom(_ sv: UIScrollView) {
+            let z = sv.zoomScale > 1.01
+            if z != parent.zoomed { DispatchQueue.main.async { self.parent.zoomed = z } }
+        }
+
+        @objc func doubleTap(_ g: UITapGestureRecognizer) {
+            guard let sv = g.view as? UIScrollView else { return }
+            if sv.zoomScale > 1.01 {
+                sv.setZoomScale(1, animated: true)
+            } else {
+                let p = g.location(in: imageView)
+                let w = sv.bounds.width / 3, h = sv.bounds.height / 3
+                sv.zoom(to: CGRect(x: p.x - w / 2, y: p.y - h / 2, width: w, height: h), animated: true)
             }
         }
     }

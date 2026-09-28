@@ -13,7 +13,7 @@ struct CustomizeView: View {
                     group("DIGI") {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Resolution").font(.system(size: 15))
-                            Segmented(items: [(1, "1MP"), (2, "2MP"), (3, "3MP"), (5, "5MP")], selection: $settings.digiMegapixels)
+                            Segmented(items: AppSettings.digiOptions.map { ($0, "\($0)MP") }, selection: $settings.digiMegapixels)
                             FlatSlider(label: "JPEG crunch", value: $settings.crunch, range: 0.3...0.95, format: { "\(Int(($0 * 100).rounded()))" })
                             FlatSlider(label: "Sensor noise", value: $settings.noise, format: { "\(Int(($0 * 100).rounded()))" })
                             NavigationLink { DateScreen(settings: settings, camera: camera) } label: {
@@ -23,6 +23,8 @@ struct CustomizeView: View {
                     }
                     group("PRO") {
                         VStack(alignment: .leading, spacing: 8) {
+                            Text("Resolution").font(.system(size: 15))
+                            Segmented(items: [(0, "MAX")] + camera.proOptions.map { ($0, "\($0)MP") }, selection: $settings.proMegapixels)
                             Text("Format").font(.system(size: 15))
                             Segmented(items: [(ProFormat.heif, "HEIF"), (.jpeg, "JPEG")], selection: $settings.proFormat)
                             Toggle("Grid", isOn: $settings.grid).tint(XA.orange).font(.system(size: 15))
@@ -54,7 +56,7 @@ struct CustomizeView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onDisappear { camera.syncFrameSettings(); camera.rebuildControls() }
+        .onDisappear { camera.applyResolution(); camera.rebuildControls() }
     }
 
     private var placement: String {

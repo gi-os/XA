@@ -25,15 +25,18 @@ enum FrameShape: Int, CaseIterable, Codable, Identifiable {
         case .none:
             return nil
         case .capsule:
-            let pw: CGFloat = w * 0.64
-            let ph: CGFloat = min(h * 0.92, pw * 2.4)
+            // Upright in a portrait frame, lying down in a landscape one.
+            let tall = h >= w
+            let pw: CGFloat = tall ? w * 0.8 : min(w * 0.94, h * 0.8 * 2.2)
+            let ph: CGFloat = tall ? min(h * 0.94, w * 0.8 * 2.2) : h * 0.8
             let rect = CGRect(x: r.midX - pw / 2, y: r.midY - ph / 2, width: pw, height: ph)
-            return CGPath(roundedRect: rect, cornerWidth: pw / 2, cornerHeight: pw / 2, transform: nil)
+            let rad: CGFloat = min(pw, ph) / 2
+            return CGPath(roundedRect: rect, cornerWidth: rad, cornerHeight: rad, transform: nil)
         case .porthole:
             let d: CGFloat = min(w, h) * 0.92
             return CGPath(ellipseIn: CGRect(x: r.midX - d / 2, y: r.midY - d / 2, width: d, height: d), transform: nil)
         case .window:
-            let pw: CGFloat = w * 0.72
+            let pw: CGFloat = min(w * 0.72, h * 0.86 / 1.3)
             let ph: CGFloat = min(h * 0.86, pw * 1.7)
             let left: CGFloat = r.midX - pw / 2
             let top: CGFloat = r.midY - ph / 2
@@ -45,11 +48,7 @@ enum FrameShape: Int, CaseIterable, Codable, Identifiable {
             p.closeSubpath()
             return p
         case .crush:
-            let pw: CGFloat = min(w * 0.92, h * 0.92 * 24 / 22)
-            let k: CGFloat = pw / 24
-            let ox: CGFloat = r.midX - 12 * k
-            let oy: CGFloat = r.midY - 11 * k
-            return Shapes.heart(scale: k, offset: CGPoint(x: ox, y: oy))
+            return Shapes.heart(in: r, fill: 0.92)
         case .nova:
             let outer: CGFloat = min(w, h) * 0.47
             let inner: CGFloat = outer * 0.46
@@ -67,16 +66,23 @@ enum FrameShape: Int, CaseIterable, Codable, Identifiable {
 }
 
 enum Shapes {
-    /// The heart from the design, drawn in a 24 × 22 box: M12 21 S1 14 1 7 a5 5 0 0 1 11 -2 a5 5 0 0 1 11 2 c0 7 -11 14 -11 14z
-    static func heart(scale k: CGFloat, offset o: CGPoint) -> CGPath {
-        func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: o.x + x * k, y: o.y + y * k) }
+    /// The heart, drawn in a 100 × 90 box: two round lobes, a soft cleft and a long point.
+    /// M50,88 C22,66 2,48 2,28 C2,13 13,2 27,2 C37,2 45,8 50,16 C55,8 63,2 73,2 C87,2 98,13 98,28 C98,48 78,66 50,88 Z
+    static func heartPoint(_ x: CGFloat, _ y: CGFloat, in r: CGRect, fill: CGFloat) -> CGPoint {
+        let k: CGFloat = min(r.width * fill / 96, r.height * fill / 86)
+        return CGPoint(x: r.midX + (x - 50) * k, y: r.midY + (y - 45) * k)
+    }
+
+    static func heart(in r: CGRect, fill: CGFloat = 1) -> CGPath {
+        func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { heartPoint(x, y, in: r, fill: fill) }
         let p = CGMutablePath()
-        p.move(to: P(12, 21))
-        p.addCurve(to: P(1, 7), control1: P(12, 21), control2: P(1, 14))
-        p.addArc(center: P(6, 7), radius: 5 * k, startAngle: .pi, endAngle: -0.2, clockwise: false)
-        p.addLine(to: P(12, 5))
-        p.addArc(center: P(18, 7), radius: 5 * k, startAngle: .pi + 0.2, endAngle: 0, clockwise: false)
-        p.addCurve(to: P(12, 21), control1: P(23, 14), control2: P(12, 21))
+        p.move(to: P(50, 88))
+        p.addCurve(to: P(2, 28), control1: P(22, 66), control2: P(2, 48))
+        p.addCurve(to: P(27, 2), control1: P(2, 13), control2: P(13, 2))
+        p.addCurve(to: P(50, 16), control1: P(37, 2), control2: P(45, 8))
+        p.addCurve(to: P(73, 2), control1: P(55, 8), control2: P(63, 2))
+        p.addCurve(to: P(98, 28), control1: P(87, 2), control2: P(98, 13))
+        p.addCurve(to: P(50, 88), control1: P(98, 48), control2: P(78, 66))
         p.closeSubpath()
         return p
     }

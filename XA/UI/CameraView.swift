@@ -11,14 +11,36 @@ struct CameraView: View {
     var body: some View {
         VStack(spacing: 8) {
             viewfinder
-            if camera.mode == .digi { DigiRows(camera: camera, onFilm: onFilm) } else { ProRows(camera: camera) }
-            ModeRow(camera: camera, onCustomize: onCustomize)
-            ShutterRow(camera: camera, onRoll: onRoll)
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 24).onEnded(swipe))
+            if camera.mode == .digi { FilmControls(camera: camera, onFilm: onFilm) } else { ProRows(camera: camera) }
+            VStack(spacing: 8) {
+                ModeRow(camera: camera, settings: settings, onCustomize: onCustomize)
+                ShutterRow(camera: camera, onRoll: onRoll)
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 24).onEnded { v in
+                if v.translation.height < -60 && abs(v.translation.height) > abs(v.translation.width) { onRoll() }
+            })
         }
         .padding(.horizontal, 11)
         .padding(.bottom, 6)
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
+    }
+
+    /// On the frame: left and right change the sim, up and down the look. In PRO, up opens the roll.
+    private func swipe(_ v: DragGesture.Value) {
+        let dx = v.translation.width, dy = v.translation.height
+        let horizontal = abs(dx) > abs(dy)
+        guard max(abs(dx), abs(dy)) > 50 else { return }
+        if camera.mode == .pro {
+            if !horizontal && dy < 0 { onRoll() }
+            return
+        }
+        withAnimation(.snappy) {
+            if horizontal { camera.stepSim(dx < 0 ? 1 : -1) } else { camera.stepLook(dy < 0 ? 1 : -1) }
+        }
     }
 
     @ViewBuilder private var viewfinder: some View {
@@ -60,55 +82,148 @@ private struct GridLines: View {
 
 // MARK: DIGI
 
-private struct DigiRows: View {
+/// Three rows, SIM, LOOK and SHAPE: swipe up and down to change row, sideways to pick. After a
+/// few seconds untouched they fold into one button showing what is loaded.
+private struct FilmControls: View {
     @ObservedObject var camera: CameraModel
     var onFilm: () -> Void
+    @State private var row = 0
+    @State private var open = true
+    @State private var touched = Date()
 
     var body: some View {
-        VStack(spacing: 6) {
-            StackRow(stack: camera.stack, onTap: onFilm)
-            HStack(spacing: 10) {
-                Button(action: onFilm) {
-                    Image(systemName: "square.grid.2x2").font(.system(size: 18, weight: .medium))
-                        .frame(width: 44, height: 53).background(XA.fill)
+        ZStack {
+            if open {
+                VStack(spacing: 6) {
+                    StackRow(stack: camera.stack, onTap: { poke() }, onSlot: { i in withAnimation(.snappy) { row = i }; poke() })
+                    HStack(spacing: 8) {
+                        Button(action: onFilm) {
+                            Image(systemName: "square.grid.2x2").font(.system(size: 18, weight: .medium))
+                                .frame(width: 44, height: 53).background(XA.fill)
+                        }
+                        .buttonStyle(.plain).foregroundStyle(.white)
+                        .accessibilityLabel("See every film")
+                        RowPicker(row: $row)
+                        FilmStrip(camera: camera, row: row, onPick: poke)
+                            .id(row)
+                            .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+                    }
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(DragGesture(minimumDistance: 16).onEnded { v in
+                        guard abs(v.translation.height) > abs(v.translation.width), abs(v.translation.height) > 24 else { return }
+                        withAnimation(.snappy) { row = min(2, max(0, row + (v.translation.height < 0 ? 1 : -1))) }
+                        poke()
+                    })
                 }
-                .buttonStyle(.plain).foregroundStyle(.white)
-                .accessibilityLabel("See every film")
-                FilmStrip(camera: camera)
+                .transition(.opacity)
+            } else {
+                FilmButton(stack: camera.stack) { withAnimation(.snappy) { open = true }; poke() }
+                    .transition(.opacity)
             }
         }
+        .frame(height: 94)
+        .onChange(of: camera.stack) { _, _ in if open { poke() } }
+        .task(id: touched) {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if !Task.isCancelled && Date().timeIntervalSince(touched) >= 3.9 { withAnimation(.easeInOut(duration: 0.3)) { open = false } }
+        }
+    }
+
+    private func poke() { touched = Date() }
+}
+
+/// SIM · LOOK · SHAPE, stacked; the lit one is the row showing.
+private struct RowPicker: View {
+    @Binding var row: Int
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(Array(["SIM", "LOOK", "SHAPE"].enumerated()), id: \.offset) { i, t in
+                Button { withAnimation(.snappy) { row = i } } label: {
+                    Text(t).font(XA.display(10)).tracking(0.8)
+                        .foregroundStyle(row == i ? XA.orange : XA.faint)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(width: 40, alignment: .leading)
     }
 }
 
-/// Every film as its box, in one strip: sims, looks, shapes. Tap to load; tap a loaded look
-/// or shape again to take it off.
+/// The folded state: the loaded sim's box and what is stacked on it. Tap to open the rows.
+struct FilmButton: View {
+    let stack: Stack
+    var action: () -> Void
+    var body: some View {
+        let sim = FilmCatalog.sim(stack.simID)
+        Button(action: action) {
+            HStack(spacing: 12) {
+                if let sim { FilmBox(item: .sim(sim), width: 72) } else {
+                    Rectangle().fill(XA.fill).frame(width: 72, height: 48).overlay(Text("NO SIM").font(XA.display(10)).foregroundStyle(XA.faint))
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(sim?.title ?? "NO SIM").font(XA.display(15)).foregroundStyle(XA.orange).lineLimit(1)
+                    Text(extras).font(XA.display(11, bold: false)).foregroundStyle(XA.dim).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.up").font(.system(size: 14, weight: .semibold)).foregroundStyle(XA.dim)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(XA.fill)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Film: \(sim?.title ?? "no sim"). Show the film rows")
+    }
+
+    private var extras: String {
+        var parts: [String] = []
+        if stack.look != .none { parts.append(stack.look.title) }
+        if let s = stack.effectiveShape { parts.append(s.title) }
+        return parts.isEmpty ? "SWIPE THE FRAME: ← → SIM · ↑ ↓ LOOK" : parts.joined(separator: " + ")
+    }
+}
+
+/// One row of boxes. Tap to load; tap a loaded look or shape again to take it off.
 struct FilmStrip: View {
     @ObservedObject var camera: CameraModel
+    var row: Int
+    var onPick: () -> Void = {}
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    ForEach(FilmCatalog.sims) { s in
-                        tile(.sim(s), on: camera.stack.simID == s.id) { camera.stack.simID = camera.stack.simID == s.id ? nil : s.id }
-                    }
-                    divider
-                    ForEach(Look.allCases.filter { $0 != .none }) { l in
-                        tile(.look(l), on: camera.stack.look == l) { camera.stack.look = camera.stack.look == l ? .none : l }
-                    }
-                    divider
-                    ForEach(FilmCatalog.shapes) { s in
-                        tile(.shape(s), on: camera.stack.shape == s) { camera.stack.shape = camera.stack.shape == s ? .none : s }
+                    switch row {
+                    case 0:
+                        ForEach(FilmCatalog.sims) { s in
+                            tile(.sim(s), on: camera.stack.simID == s.id) { camera.stack.simID = camera.stack.simID == s.id ? nil : s.id }
+                        }
+                    case 1:
+                        ForEach(Look.allCases.filter { $0 != .none }) { l in
+                            tile(.look(l), on: camera.stack.look == l) { camera.stack.look = camera.stack.look == l ? .none : l }
+                        }
+                    default:
+                        ForEach(FilmCatalog.shapes) { s in
+                            tile(.shape(s), on: camera.stack.shape == s) { camera.stack.shape = camera.stack.shape == s ? .none : s }
+                        }
                     }
                 }
                 .padding(.vertical, 3).padding(.horizontal, 2)
             }
-            .onAppear { if let id = camera.stack.simID { proxy.scrollTo("sim-\(id)", anchor: .center) } }
+            .onAppear { scroll(proxy) }
+            .onChange(of: camera.stack) { _, _ in withAnimation { scroll(proxy) } }
         }
         .frame(height: 59)
     }
-    private var divider: some View { Rectangle().fill(Color.white.opacity(0.2)).frame(width: 1, height: 40) }
+
+    private func scroll(_ proxy: ScrollViewProxy) {
+        switch row {
+        case 0: if let id = camera.stack.simID { proxy.scrollTo("sim-\(id)", anchor: .center) }
+        case 1: if camera.stack.look != .none { proxy.scrollTo("look-\(camera.stack.look.rawValue)", anchor: .center) }
+        default: if camera.stack.shape != .none { proxy.scrollTo("shape-\(camera.stack.shape.rawValue)", anchor: .center) }
+        }
+    }
+
     private func tile(_ item: FilmItem, on: Bool, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button { action(); onPick() } label: {
             FilmBox(item: item, width: 80)
                 .overlay(Rectangle().strokeBorder(on ? XA.orange : Color.clear, lineWidth: 2).padding(-3))
                 .opacity(on ? 1 : 0.82)
@@ -229,6 +344,7 @@ private struct Dial: View {
 
 private struct ModeRow: View {
     @ObservedObject var camera: CameraModel
+    @ObservedObject var settings: AppSettings
     var onCustomize: () -> Void
     var body: some View {
         HStack {
@@ -249,16 +365,30 @@ private struct ModeRow: View {
             }
             .padding(3).background(XA.fill, in: Capsule())
             Spacer()
-            Text(spec).font(XA.mono(12)).lineLimit(1)
-                .padding(.horizontal, 10).frame(minWidth: 44, minHeight: 44).background(XA.fill, in: Capsule())
+            Menu {
+                if camera.mode == .digi {
+                    ForEach(AppSettings.digiOptions, id: \.self) { mp in
+                        Button { settings.digiMegapixels = mp; camera.applyResolution() } label: {
+                            if mp == settings.digiMegapixels { Label("\(mp)MP", systemImage: "checkmark") } else { Text("\(mp)MP") }
+                        }
+                    }
+                } else {
+                    ForEach(camera.proOptions, id: \.self) { mp in
+                        Button { settings.proMegapixels = mp; camera.applyResolution() } label: {
+                            if mp == shownPro { Label("\(mp)MP", systemImage: "checkmark") } else { Text("\(mp)MP") }
+                        }
+                    }
+                }
+            } label: {
+                Text(spec).font(XA.mono(12)).lineLimit(1).foregroundStyle(.white)
+                    .padding(.horizontal, 10).frame(minWidth: 44, minHeight: 44).background(XA.fill, in: Capsule())
+            }
+            .accessibilityLabel("Resolution \(spec)")
         }
     }
+    private var shownPro: Int { CaptureMode.megapixels(camera.photoSize) }
     private var spec: String {
-        if camera.mode == .digi {
-            let s = Digicam.size(for: camera.photoSize == .zero ? CGSize(width: 4032, height: 3024) : camera.photoSize, megapixels: camera.settings.digiMegapixels)
-            return "\(CaptureMode.megapixels(s))MP"
-        }
-        return "\(CaptureMode.megapixels(camera.photoSize))MP"
+        camera.mode == .digi ? "\(settings.digiMegapixels)MP" : "\(shownPro)MP"
     }
 }
 

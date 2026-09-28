@@ -31,22 +31,18 @@ struct RootView: View {
     var body: some View {
         GeometryReader { geo in
             let wide = geo.size.width > geo.size.height * 0.8
-            Group {
-                if wide {
-                    HStack(spacing: 0) {
-                        camView.frame(width: geo.size.width * 0.55)
-                        ContactSheet(library: library)
-                    }
-                } else {
+            if wide {
+                HStack(spacing: 0) {
+                    camView.frame(width: geo.size.width * 0.55)
+                    ContactSheet(library: library)
+                }
+            } else {
+                // The roll is a layer above the camera: swipe up for it, swipe down to put it away.
+                ZStack {
                     camView
-                        .offset(y: max(0, pull) * 0.4)
-                        .simultaneousGesture(DragGesture(minimumDistance: 24).onChanged { v in
-                            if v.translation.height > 0 && abs(v.translation.height) > abs(v.translation.width) * 1.5 { pull = v.translation.height }
-                        }.onEnded { v in
-                            if v.translation.height > 120 && abs(v.translation.height) > abs(v.translation.width) { showRoll = true }
-                            withAnimation(.snappy) { pull = 0 }
-                        })
-                        .fullScreenCover(isPresented: $showRoll) { ContactSheet(library: library, onClose: { showRoll = false }) }
+                    ContactSheet(library: library, onClose: closeRoll, onDrag: { pull = $0 })
+                        .offset(y: showRoll ? max(0, pull) : geo.size.height + 40)
+                        .allowsHitTesting(showRoll)
                 }
             }
         }
@@ -62,13 +58,17 @@ struct RootView: View {
         }
         .onChange(of: phase) { _, p in if p == .active { camera.resume() } else if p == .background { camera.stop() } }
         .onChange(of: settings.date) { _, _ in camera.syncFrameSettings(); pushContext() }
-        .onChange(of: settings.digiMegapixels) { _, _ in camera.syncFrameSettings(); pushContext() }
+        .onChange(of: settings.digiMegapixels) { _, _ in camera.applyResolution(); pushContext() }
+        .onChange(of: settings.proMegapixels) { _, _ in camera.applyResolution() }
         .task { await ingestLockScreenShots() }
     }
 
     private var camView: some View {
-        CameraView(camera: camera, settings: settings, onRoll: { showRoll = true }, onCustomize: { showCustomize = true }, onFilm: { showFilm = true })
+        CameraView(camera: camera, settings: settings, onRoll: openRoll, onCustomize: { showCustomize = true }, onFilm: { showFilm = true })
     }
+
+    private func openRoll() { pull = 0; withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { showRoll = true } }
+    private func closeRoll() { withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { showRoll = false; pull = 0 } }
 
     /// The Lock Screen camera cannot read the app's settings; they travel in the intent context.
     private func pushContext() {

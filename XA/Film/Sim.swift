@@ -327,21 +327,6 @@ enum SimEngine {
     }
 
     static func grain(_ img: CIImage, amount: Double, size: Double) -> CIImage {
-        let e = img.extent
-        guard let rnd = CIFilter.randomGenerator().outputImage else { return img }
-        let scale: CGFloat = 1 + CGFloat(size) * 2.5 * max(1, e.width / 1600)
-        let a: CGFloat = CGFloat(amount) * 0.14
-        let m = CIFilter.colorMatrix()
-        m.inputImage = rnd.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        m.rVector = CIVector(x: 0, y: 2 * a, z: 0, w: 0)
-        m.gVector = CIVector(x: 0, y: 2 * a, z: 0, w: 0)
-        m.bVector = CIVector(x: 0, y: 2 * a, z: 0, w: 0)
-        m.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
-        m.biasVector = CIVector(x: -a, y: -a, z: -a, w: 0)
-        guard let n = m.outputImage?.cropped(to: e) else { return img }
-        let add = CIFilter.additionCompositing()
-        add.inputImage = n
-        add.backgroundImage = img
-        return (add.outputImage ?? img).cropped(to: e)
+        FilmGrain.apply(img, amount: amount, size: size)
     }
 }

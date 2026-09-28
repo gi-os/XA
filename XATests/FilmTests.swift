@@ -10,6 +10,15 @@ final class FilmTests: XCTestCase {
         XCTAssertEqual(Digicam.size(for: s, megapixels: 2), CGSize(width: 1600, height: 1200))
         XCTAssertEqual(Digicam.size(for: s, megapixels: 1), CGSize(width: 1152, height: 864))
         XCTAssertEqual(Digicam.size(for: s, megapixels: 5), CGSize(width: 2592, height: 1944))
+        XCTAssertEqual(Digicam.size(for: s, megapixels: 8), CGSize(width: 3264, height: 2448))
+        XCTAssertEqual(Digicam.size(for: s, megapixels: 12), s)
+    }
+
+    func testEveryResolutionOptionIsItsOwnSize() {
+        let s = CGSize(width: 4032, height: 3024)
+        let sizes = AppSettings.digiOptions.map { Digicam.size(for: s, megapixels: $0).width }
+        XCTAssertEqual(Set(sizes).count, sizes.count)
+        XCTAssertEqual(sizes, sizes.sorted())
     }
 
     func testDigicamLeavesSmallFramesAlone() {
@@ -75,13 +84,54 @@ final class FilmTests: XCTestCase {
     // MARK: shapes and stacks
 
     func testEveryShapeSitsInsideTheFrameAndCoversTheMiddle() {
-        let r = CGRect(x: 0, y: 0, width: 300, height: 400)
-        for s in FrameShape.allCases where s != .none {
-            let p = s.path(in: r)!
-            XCTAssertTrue(r.insetBy(dx: -1, dy: -1).contains(p.boundingBox), "\(s)")
-            XCTAssertTrue(p.contains(CGPoint(x: r.midX, y: r.midY)), "\(s)")
+        // Portrait and landscape: a landscape photo must not make a corner radius too big.
+        for r in [CGRect(x: 0, y: 0, width: 300, height: 400), CGRect(x: 0, y: 0, width: 400, height: 300)] {
+            for s in FrameShape.allCases where s != .none {
+                let p = s.path(in: r)!
+                XCTAssertTrue(r.insetBy(dx: -1, dy: -1).contains(p.boundingBox), "\(s) in \(r.size)")
+                XCTAssertTrue(p.contains(CGPoint(x: r.midX, y: r.midY)), "\(s) in \(r.size)")
+            }
         }
-        XCTAssertNil(FrameShape.none.path(in: r))
+        XCTAssertNil(FrameShape.none.path(in: CGRect(x: 0, y: 0, width: 10, height: 10)))
+    }
+
+    func testTheCapsuleIsWideEnoughToShoot() {
+        let r = CGRect(x: 0, y: 0, width: 300, height: 400)
+        XCTAssertGreaterThanOrEqual(FrameShape.capsule.path(in: r)!.boundingBox.width, 300 * 0.78)
+    }
+
+    func testTheHeartHasTwoLobesAndAPoint() {
+        let r = CGRect(x: 0, y: 0, width: 300, height: 300)
+        let p = FrameShape.crush.path(in: r)!
+        // The cleft between the lobes is outside; each lobe is inside.
+        let top = p.boundingBox.minY
+        XCTAssertFalse(p.contains(CGPoint(x: r.midX, y: top + 4)))
+        XCTAssertTrue(p.contains(CGPoint(x: r.midX - 60, y: top + 30)))
+        XCTAssertTrue(p.contains(CGPoint(x: r.midX + 60, y: top + 30)))
+    }
+
+    func testGrainIsMonochromeAndCentred() {
+        let src = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5)).cropped(to: CGRect(x: 0, y: 0, width: 200, height: 200))
+        let out = FilmGrain.apply(src, amount: 1, size: 0.5)
+        var px = [Float](repeating: 0, count: 4)
+        Looks.context.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 100, y: 100, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        XCTAssertEqual(px[0], px[1], accuracy: 0.001)
+        XCTAssertEqual(px[1], px[2], accuracy: 0.001)
+        var avg = [Float](repeating: 0, count: 4)
+        let f = CIFilter(name: "CIAreaAverage", parameters: [kCIInputImageKey: out, kCIInputExtentKey: CIVector(cgRect: out.extent)])!.outputImage!
+        Looks.context.render(f, toBitmap: &avg, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        XCTAssertEqual(avg[0], px.isEmpty ? 0 : 0.5, accuracy: 0.08, "grain should not brighten or darken the picture")
+    }
+
+    func testSwipingThroughFilmsWraps() {
+        let cam = CameraModel(settings: AppSettings())
+        cam.stack = Stack(simID: nil, look: .none, shape: .none)
+        cam.stepLook(-1)
+        XCTAssertEqual(cam.stack.look, Look.allCases.last)
+        cam.stepLook(1)
+        XCTAssertEqual(cam.stack.look, Look.none)
+        cam.stepSim(1)
+        XCTAssertEqual(cam.stack.simID, FilmCatalog.sims.first?.id)
     }
 
     func testAShapeLeavesTransparentPixels() {
