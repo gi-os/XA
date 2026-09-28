@@ -1,0 +1,62 @@
+name: XA
+options:
+  bundleIdPrefix: com.gios
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1"
+    DEVELOPMENT_TEAM: ""
+targets:
+  XA:
+    type: application
+    platform: iOS
+    sources:
+      - path: XA
+    info:
+      path: XA/Info.plist
+      properties:
+        CFBundleDisplayName: XA
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen:
+          UIColorName: ""
+        ITSAppUsesNonExemptEncryption: false
+        NSCameraUsageDescription: XA is a camera. It needs the camera to take pictures.
+        NSPhotoLibraryAddUsageDescription: XA saves your pictures to the XA album in Photos.
+        NSPhotoLibraryUsageDescription: XA shows the pictures in its album as a contact sheet.
+        UIStatusBarHidden: true
+        UIViewControllerBasedStatusBarAppearance: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gios.xa
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+  XATests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: XATests
+    dependencies:
+      - target: XA
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.gios.xa.tests
+schemes:
+  XA:
+    build:
+      targets:
+        XA: all
+        XATests: [test]
+    test:
+      targets:
+        - XATests
