@@ -27,6 +27,16 @@ final class CameraModel: NSObject, ObservableObject {
     @Published var videoLook: VideoLook = .clean { didSet { UserDefaults.standard.set(videoLook.rawValue, forKey: "videoLook"); lock.lock(); _videoLook = videoLook; lock.unlock() } }
     @Published private(set) var recording = false
     @Published private(set) var recordSeconds: Double = 0
+    // FOCUS
+    /// Where focus is aimed, in viewfinder coordinates (0…1, top-left). Nil when the camera chooses.
+    @Published private(set) var focusPoint: CGPoint?
+    /// The half-press has locked focus and exposure.
+    @Published private(set) var focusLocked = false
+    /// Half-press held (on-screen shutter or a held hardware button).
+    @Published private(set) var halfPressed = false
+    private var focusObservation: NSKeyValueObservation?
+    private var _eyeTracking = false
+
     /// The take so far: which tape from which second.
     @Published private(set) var segments: [TakeSegment] = []
     @Published var mode: CaptureMode = .digi { didSet { modeChanged(oldValue) } }
@@ -470,6 +480,117 @@ final class CameraModel: NSObject, ObservableObject {
     /// The roll button shows the newest picture on the roll, from launch on.
     func showThumb(_ img: UIImage?) { if let img { lastShot = img } }
 
+    // MARK: focus
+
+    /// Point focus: aim focus and exposure at a spot in the viewfinder.
+    func focus(at viewPoint: CGPoint) {
+        guard mode != .pro || focusIndex == nil else { return }
+        focusPoint = viewPoint
+        focusLocked = false
+        let continuous = settings.afMode == .continuous
+        let front = self.front
+        sessionQueue.async { self.aim(viewPoint, front: front, continuous: continuous) }
+    }
+
+    private func aim(_ viewPoint: CGPoint, front: Bool, continuous: Bool) {
+        guard let dev = device, (try? dev.lockForConfiguration()) != nil else { return }
+        defer { dev.unlockForConfiguration() }
+        let p = FocusGeometry.devicePoint(fromView: viewPoint, front: front)
+        if dev.isFocusPointOfInterestSupported { dev.focusPointOfInterest = p }
+        let fm: AVCaptureDevice.FocusMode = continuous ? .continuousAutoFocus : .autoFocus
+        if dev.isFocusModeSupported(fm) { dev.focusMode = fm }
+        if dev.isExposurePointOfInterestSupported { dev.exposurePointOfInterest = p }
+        if dev.isExposureModeSupported(.continuousAutoExposure) && dev.exposureMode != .custom { dev.exposureMode = .continuousAutoExposure }
+    }
+
+    /// Back to the camera's own choice.
+    func resetFocus() {
+        focusPoint = nil
+        focusLocked = false
+        sessionQueue.async {
+            guard let dev = self.device, (try? dev.lockForConfiguration()) != nil else { return }
+            defer { dev.unlockForConfiguration() }
+            let c = CGPoint(x: 0.5, y: 0.5)
+            if dev.isFocusPointOfInterestSupported { dev.focusPointOfInterest = c }
+            if dev.isExposurePointOfInterestSupported { dev.exposurePointOfInterest = c }
+            if dev.isFocusModeSupported(.continuousAutoFocus) { dev.focusMode = .continuousAutoFocus }
+            if dev.exposureMode != .custom && dev.isExposureModeSupported(.continuousAutoExposure) { dev.exposureMode = .continuousAutoExposure }
+            dev.isSubjectAreaChangeMonitoringEnabled = false
+        }
+    }
+
+    /// First stage: focus (and, in AF-S, exposure) lock where it is aimed.
+    func halfPress() {
+        guard mode != .video, !halfPressed else { return }
+        halfPressed = true
+        guard mode != .pro || focusIndex == nil else { focusLocked = true; return }
+        let single = settings.afMode == .single
+        let point = focusPoint ?? CGPoint(x: 0.5, y: 0.5)
+        let front = self.front
+        sessionQueue.async {
+            guard let dev = self.device, (try? dev.lockForConfiguration()) != nil else { return }
+            let p = FocusGeometry.devicePoint(fromView: point, front: front)
+            if dev.isFocusPointOfInterestSupported { dev.focusPointOfInterest = p }
+            if dev.isExposurePointOfInterestSupported { dev.exposurePointOfInterest = p }
+            if single, dev.isFocusModeSupported(.autoFocus) { dev.focusMode = .autoFocus }
+            dev.unlockForConfiguration()
+            // Locked once the lens stops moving.
+            self.focusObservation = dev.observe(\.isAdjustingFocus, options: [.new]) { [weak self] d, _ in
+                guard let self, !d.isAdjustingFocus else { return }
+                self.focusObservation = nil
+                if single, (try? d.lockForConfiguration()) != nil {
+                    if d.isExposureModeSupported(.locked) && d.exposureMode != .custom { d.exposureMode = .locked }
+                    d.unlockForConfiguration()
+                }
+                DispatchQueue.main.async {
+                    guard self.halfPressed else { return }
+                    self.focusLocked = true
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.6)
+                }
+            }
+            if !dev.isAdjustingFocus && !single {
+                DispatchQueue.main.async { if self.halfPressed { self.focusLocked = true } }
+            }
+        }
+    }
+
+    /// Second stage: fire, then let go of the lock.
+    func fullPress() {
+        if mode == .video { toggleRecording(); return }
+        shoot()
+        releaseHalfPress()
+    }
+
+    func releaseHalfPress() {
+        guard halfPressed else { return }
+        halfPressed = false
+        focusLocked = false
+        focusObservation = nil
+        let point = focusPoint
+        let front = self.front
+        sessionQueue.async {
+            guard let dev = self.device, (try? dev.lockForConfiguration()) != nil else { return }
+            if dev.exposureMode == .locked && dev.isExposureModeSupported(.continuousAutoExposure) { dev.exposureMode = .continuousAutoExposure }
+            dev.unlockForConfiguration()
+            if let point { self.aim(point, front: front, continuous: true) } else if dev.isFocusModeSupported(.continuousAutoFocus), (try? dev.lockForConfiguration()) != nil {
+                dev.focusMode = .continuousAutoFocus
+                dev.unlockForConfiguration()
+            }
+        }
+    }
+
+    /// Eye AF: every few frames, find the nearer eye and aim there. In AF-S a held half-press freezes it.
+    private func trackEye(_ pb: CVPixelBuffer) {
+        guard let eye = EyeFinder.nearerEye(in: pb) else { return }
+        DispatchQueue.main.async {
+            guard self.settings.afArea == .eye, self.mode != .pro || self.focusIndex == nil else { return }
+            if self.halfPressed && self.settings.afMode == .single { return }
+            self.focusPoint = eye
+            let front = self.front
+            self.sessionQueue.async { self.aim(eye, front: front, continuous: true) }
+        }
+    }
+
     // MARK: swiping through films
 
     func stepSim(_ by: Int) {
@@ -666,6 +787,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         let src = raw.transformed(by: CGAffineTransform(scaleX: k, y: k))
         let (m, dev) = frameState()
         frameCount += 1
+        if m != .video && frameCount % 6 == 3 && settings.afArea == .eye { trackEye(pb) }
         if frameCount % 10 == 0 {
             let s: CGFloat = 640 / max(src.extent.width, 1)
             let small = src.transformed(by: CGAffineTransform(scaleX: s, y: s))

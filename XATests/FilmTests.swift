@@ -203,6 +203,16 @@ final class FilmTests: XCTestCase {
         XCTAssertTrue(first === second, "within a sixth of a second the frame is held")
     }
 
+    func testFocusPointsLandInTheSensorFrame() {
+        // Portrait, back camera: the top-left of the viewfinder is the sensor's bottom-left.
+        let p = FocusGeometry.devicePoint(fromView: CGPoint(x: 0, y: 0), front: false)
+        XCTAssertEqual(p.x, 0, accuracy: 0.001); XCTAssertEqual(p.y, 1, accuracy: 0.001)
+        let c = FocusGeometry.devicePoint(fromView: CGPoint(x: 0.5, y: 0.5), front: true)
+        XCTAssertEqual(c.x, 0.5, accuracy: 0.001); XCTAssertEqual(c.y, 0.5, accuracy: 0.001)
+        let clamped = FocusGeometry.devicePoint(fromView: CGPoint(x: 2, y: -1), front: false)
+        XCTAssertEqual(clamped.x, 0, accuracy: 0.001); XCTAssertEqual(clamped.y, 0, accuracy: 0.001)
+    }
+
     func testTakeSegmentsBecomeSpans() {
         let segs = [TakeSegment(look: .super8, start: 0), TakeSegment(look: .vhs, start: 4)]
         let spans = TakeSegment.spans(segs, duration: 12)

@@ -15,9 +15,7 @@ struct CameraView: View {
             viewfinder
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 24).onEnded(swipe))
-                // Double-tap flips between the back and front cameras; a single tap folds the film rows.
-                .onTapGesture(count: 2) { camera.flip(); UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-                .onTapGesture { if filmOpen { withAnimation(.snappy) { filmOpen = false } } }
+                .overlay { FocusTapLayer(camera: camera, filmOpen: $filmOpen) }
             switch camera.mode {
             case .digi:
                 if filmOpen { FilmControls(camera: camera, open: $filmOpen, onFilm: onFilm).transition(.opacity) }
@@ -74,6 +72,7 @@ struct CameraView: View {
                 Viewfinder(camera: camera)
                     .aspectRatio(3 / 4, contentMode: .fit)
                     .overlay { if settings.grid && camera.mode == .pro { GridLines() } }
+                    .overlay { FocusBracket(camera: camera) }
                     .overlay { if camera.flash { Color.white.opacity(0.7) } }
             }
         }
@@ -502,7 +501,7 @@ private struct ShutterRow: View {
     var body: some View {
         HStack(spacing: 28) {
             if settings.showRollButton { rollButton } else { Color.clear.frame(width: 50, height: 50) }
-            Button { camera.shoot() } label: {
+            ShutterKey(camera: camera) {
                 if camera.mode == .video {
                     ZStack {
                         Capsule().fill(camera.recording ? Color.red : Color.white)
@@ -514,11 +513,14 @@ private struct ShutterRow: View {
                     }
                     .frame(width: 118, height: 40)
                 } else {
-                    Capsule().fill(Color.white).frame(width: 118, height: 40)
+                    Capsule().fill(Color.white).frame(width: camera.halfPressed ? 112 : 118, height: camera.halfPressed ? 36 : 40)
+                        .overlay(Capsule().strokeBorder(camera.focusLocked ? XA.orange : .clear, lineWidth: 3).padding(-6))
+                        .frame(width: 118, height: 40)
                 }
             }
-            .buttonStyle(.plain)
             .accessibilityLabel(camera.mode == .video ? (camera.recording ? "Stop recording" : "Record") : "Take picture")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { camera.fullPress() }
             if settings.showFlipButton {
                 RoundButton(size: 50, action: { camera.flip() }) { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 20, weight: .medium)) }
                     .accessibilityLabel("Switch camera")
@@ -539,5 +541,80 @@ private struct ShutterRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open the roll")
+    }
+}
+
+/// The shutter as a two-stage button: touch down is the half-press (focus and exposure lock),
+/// lift is the shot. Slide off before lifting to cancel.
+private struct ShutterKey<Label: View>: View {
+    @ObservedObject var camera: CameraModel
+    @ViewBuilder var label: () -> Label
+    @State private var down = false
+    var body: some View {
+        label()
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    if !down { down = true; if camera.mode != .video { camera.halfPress() } }
+                }
+                .onEnded { v in
+                    down = false
+                    let inside = abs(v.translation.width) < 90 && abs(v.translation.height) < 70
+                    if inside { camera.fullPress() } else { camera.releaseHalfPress() }
+                })
+    }
+}
+
+/// Tap to aim focus; the first tap folds the film rows if they are open. Double-tap flips.
+private struct FocusTapLayer: View {
+    @ObservedObject var camera: CameraModel
+    @Binding var filmOpen: Bool
+    var body: some View {
+        GeometryReader { g in
+            Color.clear.contentShape(Rectangle())
+                .onTapGesture(count: 2) { camera.flip(); UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+                .simultaneousGesture(SpatialTapGesture().onEnded { v in
+                    if filmOpen { withAnimation(.snappy) { filmOpen = false }; return }
+                    let p = CGPoint(x: v.location.x / max(g.size.width, 1), y: v.location.y / max(g.size.height, 1))
+                    camera.focus(at: p)
+                })
+                .onLongPressGesture(minimumDuration: 0.6) { camera.resetFocus() }
+        }
+    }
+}
+
+/// Four thin corners where focus is aimed: orange while it hunts, white once locked. Fades when idle.
+private struct FocusBracket: View {
+    @ObservedObject var camera: CameraModel
+    @State private var visible = false
+    var body: some View {
+        GeometryReader { g in
+            if let p = camera.focusPoint, visible || camera.halfPressed {
+                let s: CGFloat = 54
+                Corners().stroke(camera.focusLocked ? Color.white : XA.orange, lineWidth: 1.5)
+                    .frame(width: s, height: s)
+                    .position(x: p.x * g.size.width, y: p.y * g.size.height)
+                    .animation(.snappy, value: p)
+            }
+        }
+        .allowsHitTesting(false)
+        .onChange(of: camera.focusPoint) { _, _ in flash() }
+        .onChange(of: camera.focusLocked) { _, _ in flash() }
+    }
+    private func flash() {
+        visible = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { if !camera.halfPressed { withAnimation(.easeOut(duration: 0.3)) { visible = false } } }
+    }
+}
+
+private struct Corners: Shape {
+    func path(in r: CGRect) -> Path {
+        let l: CGFloat = r.width * 0.28
+        var p = Path()
+        for (c, dx, dy) in [(CGPoint(x: r.minX, y: r.minY), 1.0, 1.0), (CGPoint(x: r.maxX, y: r.minY), -1.0, 1.0),
+                            (CGPoint(x: r.minX, y: r.maxY), 1.0, -1.0), (CGPoint(x: r.maxX, y: r.maxY), -1.0, -1.0)] {
+            p.move(to: CGPoint(x: c.x + l * CGFloat(dx), y: c.y)); p.addLine(to: c); p.addLine(to: CGPoint(x: c.x, y: c.y + l * CGFloat(dy)))
+        }
+        return p
     }
 }

@@ -62,8 +62,14 @@ struct Viewfinder: UIViewRepresentable {
     func makeUIView(context: Context) -> PreviewView {
         let v = PreviewView()
         camera.preview = v
+        // Held button: the first stage locks focus, letting go fires, like a DSLR's shutter.
         let shutter = AVCaptureEventInteraction { event in
-            if event.phase == .began { camera.shoot() }
+            switch event.phase {
+            case .began: camera.halfPress()
+            case .ended: camera.fullPress()
+            case .cancelled: camera.releaseHalfPress()
+            default: break
+            }
         }
         v.addInteraction(shutter)
         return v

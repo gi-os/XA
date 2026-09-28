@@ -22,6 +22,8 @@ final class AppSettings: ObservableObject {
     @Published var proSlide: ProSlide { didSet { d.set(proSlide.rawValue, forKey: "proSlide") } }
     @Published var openIn: OpenIn { didSet { d.set(openIn.rawValue, forKey: "openIn") } }
     @Published var grid: Bool { didSet { d.set(grid, forKey: "grid") } }
+    @Published var afMode: AFMode { didSet { d.set(afMode.rawValue, forKey: "afMode") } }
+    @Published var afArea: AFArea { didSet { d.set(afArea.rawValue, forKey: "afArea") } }
     @Published var showRollButton: Bool { didSet { d.set(showRollButton, forKey: "showRollButton") } }
     @Published var showFlipButton: Bool { didSet { d.set(showFlipButton, forKey: "showFlipButton") } }
 
@@ -36,6 +38,8 @@ final class AppSettings: ObservableObject {
         proSlide = ProSlide(rawValue: d.string(forKey: "proSlide") ?? "") ?? .exposure
         openIn = OpenIn(rawValue: d.string(forKey: "openIn") ?? "") ?? .last
         grid = d.object(forKey: "grid") as? Bool ?? false
+        afMode = AFMode(rawValue: d.string(forKey: "afMode") ?? "") ?? .single
+        afArea = AFArea(rawValue: d.string(forKey: "afArea") ?? "") ?? .auto
         showRollButton = d.object(forKey: "showRollButton") as? Bool ?? true
         showFlipButton = d.object(forKey: "showFlipButton") as? Bool ?? true
     }
