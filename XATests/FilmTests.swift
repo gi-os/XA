@@ -203,6 +203,14 @@ final class FilmTests: XCTestCase {
         XCTAssertTrue(first === second, "within a sixth of a second the frame is held")
     }
 
+    func testTakeSegmentsBecomeSpans() {
+        let segs = [TakeSegment(look: .super8, start: 0), TakeSegment(look: .vhs, start: 4)]
+        let spans = TakeSegment.spans(segs, duration: 12)
+        XCTAssertEqual(spans.count, 2)
+        XCTAssertEqual(spans[0].1, 4.0 / 12, accuracy: 0.001)
+        XCTAssertEqual(spans[1].1, 8.0 / 12, accuracy: 0.001)
+    }
+
     func testTheRecorderWritesAMovie() {
         guard let r = VideoRecorder(size: CGSize(width: 320, height: 240), audio: false) else { return XCTFail("no writer") }
         let img = CIImage(color: .green).cropped(to: CGRect(x: 0, y: 0, width: 320, height: 240))

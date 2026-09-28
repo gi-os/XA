@@ -558,8 +558,12 @@ private struct TapeBox: View {
         case .super8: super8
         case .vhs: vhs
         case .pocket: pocket
+        case .pocketColor: pocketColor
         case .trails: trails
+        case .motion: motion
         case .stopMotion: clapper
+        case .cctv: cctv
+        case .slitScan: slit
         case .datamosh: mosh
         }
     }
@@ -616,6 +620,50 @@ private struct TapeBox: View {
             T("12", f, 26, Color(hex: "#0F380F")).tr(10, 26)
             T("FPS", f, 10, Color(hex: "#0F380F")).tr(10, 58)
             T("4 GREENS", f, 8, Color(hex: "#0F380F"), 1).bl(84, 8)
+        }
+    }
+
+    private var pocketColor: some View {
+        let f = "Silkscreen-Regular"
+        return BoxCanvas(bg: Color(hex: "#5B3F9E")) {
+            Rectangle().fill(Color(hex: "#3B2470")).frame(width: 160, height: 18).tl(0, 0)
+            T("POCKET COLOR", f, 10, Color(hex: "#FFD23F"), 1).tl(10, 3)
+            LinearGradient(colors: [Color(hex: "#E24DA0"), Color(hex: "#FFD23F"), Color(hex: "#3BB273"), Color(hex: "#1B4FA0")], startPoint: .topLeading, endPoint: .bottomTrailing)
+                .frame(width: 64, height: 50).tl(10, 28)
+            T("56", f, 26, Color(hex: "#FFD23F")).tr(10, 26)
+            T("COLORS", f, 9, .white).tr(10, 58)
+        }
+    }
+
+    private var motion: some View {
+        let f = "RussoOne-Regular"
+        return BoxCanvas(bg: Color(hex: "#101820")) {
+            Circle().stroke(Color(hex: "#6FB6C9"), lineWidth: 2).frame(width: 70, height: 70).tl(70, 18)
+            Circle().stroke(Color(hex: "#6FB6C9").opacity(0.4), lineWidth: 2).frame(width: 70, height: 70).tl(78, 26)
+            T("MOTION", f, 20, .white).tl(10, 10)
+            T("ONLY WHAT MOVES", f, 8, Color(hex: "#6FB6C9")).tl(10, 36)
+        }
+    }
+
+    private var cctv: some View {
+        let mono = "ShareTechMono-Regular", green = Color(hex: "#C8F56A")
+        return BoxCanvas(bg: Color(hex: "#1C1C1E")) {
+            Rectangle().fill(Color(hex: "#0A0A0A")).frame(width: 64, height: 44).border(Color(hex: "#3A3A3C"), width: 2).tl(10, 10)
+            Circle().fill(Color(hex: "#D8412F")).frame(width: 6).tl(14, 14)
+            T("CAM 01", mono, 14, green).tr(10, 12)
+            T("26-09-28 23:14:07", mono, 12, green).bl(10, 10)
+        }
+    }
+
+    private var slit: some View {
+        BoxCanvas(bg: Color(hex: "#F4F1EA")) {
+            VStack(spacing: 0) {
+                ForEach(0..<12, id: \.self) { i in
+                    Rectangle().fill(Color(hex: "#1B4FA0")).opacity(0.25 + Double(i % 4) * 0.18)
+                        .frame(width: 160, height: 9).offset(x: CGFloat((i * 11) % 40 - 20))
+                }
+            }
+            T("SLIT-SCAN", "Unbounded-ExtraBold", 20, Color(hex: "#111111")).padding(.horizontal, 4).background(Color(hex: "#F4F1EA")).tl(10, 36)
         }
     }
 

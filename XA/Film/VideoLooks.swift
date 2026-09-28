@@ -6,18 +6,39 @@ import UIKit
 /// remember the frames before, Super 8, Pocket and Stop Motion hold frames the way the real
 /// things ran slow.
 enum VideoLook: Int, CaseIterable, Codable, Identifiable {
-    case clean, super8, vhs, pocket, trails, stopMotion, datamosh
+    case clean, pocket, pocketColor, super8, vhs, trails, motion, stopMotion, cctv, slitScan, datamosh
 
     var id: Int { rawValue }
     var title: String {
         switch self {
         case .clean: return "CLEAN"
+        case .pocket: return "POCKET"
+        case .pocketColor: return "POCKET COLOR"
         case .super8: return "SUPER 8"
         case .vhs: return "VHS"
-        case .pocket: return "POCKET"
         case .trails: return "TRAILS"
+        case .motion: return "MOTION"
         case .stopMotion: return "STOP MOTION"
+        case .cctv: return "CCTV"
+        case .slitScan: return "SLIT-SCAN"
         case .datamosh: return "DATAMOSH"
+        }
+    }
+
+    /// The tape's colour, for the take timeline.
+    var color: String {
+        switch self {
+        case .clean: return "#4A4A4C"
+        case .pocket: return "#8BAC0F"
+        case .pocketColor: return "#5B3F9E"
+        case .super8: return "#F2B51E"
+        case .vhs: return "#F4F1EA"
+        case .trails: return "#E24DA0"
+        case .motion: return "#6FB6C9"
+        case .stopMotion: return "#FFFFFF"
+        case .cctv: return "#C8F56A"
+        case .slitScan: return "#1B4FA0"
+        case .datamosh: return "#00A6D6"
         }
     }
 
@@ -25,8 +46,9 @@ enum VideoLook: Int, CaseIterable, Codable, Identifiable {
     var heldFPS: Double? {
         switch self {
         case .super8: return 18
-        case .pocket: return 12
-        case .stopMotion: return 6
+        case .pocket, .pocketColor: return 12
+        case .stopMotion: return 8
+        case .cctv: return 15
         default: return nil
         }
     }
@@ -41,8 +63,10 @@ final class VideoFX {
     private var keyframeAt: Double = 0
     private var leakUntil: Double = 0
     private var noiseBandY: CGFloat = -1
+    /// Recent camera frames, newest last, for Motion and Slit-scan.
+    private var history: [CIImage] = []
 
-    func reset() { held = nil; heldAt = -1; previousOut = nil; previousIn = nil; keyframeAt = 0 }
+    func reset() { held = nil; heldAt = -1; previousOut = nil; previousIn = nil; keyframeAt = 0; history = [] }
 
     /// `time` is seconds, monotonic. Returns the frame to show and record.
     func apply(_ look: VideoLook, to src: CIImage, time: Double, date: Date) -> CIImage {
@@ -50,14 +74,24 @@ final class VideoFX {
         if let fps = look.heldFPS {
             if let held, time - heldAt < 1 / fps, held.extent == e { return held }
         }
+        if look == .motion || look == .slitScan {
+            if let last = history.last, last.extent != e { history = [] }
+            // Kept small: a frame costs nothing until it is rendered.
+            history.append(src)
+            if history.count > 30 { history.removeFirst(history.count - 30) }
+        }
         var out: CIImage
         switch look {
         case .clean: out = src
+        case .pocket: out = Looks.apply(.gameboy, to: src)
+        case .pocketColor: out = Looks.apply(.gbcolor, to: src)
         case .super8: out = super8(src, time: time)
         case .vhs: out = vhs(src, time: time, date: date)
-        case .pocket: out = Looks.apply(.gameboy, to: src)
         case .trails: out = trails(src)
+        case .motion: out = motion(src)
         case .stopMotion: out = jitter(src, amount: 0.004)
+        case .cctv: out = cctv(src, date: date)
+        case .slitScan: out = slitScan(src)
         case .datamosh: out = datamosh(src, time: time)
         }
         out = out.cropped(to: e)
@@ -165,6 +199,52 @@ final class VideoFX {
         return out
     }
 
+    /// Only what moves: the frame over an inverted copy of itself from a moment ago, so
+    /// anything still cancels to grey.
+    private func motion(_ src: CIImage) -> CIImage {
+        let e = src.extent
+        guard history.count > 6 else { return src }
+        let old = history[history.count - 7]
+        let inv = CIFilter.colorInvert(); inv.inputImage = old
+        let mix = CIFilter.dissolveTransition(); mix.inputImage = src; mix.targetImage = inv.outputImage; mix.time = 0.5
+        let cc = CIFilter.colorControls(); cc.inputImage = mix.outputImage; cc.contrast = 2.4; cc.saturation = 1.4
+        return (cc.outputImage ?? src).cropped(to: e)
+    }
+
+    /// Each band of rows from a different moment: the top is now, the bottom a second ago.
+    private func slitScan(_ src: CIImage) -> CIImage {
+        let e = src.extent
+        let n = history.count
+        guard n > 1 else { return src }
+        let bands = 30
+        let bandH: CGFloat = e.height / CGFloat(bands)
+        var out = src
+        for i in 0..<bands {
+            let age = min(n - 1, i * n / bands)
+            let frame = history[n - 1 - age]
+            // CI is bottom-up: band 0 (now) sits at the top.
+            let y: CGFloat = e.maxY - CGFloat(i + 1) * bandH
+            out = frame.cropped(to: CGRect(x: e.minX, y: y, width: e.width, height: bandH + 1)).composited(over: out)
+        }
+        return out.cropped(to: e)
+    }
+
+    /// A security camera: green-grey, soft, noisy, 15 frames a second, the clock burned in.
+    private func cctv(_ src: CIImage, date: Date) -> CIImage {
+        let e = src.extent
+        let cc = CIFilter.colorControls(); cc.inputImage = src; cc.saturation = 0.15; cc.contrast = 1.25; cc.brightness = -0.03
+        let tint = CIFilter.colorMatrix(); tint.inputImage = cc.outputImage
+        tint.rVector = CIVector(x: 0.85, y: 0, z: 0, w: 0); tint.gVector = CIVector(x: 0, y: 1.0, z: 0, w: 0); tint.bVector = CIVector(x: 0, y: 0, z: 0.82, w: 0)
+        let k: CGFloat = 480 / max(e.width, 1)
+        var img = (tint.outputImage ?? src).cropped(to: e)
+            .transformed(by: CGAffineTransform(scaleX: k, y: k)).transformed(by: CGAffineTransform(scaleX: 1 / k, y: 1 / k)).cropped(to: e)
+        img = FilmGrain.apply(img, amount: 0.5, size: 0.2)
+        if let osd = CCTVOverlay.image(size: e.size, date: date) {
+            img = osd.transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY)).composited(over: img)
+        }
+        return img.cropped(to: e)
+    }
+
     /// Where the picture moves, the old pixels stay and smear, the way a broken P-frame looks.
     /// A clean keyframe every few seconds.
     private func datamosh(_ src: CIImage, time: Double) -> CIImage {
@@ -212,5 +292,59 @@ enum VHSOverlay {
         let c = CIImage(cgImage: cg)
         lock.lock(); key = k; cached = c; lock.unlock()
         return c
+    }
+}
+
+/// CAM 01, a record dot, and the date and time to the second, in a small green mono face.
+enum CCTVOverlay {
+    private static let lock = NSLock()
+    private static var key = ""
+    private static var cached: CIImage?
+
+    static func image(size: CGSize, date: Date) -> CIImage? {
+        let f = DateFormatter(); f.dateFormat = "yy-MM-dd  HH:mm:ss"
+        let text = f.string(from: date)
+        let k = "\(Int(size.width))x\(Int(size.height))|\(text)"
+        lock.lock(); if k == key, let c = cached { lock.unlock(); return c }; lock.unlock()
+        let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 1; fmt.opaque = false
+        let font = XA.uiFont("ShareTechMono-Regular", size.height / 26)
+        let green = UIColor(red: 0.78, green: 0.96, blue: 0.42, alpha: 0.95)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: green]
+        let pad = size.height / 26
+        let img = UIGraphicsImageRenderer(size: size, format: fmt).image { r in
+            ("CAM 01" as NSString).draw(at: CGPoint(x: size.width - pad - ("CAM 01" as NSString).size(withAttributes: attrs).width, y: pad), withAttributes: attrs)
+            let dot = font.lineHeight * 0.4
+            r.cgContext.setFillColor(UIColor(red: 0.85, green: 0.25, blue: 0.18, alpha: 1).cgColor)
+            r.cgContext.fillEllipse(in: CGRect(x: pad, y: pad + font.lineHeight * 0.3, width: dot, height: dot))
+            ("REC" as NSString).draw(at: CGPoint(x: pad + dot * 1.8, y: pad), withAttributes: attrs)
+            (text as NSString).draw(at: CGPoint(x: pad, y: size.height - pad - font.lineHeight), withAttributes: attrs)
+        }
+        guard let cg = img.cgImage else { return nil }
+        let c = CIImage(cgImage: cg)
+        lock.lock(); key = k; cached = c; lock.unlock()
+        return c
+    }
+}
+
+/// One stretch of a take in one tape.
+struct TakeSegment: Codable, Equatable {
+    var look: VideoLook
+    var start: Double
+
+    static func store(_ segs: [TakeSegment], for assetID: String) {
+        if let d = try? JSONEncoder().encode(segs) { UserDefaults.standard.set(d, forKey: "segments:" + assetID) }
+    }
+    static func load(for assetID: String) -> [TakeSegment] {
+        guard let d = UserDefaults.standard.data(forKey: "segments:" + assetID) else { return [] }
+        return (try? JSONDecoder().decode([TakeSegment].self, from: d)) ?? []
+    }
+
+    /// (look, fraction of the whole) for drawing a bar.
+    static func spans(_ segs: [TakeSegment], duration: Double) -> [(VideoLook, Double)] {
+        guard duration > 0, !segs.isEmpty else { return [] }
+        return segs.enumerated().map { i, s in
+            let end = i + 1 < segs.count ? segs[i + 1].start : duration
+            return (s.look, max(0, min(duration, end) - s.start) / duration)
+        }
     }
 }

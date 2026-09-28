@@ -148,7 +148,10 @@ private struct PhotoPage: View {
     var body: some View {
         ZStack {
             if asset.mediaType == .video {
-                if let player { VideoPlayer(player: player).onDisappear { player.pause() } } else { ProgressView().tint(.white) }
+                if let player {
+                    VideoPlayer(player: player).onDisappear { player.pause() }
+                    VStack { Spacer(); TakeScrubber(player: player, segments: TakeSegment.load(for: asset.localIdentifier), duration: asset.duration).padding(.horizontal, 16).padding(.bottom, 150) }
+                } else { ProgressView().tint(.white) }
             } else if let img { ZoomableImage(image: img, zoomed: $zoomed) } else { ProgressView().tint(.white) }
         }
         .onAppear {
@@ -242,5 +245,46 @@ private struct PhotoInfo: View {
         .presentationBackground(Color(red: 0.07, green: 0.07, blue: 0.075))
         .preferredColorScheme(.dark)
         .onAppear { library.metadata(asset) { rows = $0 } }
+    }
+}
+
+/// The take's tapes as a scrub bar: drag to seek, the playhead follows playback.
+private struct TakeScrubber: View {
+    let player: AVPlayer
+    let segments: [TakeSegment]
+    let duration: Double
+    @State private var t: Double = 0
+    @State private var token: Any?
+    var body: some View {
+        let spans = TakeSegment.spans(segments.isEmpty ? [TakeSegment(look: .clean, start: 0)] : segments, duration: max(duration, 0.01))
+        VStack(alignment: .leading, spacing: 4) {
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    HStack(spacing: 2) {
+                        ForEach(spans.indices, id: \.self) { i in
+                            Rectangle().fill(Color(hex: spans[i].0.color).opacity(0.85))
+                                .frame(width: max(2, (g.size.width - CGFloat(spans.count) * 2) * CGFloat(spans[i].1)))
+                        }
+                    }
+                    Rectangle().fill(Color.white).frame(width: 3, height: 34).offset(x: g.size.width * CGFloat(t / max(duration, 0.01)) - 1.5)
+                }
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { v in
+                    let f = min(1, max(0, v.location.x / g.size.width))
+                    t = f * duration
+                    player.seek(to: CMTime(seconds: t, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+                })
+            }
+            .frame(height: 30)
+            HStack {
+                Text(spans.map { $0.0.title }.joined(separator: " → ")).font(XA.display(10)).foregroundStyle(XA.dim)
+                Spacer()
+                Text("\(Library.clock(t)) / \(Library.clock(duration))").font(XA.mono(10)).foregroundStyle(XA.dim)
+            }
+        }
+        .onAppear {
+            token = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 20), queue: .main) { time in t = time.seconds }
+        }
+        .onDisappear { if let token { player.removeTimeObserver(token) } }
     }
 }

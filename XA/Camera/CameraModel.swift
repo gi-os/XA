@@ -27,6 +27,8 @@ final class CameraModel: NSObject, ObservableObject {
     @Published var videoLook: VideoLook = .clean { didSet { UserDefaults.standard.set(videoLook.rawValue, forKey: "videoLook"); lock.lock(); _videoLook = videoLook; lock.unlock() } }
     @Published private(set) var recording = false
     @Published private(set) var recordSeconds: Double = 0
+    /// The take so far: which tape from which second.
+    @Published private(set) var segments: [TakeSegment] = []
     @Published var mode: CaptureMode = .digi { didSet { modeChanged(oldValue) } }
     @Published var stack = Stack(simID: "nocturne") { didSet { stackChanged() } }
     @Published private(set) var authorized: Bool?
@@ -63,6 +65,8 @@ final class CameraModel: NSObject, ObservableObject {
     private var audioInput: AVCaptureDeviceInput?
     private var _videoLook: VideoLook = .clean
     private var _wantRecord = false
+    private var _lockedTurn: CGFloat?
+    private var _segments: [TakeSegment] = []
     private var _recorder: VideoRecorder?
     private let fx = VideoFX()
     private var recordTimer: Timer?
@@ -512,21 +516,24 @@ final class CameraModel: NSObject, ObservableObject {
     private func startRecording() {
         guard !recording else { return }
         fx.reset()
-        lock.lock(); _wantRecord = true; lock.unlock()
+        // The turn locks when the clip starts, so a take never flips halfway.
+        lock.lock(); _wantRecord = true; _lockedTurn = _turn; _segments = []; lock.unlock()
+        segments = []
         recording = true
         recordSeconds = 0
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         recordTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             guard let self else { return }
-            self.lock.lock(); let d = self._recorder?.duration ?? 0; self.lock.unlock()
+            self.lock.lock(); let d = self._recorder?.duration ?? 0; let segs = self._segments; self.lock.unlock()
             self.recordSeconds = d
+            if segs != self.segments { self.segments = segs }
         }
     }
 
     func stopRecording() {
         guard recording else { return }
         recordTimer?.invalidate(); recordTimer = nil
-        lock.lock(); let r = _recorder; _recorder = nil; _wantRecord = false; lock.unlock()
+        lock.lock(); let r = _recorder; _recorder = nil; _wantRecord = false; _lockedTurn = nil; let segs = _segments; lock.unlock()
         recording = false
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         guard let r else { return }
@@ -535,7 +542,9 @@ final class CameraModel: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 self.developing = max(0, self.developing - 1)
                 guard let url else { return }
-                if let lib = self.library { lib.save(video: url) } else if let dir = self.fallbackFolder {
+                if let lib = self.library {
+                    lib.save(video: url) { id in if let id { TakeSegment.store(segs, for: id) } }
+                } else if let dir = self.fallbackFolder {
                     try? FileManager.default.moveItem(at: url, to: dir.appendingPathComponent(url.lastPathComponent))
                 }
             }
@@ -667,7 +676,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         let vlook = _videoLook
         lock.unlock()
         if m == .video {
-            let t = turn
+            lock.lock(); let t = _lockedTurn ?? _turn; lock.unlock()
             let upright = Self.rotated(src, clockwise: t)
             var base = upright
             if let sim = FilmCatalog.sim(dev.stack.simID), !sim.isNeutral { base = SimEngine.apply(sim, to: base, preview: true) }
@@ -676,6 +685,11 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             lock.lock()
             if _wantRecord && _recorder == nil { _recorder = VideoRecorder(size: frame.extent.size, audio: audioInput != nil) }
             let r = _recorder
+            if let r {
+                // A new segment whenever the tape changes mid-take.
+                let at = r.duration
+                if _segments.last?.look != vlook { _segments.append(TakeSegment(look: vlook, start: at)) }
+            }
             lock.unlock()
             r?.append(frame, at: pts)
             let shown = t == 0 ? frame : Self.rotated(frame, clockwise: 360 - t)

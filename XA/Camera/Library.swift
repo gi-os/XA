@@ -142,19 +142,21 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
         images.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: o) { img, _ in done(img) }
     }
 
-    func save(video url: URL, completion: ((Bool) -> Void)? = nil) {
+    func save(video url: URL, completion: ((String?) -> Void)? = nil) {
         let existing = album()
+        var id: String?
         PHPhotoLibrary.shared().performChanges({
             let req = PHAssetCreationRequest.forAsset()
             let o = PHAssetResourceCreationOptions(); o.shouldMoveFile = true
             req.addResource(with: .video, fileURL: url, options: o)
             guard let ph = req.placeholderForCreatedAsset else { return }
+            id = ph.localIdentifier
             if let existing {
                 PHAssetCollectionChangeRequest(for: existing)?.addAssets([ph] as NSArray)
             } else {
                 PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: Self.title).addAssets([ph] as NSArray)
             }
-        }, completionHandler: { ok, _ in DispatchQueue.main.async { completion?(ok) } })
+        }, completionHandler: { ok, _ in DispatchQueue.main.async { completion?(ok ? id : nil) } })
     }
 
     func playerItem(_ asset: PHAsset, _ done: @escaping (AVPlayerItem?) -> Void) {

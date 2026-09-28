@@ -254,6 +254,9 @@ private struct VideoRows: View {
     var onFilm: () -> Void
     var body: some View {
         VStack(spacing: 6) {
+            if camera.recording {
+                TakeBar(segments: camera.segments, duration: camera.recordSeconds)
+            } else {
             HStack(spacing: 6) {
                 Text("SIM").font(XA.display(10)).foregroundStyle(XA.faint)
                 Button(action: onFilm) {
@@ -263,6 +266,7 @@ private struct VideoRows: View {
                 .buttonStyle(.plain)
                 Spacer()
                 Text("SWIPE ↑↓ FOR LOOKS").font(XA.display(10)).foregroundStyle(XA.faint)
+            }
             }
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -286,6 +290,33 @@ private struct VideoRows: View {
             .frame(height: 59)
         }
         .frame(height: 94)
+    }
+}
+
+/// The take as coloured segments, one per tape, growing as it records.
+struct TakeBar: View {
+    let segments: [TakeSegment]
+    let duration: Double
+    var body: some View {
+        let spans = TakeSegment.spans(segments, duration: max(duration, 0.01))
+        VStack(alignment: .leading, spacing: 3) {
+            GeometryReader { g in
+                HStack(spacing: 2) {
+                    ForEach(spans.indices, id: \.self) { i in
+                        Rectangle().fill(Color(hex: spans[i].0.color)).frame(width: max(2, (g.size.width - CGFloat(spans.count) * 2) * CGFloat(spans[i].1)))
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+            .frame(height: 8)
+            HStack {
+                Circle().fill(Color.red).frame(width: 7, height: 7)
+                Text("SWIPE ↑↓ TO CHANGE TAPE MID-TAKE").font(XA.display(10)).foregroundStyle(XA.dim)
+                Spacer()
+                Text(spans.map { $0.0.title }.joined(separator: " → ")).font(XA.display(10)).foregroundStyle(XA.dim).lineLimit(1)
+            }
+        }
+        .frame(height: 26)
     }
 }
 
