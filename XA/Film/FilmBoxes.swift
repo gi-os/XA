@@ -321,18 +321,28 @@ private struct PresetSimBox: View {
         }
     }
 
-    /// Neutral: an 18% grey card, the thing you point a meter at when you want no opinion.
+    /// Neutral: reference stock. A blueprint grid, a registration mark, no grade.
     private var neutral: some View {
-        let f = "ChakraPetch-Bold", fg = Color(hex: "#F4F4F2")
-        let steps: [Double] = [0.96, 0.8, 0.62, 0.46, 0.3, 0.14, 0.04]
-        return BoxCanvas(bg: Color(hex: "#777777")) {
-            T("18%", f, 34, fg).tl(10, 6)
-            T("NEUTRAL", f, 18, fg, 1).tl(10, 46)
-            T("XA · GREY CARD · 100", "ChakraPetch-SemiBold", 8, fg, 1).bl(10, 8)
-            VStack(spacing: 0) {
-                ForEach(steps.indices, id: \.self) { i in Rectangle().fill(Color(white: steps[i])).frame(width: 18, height: 12) }
+        let mono = "ShareTechMono-Regular", fg = Color(hex: "#E8F0FF")
+        return BoxCanvas(bg: Color(hex: "#1C3F7A")) {
+            SwiftUI.Canvas { ctx, size in
+                var p = Path()
+                var x: CGFloat = 0
+                while x <= size.width { p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x, y: size.height)); x += 10 }
+                var y: CGFloat = 0
+                while y <= size.height { p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: size.width, y: y)); y += 10 }
+                ctx.stroke(p, with: .color(Color.white.opacity(0.12)), lineWidth: 1)
             }
-            .border(fg, width: 1).tr(10, 8)
+            .frame(width: 160, height: 106)
+            T("N", "ChakraPetch-Bold", 44, fg).tl(10, 4)
+            VStack(alignment: .leading, spacing: 1) { T("NEUTRAL", mono, 11, fg); T("ISO 100", mono, 11, fg); T("5500K", mono, 11, fg) }.tl(44, 12)
+            ZStack {
+                Circle().stroke(fg, lineWidth: 1)
+                Rectangle().fill(fg).frame(width: 1, height: 40)
+                Rectangle().fill(fg).frame(width: 40, height: 1)
+            }
+            .frame(width: 40, height: 40).tr(12, 12)
+            T("XA · REFERENCE · NO GRADE", mono, 8, fg, 0.5).bl(10, 8)
         }
     }
 

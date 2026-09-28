@@ -58,7 +58,7 @@ struct Sim: Codable, Equatable, Identifiable, Hashable {
     /// The camera's own colour, no film emulation: what DIGI does with nothing loaded.
     static let neutral: Sim = {
         var s = Sim(id: "neutral", name: "Neutral", iso: "100", exposures: 36)
-        s.box = BoxDesign(bg: "#777777", fg: "#F4F4F2", accent: "#F4F4F2", second: "#5E5E5E", font: .chakra, pattern: .plain)
+        s.box = BoxDesign(bg: "#1C3F7A", fg: "#E8F0FF", accent: "#E8F0FF", second: "#2A5296", font: .shareTech, pattern: .plain)
         return s
     }()
     static var neutralPreset: Sim { neutral }
