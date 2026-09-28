@@ -76,6 +76,13 @@ final class CameraModel: NSObject, ObservableObject {
     // Mode switch: DIGI's processing fades in or out over half a second.
     private var _switchStart: CFTimeInterval = 0
     private var _toDigi = true
+    /// The fade starts on the first frame after the switch, not on the tap, so a slow frame
+    /// never eats the start of it.
+    private var _switchPending = false
+    // Per-shot photo sizes: the output is set to the largest once, so switching modes never
+    // reconfigures the session.
+    private var digiDims = CMVideoDimensions(width: 4032, height: 3024)
+    private var proDims = CMVideoDimensions(width: 4032, height: 3024)
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -126,18 +133,19 @@ final class CameraModel: NSObject, ObservableObject {
     private func modeChanged(_ old: CaptureMode) {
         UserDefaults.standard.set(mode.rawValue, forKey: "mode")
         if old != mode {
-            lock.lock(); _switchStart = CACurrentMediaTime(); _toDigi = mode == .digi; lock.unlock()
+            lock.lock(); _switchPending = true; _switchStart = CACurrentMediaTime(); _toDigi = mode == .digi; lock.unlock()
         }
         syncFrameSettings()
         guard old != mode, input != nil else { return }
         let m = mode
-        sessionQueue.async {
-            guard let dev = self.device else { return }
+        publishPhotoSize(m)
+        sessionQueue.async { self.applyProOnQueue(m) }
+        // Camera Control is rebuilt once the fade is over, so it cannot stall the feed during it.
+        sessionQueue.asyncAfter(deadline: .now() + 0.7) {
+            guard self.mode == m, let dev = self.device else { return }
             self.session.beginConfiguration()
-            self.setupPhotoOutput(dev, m)
             self.addControls(dev, m)
             self.session.commitConfiguration()
-            self.applyProOnQueue(m)
         }
         onStackChange?()
     }
@@ -195,21 +203,27 @@ final class CameraModel: NSObject, ObservableObject {
 
     private func setupPhotoOutput(_ dev: AVCaptureDevice, _ m: CaptureMode) {
         let dims = dev.activeFormat.supportedMaxPhotoDimensions
+        func px(_ d: CMVideoDimensions) -> Int { Int(d.width) * Int(d.height) }
         func mp(_ d: CMVideoDimensions) -> Int { CaptureMode.megapixels(CGSize(width: CGFloat(d.width), height: CGFloat(d.height))) }
+        guard let largest = dims.max(by: { px($0) < px($1) }) else { return }
         let options = Array(Set(dims.map(mp))).sorted()
-        var fit = dims.filter { Int($0.width) * Int($0.height) <= m.maxSensorPixels }
-        if m == .pro {
-            let want = settings.proMegapixels
-            if want > 0 {
-                let chosen = dims.filter { mp($0) <= want }
-                if !chosen.isEmpty { fit = chosen }
-            }
-        }
-        if let d = fit.max(by: { Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height) }) ?? dims.first {
-            photoOutput.maxPhotoDimensions = d
-            let s = CGSize(width: CGFloat(d.width), height: CGFloat(d.height))
-            DispatchQueue.main.async { self.photoSize = s; self.proOptions = options }
-        }
+        if px(photoOutput.maxPhotoDimensions) != px(largest) { photoOutput.maxPhotoDimensions = largest }
+        let digi = dims.filter { px($0) <= CaptureMode.digi.maxSensorPixels }.max(by: { px($0) < px($1) }) ?? largest
+        var pro = largest
+        let want = settings.proMegapixels
+        if want > 0, let chosen = dims.filter({ mp($0) <= want }).max(by: { px($0) < px($1) }) { pro = chosen }
+        lock.lock(); digiDims = digi; proDims = pro; lock.unlock()
+        DispatchQueue.main.async { self.proOptions = options; self.publishPhotoSize(m) }
+    }
+
+    private func shotDims(_ m: CaptureMode) -> CMVideoDimensions {
+        lock.lock(); defer { lock.unlock() }
+        return m == .digi ? digiDims : proDims
+    }
+
+    private func publishPhotoSize(_ m: CaptureMode) {
+        let d = shotDims(m)
+        photoSize = CGSize(width: CGFloat(d.width), height: CGFloat(d.height))
     }
 
     /// Re-read the resolution settings.
@@ -218,9 +232,8 @@ final class CameraModel: NSObject, ObservableObject {
         let m = mode
         sessionQueue.async {
             guard let dev = self.device else { return }
-            self.session.beginConfiguration()
+            // Only the per-shot size changes; the session is left alone.
             self.setupPhotoOutput(dev, m)
-            self.session.commitConfiguration()
         }
     }
 
@@ -460,7 +473,7 @@ final class CameraModel: NSObject, ObservableObject {
         }
         let want = m.prioritization
         settingsP.photoQualityPrioritization = want.rawValue <= photoOutput.maxPhotoQualityPrioritization.rawValue ? want : photoOutput.maxPhotoQualityPrioritization
-        settingsP.maxPhotoDimensions = photoOutput.maxPhotoDimensions
+        settingsP.maxPhotoDimensions = shotDims(m)
         if let c = photoOutput.connection(with: .video), let rc = rotation {
             let a = rc.videoRotationAngleForHorizonLevelCapture
             if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
@@ -561,6 +574,9 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate {
             let small = src.transformed(by: CGAffineTransform(scaleX: s, y: s))
             lock.lock(); _latest = small; lock.unlock()
         }
+        lock.lock()
+        if _switchPending { _switchPending = false; _switchStart = CACurrentMediaTime() }
+        lock.unlock()
         let img: CIImage
         let amount = digiAmount()
         if amount <= 0 {
@@ -586,7 +602,8 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate {
             img = t == 0 ? developed : Self.rotated(developed, clockwise: 360 - t)
         }
         let pixel = m == .digi && dev.stack.look.pixelWidth != nil
-        DispatchQueue.main.async { [weak self] in self?.preview?.show(img, pixelated: pixel) }
+        // Drawn right here on the frame queue: the main thread can be busy without the viewfinder stuttering.
+        preview?.show(img, pixelated: pixel)
     }
 }
 

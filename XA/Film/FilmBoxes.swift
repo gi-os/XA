@@ -107,6 +107,7 @@ struct FilmBox: View {
     var body: some View {
         let s = width / 160
         content
+            .drawingGroup()
             .scaleEffect(s, anchor: .topLeading)
             .frame(width: 160 * s, height: 106 * s, alignment: .topLeading)
             .clipped()

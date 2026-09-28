@@ -3,21 +3,24 @@ import CoreImage
 import SwiftUI
 import AVKit
 
-/// The viewfinder: developed Core Image frames drawn straight into a Metal view.
+/// The viewfinder: developed Core Image frames drawn straight into a Metal layer. Frames are
+/// rendered on the camera's frame queue, not the main thread, so the viewfinder keeps moving
+/// while SwiftUI is busy (a mode switch, the film rows opening).
 final class PreviewView: MTKView {
     private let ci: CIContext
     private let queue: MTLCommandQueue?
-    private var image: CIImage?
-    private var pixelated = false
+    private let sizeLock = NSLock()
+    private var _size: CGSize = .zero
 
     init() {
         let dev = MTLCreateSystemDefaultDevice()
-        ci = dev.map { CIContext(mtlDevice: $0, options: [.cacheIntermediates: false]) } ?? CIContext()
+        ci = dev.map { CIContext(mtlDevice: $0, options: [.cacheIntermediates: false, .priorityRequestLow: false]) } ?? CIContext()
         queue = dev?.makeCommandQueue()
         super.init(frame: .zero, device: dev)
         framebufferOnly = false
         isPaused = true
-        enableSetNeedsDisplay = true
+        enableSetNeedsDisplay = false
+        autoResizeDrawable = true
         colorPixelFormat = .bgra8Unorm
         backgroundColor = .black
         contentMode = .scaleAspectFill
@@ -25,15 +28,17 @@ final class PreviewView: MTKView {
 
     required init(coder: NSCoder) { fatalError("not used") }
 
-    func show(_ img: CIImage, pixelated: Bool) {
-        image = img
-        self.pixelated = pixelated
-        setNeedsDisplay()
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let ds = drawableSize
+        sizeLock.lock(); _size = ds; sizeLock.unlock()
     }
 
-    override func draw(_ rect: CGRect) {
-        guard let img = image, let drawable = currentDrawable, let cb = queue?.makeCommandBuffer() else { return }
-        let ds = drawableSize
+    /// Call from any queue.
+    func show(_ img: CIImage, pixelated: Bool) {
+        sizeLock.lock(); let ds = _size; sizeLock.unlock()
+        guard ds.width > 0, ds.height > 0, let layer = self.layer as? CAMetalLayer,
+              let drawable = layer.nextDrawable(), let cb = queue?.makeCommandBuffer() else { return }
         let e = img.extent
         guard e.width > 0, e.height > 0 else { return }
         // Fit, not fill: an instant print is square and must not be cropped.
@@ -42,8 +47,9 @@ final class PreviewView: MTKView {
         src = src.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY))
             .transformed(by: CGAffineTransform(scaleX: s, y: s))
             .transformed(by: CGAffineTransform(translationX: (ds.width - e.width * s) / 2, y: (ds.height - e.height * s) / 2))
-        let bg = CIImage(color: .black).cropped(to: CGRect(origin: .zero, size: ds))
-        ci.render(src.composited(over: bg), to: drawable.texture, commandBuffer: cb, bounds: CGRect(origin: .zero, size: ds), colorSpace: CGColorSpaceCreateDeviceRGB())
+        let bounds = CGRect(origin: .zero, size: ds)
+        let bg = CIImage(color: .black).cropped(to: bounds)
+        ci.render(src.composited(over: bg), to: drawable.texture, commandBuffer: cb, bounds: bounds, colorSpace: CGColorSpaceCreateDeviceRGB())
         cb.present(drawable)
         cb.commit()
     }
