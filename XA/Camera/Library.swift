@@ -49,7 +49,7 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     /// Days, newest first, for the roll.
     var days: [(title: String, assets: [PHAsset])] {
         let cal = Calendar.current
-        var out: [(String, [PHAsset])] = []
+        var out: [(title: String, assets: [PHAsset])] = []
         var current: Date?
         var bucket: [PHAsset] = []
         let fmt = DateFormatter()
@@ -61,11 +61,11 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
         }
         for a in assets {
             let d = cal.startOfDay(for: a.creationDate ?? Date())
-            if let c = current, c != d { out.append((title(c), bucket)); bucket = [] }
+            if let c = current, c != d { out.append((title: title(c), assets: bucket)); bucket = [] }
             current = d
             bucket.append(a)
         }
-        if let c = current, !bucket.isEmpty { out.append((title(c), bucket)) }
+        if let c = current, !bucket.isEmpty { out.append((title: title(c), assets: bucket)) }
         return out
     }
 

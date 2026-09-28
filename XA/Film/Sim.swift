@@ -285,7 +285,7 @@ enum SimEngine {
         f.inputImage = img
         f.cubeDimension = 32
         f.cubeData = cube(for: s)
-        f.colorSpace = CGColorSpace(name: CGColorSpace.sRGB)
+        if let cs = CGColorSpace(name: CGColorSpace.sRGB) { f.colorSpace = cs }
         var out = (f.outputImage ?? img).cropped(to: e)
         if s.halation > 0 { out = halation(out, s) }
         if s.grain > 0 { out = grain(out, amount: s.grain, size: s.grainSize) }

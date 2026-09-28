@@ -189,8 +189,8 @@ enum DateBack {
         }
 
         func width(of ch: Character) -> CGFloat {
-            if style == .dots && glyphs[ch] != nil { return advance }
-            if style == .quartz && (segments[ch] != nil || ch == "'" || ch == " " || ch == "." || ch == ":") { return advance }
+            if style == .dots && DateBack.glyphs[ch] != nil { return advance }
+            if style == .quartz && (DateBack.segments[ch] != nil || ch == "'" || ch == " " || ch == "." || ch == ":") { return advance }
             if style == .dots && ch == " " { return advance }
             let s = String(ch) as NSString
             return s.size(withAttributes: [.font: font()]).width
@@ -203,10 +203,10 @@ enum DateBack {
         }
 
         func draw(_ ch: Character, in ctx: CGContext) {
-            if style == .dots, let rows = glyphs[ch] { drawDots(rows, ctx); return }
+            if style == .dots, let rows = DateBack.glyphs[ch] { drawDots(rows, ctx); return }
             if style == .quartz, ch == " " { return }
             if style == .dots, ch == " " { return }
-            if style == .quartz, segments[ch] != nil || ch == "'" || ch == "." || ch == ":" { drawQuartz(ch, ctx); return }
+            if style == .quartz, DateBack.segments[ch] != nil || ch == "'" || ch == "." || ch == ":" { drawQuartz(ch, ctx); return }
             drawType(ch, ctx)
         }
 
@@ -240,7 +240,7 @@ enum DateBack {
             } else if ch == ":" {
                 p.addRect(CGRect(x: w * 0.4, y: -h * 0.3 - t / 2, width: t, height: t))
                 p.addRect(CGRect(x: w * 0.4, y: -h * 0.7 - t / 2, width: t, height: t))
-            } else if let on = segments[ch] {
+            } else if let on = DateBack.segments[ch] {
                 let half: CGFloat = h / 2
                 let nick: CGFloat = t * 0.5
                 let across: CGFloat = w - t
