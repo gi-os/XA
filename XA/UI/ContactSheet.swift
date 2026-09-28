@@ -9,12 +9,14 @@ struct ContactSheet: View {
     /// Live drag distance while pulling the roll down, so the layer follows the finger.
     var onDrag: ((CGFloat) -> Void)?
     @State private var open: Opened?
-    @State private var atTop = true
+    /// How far the grid is pulled down past its top, in points.
+    @State private var overscroll: CGFloat = 0
 
     private let cols = Array(repeating: GridItem(.flexible(), spacing: 3), count: 3)
 
     var body: some View {
         VStack(spacing: 0) {
+            Capsule().fill(Color.white.opacity(0.3)).frame(width: 40, height: 5).padding(.top, 8)
             HStack(alignment: .firstTextBaseline) {
                 Text("ROLL").font(XA.display(40))
                 Text("\(library.assets.count)").font(XA.mono(13)).foregroundStyle(XA.dim)
@@ -24,7 +26,14 @@ struct ContactSheet: View {
                         .accessibilityLabel("Back to the camera")
                 }
             }
-            .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 6)
+            .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 6)
+            .contentShape(Rectangle())
+            // The header is a handle: drag it down and the roll follows the finger.
+            .gesture(DragGesture(minimumDistance: 6).onChanged { v in
+                onDrag?(max(0, v.translation.height))
+            }.onEnded { v in
+                if v.translation.height > 110 || v.predictedEndTranslation.height > 260 { onClose?() } else { onDrag?(0) }
+            })
             if !library.authorized {
                 Spacer()
                 Button("Show my XA pictures") { library.requestAccess() }
@@ -51,18 +60,16 @@ struct ContactSheet: View {
                     }
                     .padding(.bottom, 40)
                 }
-                .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y + $0.contentInsets.top <= 2 }) { _, top in atTop = top }
+                // Pulled past the top and let go: close, the way a sheet does.
+                .onScrollGeometryChange(for: CGFloat.self, of: { -($0.contentOffset.y + $0.contentInsets.top) }) { _, v in overscroll = max(0, v) }
+                .onScrollPhaseChange { old, new in
+                    if old == .interacting && new != .interacting && overscroll > 70 { onClose?() }
+                }
             }
         }
         .background(Color.black.ignoresSafeArea())
         .foregroundStyle(.white)
         .preferredColorScheme(.dark)
-        .simultaneousGesture(DragGesture(minimumDistance: 20).onChanged { v in
-            guard atTop, v.translation.height > 0, abs(v.translation.height) > abs(v.translation.width) else { return }
-            onDrag?(v.translation.height)
-        }.onEnded { v in
-            if atTop && v.translation.height > 120 && abs(v.translation.height) > abs(v.translation.width) { onClose?() } else { onDrag?(0) }
-        })
         .fullScreenCover(item: $open) { o in
             PhotoViewer(library: library, current: o.asset.localIdentifier)
         }

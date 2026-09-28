@@ -505,16 +505,16 @@ final class CameraModel: NSObject, ObservableObject {
             } else {
                 let (developed, alpha) = Darkroom.develop(src, shot.develop, date: shot.date, preview: false)
                 let recipe = Recipe.describe(shot.develop.stack, megapixels: shot.develop.megapixels)
-                let img = developed.settingProperties(Recipe.properties(from: src.properties, recipe: recipe))
-                thumbSource = img
-                guard let cs = CGColorSpace(name: CGColorSpace.sRGB) else { return }
-                if alpha {
-                    out = Looks.context.pngRepresentation(of: img, format: .RGBA8, colorSpace: cs)
-                    type = .png
-                } else {
-                    let q = CGFloat(shot.crunch)
-                    out = Looks.context.jpegRepresentation(of: img, colorSpace: cs, options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: q])
-                }
+                thumbSource = developed
+                // The thumbnail first: it is the reference the full render is checked against.
+                let e0 = developed.extent
+                let k0: CGFloat = 200 / max(e0.width, 1)
+                let small = developed.transformed(by: CGAffineTransform(scaleX: k0, y: k0))
+                let expect = Encoder.gpu.createCGImage(small, from: small.extent).map(Encoder.brightness)
+                guard let cg = Encoder.render(developed, expectBrightness: expect) else { return }
+                let props = Recipe.properties(from: src.properties, recipe: recipe)
+                type = alpha ? .png : .jpeg
+                out = Encoder.encode(cg, type: type, quality: CGFloat(shot.crunch), properties: props)
             }
             guard let out else { return }
             let e = thumbSource.extent

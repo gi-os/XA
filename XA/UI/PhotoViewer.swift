@@ -147,30 +147,47 @@ private struct PhotoPage: View {
     }
 }
 
-/// Thumbnails along the bottom. The current one is lit and kept centred; tap to jump.
+/// Thumbnails along the bottom, like Photos: drag the strip and the photo follows whichever
+/// thumbnail sits in the middle; swipe the photo and the strip follows. Tap to jump.
 private struct ThumbRow: View {
     @ObservedObject var library: Library
     @Binding var current: String
+    @State private var centred: String?
+    @State private var dragging = false
+    private let cell: CGFloat = 34
+
     var body: some View {
-        ScrollViewReader { proxy in
+        GeometryReader { g in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 3) {
+                LazyHStack(spacing: 2) {
                     ForEach(library.assets, id: \.localIdentifier) { a in
                         let on = a.localIdentifier == current
                         SmallThumb(asset: a, library: library)
-                            .frame(width: on ? 44 : 32, height: 48)
+                            .frame(width: cell, height: 48)
                             .clipped()
                             .overlay(Rectangle().strokeBorder(on ? XA.orange : .clear, lineWidth: 2))
+                            .scaleEffect(y: on ? 1.08 : 1)
                             .id(a.localIdentifier)
-                            .onTapGesture { withAnimation(.snappy) { current = a.localIdentifier } }
+                            .onTapGesture { withAnimation(.snappy) { centred = a.localIdentifier; current = a.localIdentifier } }
                     }
                 }
-                .padding(.horizontal, 180)
+                .scrollTargetLayout()
             }
-            .frame(height: 52)
-            .onAppear { proxy.scrollTo(current, anchor: .center) }
-            .onChange(of: current) { _, c in withAnimation(.snappy) { proxy.scrollTo(c, anchor: .center) } }
+            .contentMargins(.horizontal, max(0, g.size.width / 2 - cell / 2), for: .scrollContent)
+            .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: $centred, anchor: .center)
+            .onScrollPhaseChange { _, phase in dragging = phase == .interacting || phase == .decelerating }
+            .onChange(of: centred) { _, c in
+                // Scrubbing: the photo follows the strip, without the page-turn animation.
+                guard dragging, let c, c != current else { return }
+                var t = Transaction(); t.disablesAnimations = true
+                withTransaction(t) { current = c }
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
+            .onChange(of: current) { _, c in if centred != c && !dragging { withAnimation(.snappy) { centred = c } } }
+            .onAppear { centred = current }
         }
+        .frame(height: 56)
         .background(Color.black.opacity(0.6))
     }
 }
