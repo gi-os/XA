@@ -310,6 +310,7 @@ private struct PresetSimBox: View {
     let sim: Sim
     var body: some View {
         switch sim.id {
+        case "neutral": neutral
         case "nocturne": nocturne
         case "visage": visage
         case "prima": prima
@@ -317,6 +318,21 @@ private struct PresetSimBox: View {
         case "sunday": sunday
         case "sundayRound": round
         default: onyx
+        }
+    }
+
+    /// Neutral: an 18% grey card, the thing you point a meter at when you want no opinion.
+    private var neutral: some View {
+        let f = "ChakraPetch-Bold", fg = Color(hex: "#F4F4F2")
+        let steps: [Double] = [0.96, 0.8, 0.62, 0.46, 0.3, 0.14, 0.04]
+        return BoxCanvas(bg: Color(hex: "#777777")) {
+            T("18%", f, 34, fg).tl(10, 6)
+            T("NEUTRAL", f, 18, fg, 1).tl(10, 46)
+            T("XA · GREY CARD · 100", "ChakraPetch-SemiBold", 8, fg, 1).bl(10, 8)
+            VStack(spacing: 0) {
+                ForEach(steps.indices, id: \.self) { i in Rectangle().fill(Color(white: steps[i])).frame(width: 18, height: 12) }
+            }
+            .border(fg, width: 1).tr(10, 8)
         }
     }
 

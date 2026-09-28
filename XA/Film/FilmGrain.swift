@@ -8,8 +8,10 @@ enum FilmGrain {
     static func apply(_ img: CIImage, amount: Double, size: Double) -> CIImage {
         guard amount > 0, let rnd = CIFilter.randomGenerator().outputImage else { return img }
         let e = img.extent
-        let unit: CGFloat = max(1, min(e.width, e.height) / 1100)
-        let cell: CGFloat = unit * (0.7 + CGFloat(size) * 1.8)
+        // A grain is a fraction of the frame, never a single pixel: at 2MP a fine grain is about
+        // two pixels across and a coarse one five. Per-pixel noise reads as a bad sensor.
+        let unit: CGFloat = max(1, min(e.width, e.height) / 640)
+        let cell: CGFloat = unit * (1.1 + CGFloat(size) * 2.2)
         // One channel of noise, grey.
         let mono = CIFilter.colorMatrix()
         mono.inputImage = rnd
@@ -23,10 +25,10 @@ enum FilmGrain {
         // Clumps: a little blur, then the contrast the blur took away put back.
         let blur = CIFilter.gaussianBlur()
         blur.inputImage = scaled
-        blur.radius = Float(cell * 0.55)
+        blur.radius = Float(cell * 0.75)
         guard let soft = blur.outputImage?.cropped(to: e) else { return img }
-        let amp: CGFloat = CGFloat(amount) * 0.13
-        let boost: CGFloat = 3.2
+        let amp: CGFloat = CGFloat(amount) * 0.09
+        let boost: CGFloat = 2.6
         let signed = CIFilter.colorMatrix()
         signed.inputImage = soft
         signed.rVector = CIVector(x: 2 * amp * boost, y: 0, z: 0, w: 0)

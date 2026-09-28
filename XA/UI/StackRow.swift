@@ -10,7 +10,7 @@ struct StackRow: View {
         let sim = FilmCatalog.sim(stack.simID)
         let shapeTaken = sim?.frame != nil && sim?.frame != SimFrame.none
         HStack(spacing: 6) {
-            slot(sim?.title, empty: "+ SIM", 0)
+            slot(sim?.title ?? Sim.neutral.title, empty: "+ SIM", 0)
             plus
             slot(stack.look == .none ? nil : stack.look.title, empty: "+ LOOK", 1)
             plus

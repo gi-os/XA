@@ -15,6 +15,7 @@ struct CameraView: View {
             viewfinder
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 24).onEnded(swipe))
+                .onTapGesture { if filmOpen { withAnimation(.snappy) { filmOpen = false } } }
             if camera.mode == .digi {
                 if filmOpen { FilmControls(camera: camera, open: $filmOpen, onFilm: onFilm).transition(.opacity) }
             } else { ProRows(camera: camera) }
@@ -97,7 +98,15 @@ private struct FilmControls: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            StackRow(stack: camera.stack, onTap: { poke() }, onSlot: { i in withAnimation(.snappy) { row = i }; poke() })
+            HStack(spacing: 8) {
+                StackRow(stack: camera.stack, onTap: { poke() }, onSlot: { i in withAnimation(.snappy) { row = i }; poke() })
+                Button { withAnimation(.snappy) { open = false } } label: {
+                    Image(systemName: "chevron.down").font(.system(size: 13, weight: .bold))
+                        .frame(width: 30, height: 28).background(XA.fill)
+                }
+                .buttonStyle(.plain).foregroundStyle(XA.dim)
+                .accessibilityLabel("Fold the film rows")
+            }
             HStack(spacing: 8) {
                 Button(action: onFilm) {
                     Image(systemName: "square.grid.2x2").font(.system(size: 18, weight: .medium))
@@ -184,7 +193,7 @@ struct FilmStrip: View {
                     switch row {
                     case 0:
                         ForEach(FilmCatalog.sims) { s in
-                            tile(.sim(s), on: camera.stack.simID == s.id) { camera.stack.simID = camera.stack.simID == s.id ? nil : s.id }
+                            tile(.sim(s), on: FilmCatalog.sim(camera.stack.simID)?.id == s.id) { camera.stack.simID = s.id }
                         }
                     case 1:
                         ForEach(Look.allCases.filter { $0 != .none }) { l in

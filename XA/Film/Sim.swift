@@ -55,11 +55,18 @@ struct Sim: Codable, Equatable, Identifiable, Hashable {
     var title: String { "\(name) \(iso)".uppercased() }
     var isPreset: Bool { Sim.presets.contains { $0.id == id } }
 
-    static let neutral = Sim(id: "neutral", name: "Neutral")
+    /// The camera's own colour, no film emulation: what DIGI does with nothing loaded.
+    static let neutral: Sim = {
+        var s = Sim(id: "neutral", name: "Neutral", iso: "100", exposures: 36)
+        s.box = BoxDesign(bg: "#777777", fg: "#F4F4F2", accent: "#F4F4F2", second: "#5E5E5E", font: .chakra, pattern: .plain)
+        return s
+    }()
+    static var neutralPreset: Sim { neutral }
+    var isNeutral: Bool { id == Sim.neutral.id }
 
-    /// The seven XA stocks. Names and boxes are XA's own; the looks are what the
+    /// Neutral, then the seven XA stocks. Names and boxes are XA's own; the looks are what the
     /// films they are modelled on are known for.
-    static let presets: [Sim] = [nocturne, visage, prima, amethyst, sunday, sundayRound, onyx]
+    static let presets: [Sim] = [neutral, nocturne, visage, prima, amethyst, sunday, sundayRound, onyx]
 
     /// Tungsten-balanced cinema stock: cool daylight, red halation round every highlight.
     static let nocturne: Sim = {

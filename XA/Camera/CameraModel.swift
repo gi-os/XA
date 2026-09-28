@@ -73,6 +73,9 @@ final class CameraModel: NSObject, ObservableObject {
     private var _frameMode: CaptureMode = .digi
     private var _develop = DevelopSettings()
     private var _latest: CIImage?
+    // Mode switch: DIGI's processing fades in or out over half a second.
+    private var _switchStart: CFTimeInterval = 0
+    private var _toDigi = true
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -84,6 +87,7 @@ final class CameraModel: NSObject, ObservableObject {
         case .digi: mode = .digi
         case .pro: mode = .pro
         }
+        _toDigi = mode == .digi
         syncFrameSettings()
     }
 
@@ -97,6 +101,14 @@ final class CameraModel: NSObject, ObservableObject {
         d.noise = settings.noise
         d.date = settings.date
         lock.lock(); _develop = d; _frameMode = mode; lock.unlock()
+    }
+
+    /// How much of DIGI's processing the viewfinder shows right now, 0…1, eased.
+    private func digiAmount() -> CGFloat {
+        lock.lock(); let start = _switchStart, toDigi = _toDigi; lock.unlock()
+        let t: CGFloat = min(1, max(0, CGFloat((CACurrentMediaTime() - start) / 0.55)))
+        let eased: CGFloat = 1 - (1 - t) * (1 - t) * (1 - t)
+        return toDigi ? eased : 1 - eased
     }
 
     private func frameState() -> (CaptureMode, DevelopSettings) {
@@ -113,6 +125,9 @@ final class CameraModel: NSObject, ObservableObject {
 
     private func modeChanged(_ old: CaptureMode) {
         UserDefaults.standard.set(mode.rawValue, forKey: "mode")
+        if old != mode {
+            lock.lock(); _switchStart = CACurrentMediaTime(); _toDigi = mode == .digi; lock.unlock()
+        }
         syncFrameSettings()
         guard old != mode, input != nil else { return }
         let m = mode
@@ -231,13 +246,13 @@ final class CameraModel: NSObject, ObservableObject {
         }
         if m == .digi {
             let sims = FilmCatalog.sims
-            let simTitles = ["No sim"] + sims.map { $0.title.capitalized }
+            let simTitles = sims.map { $0.title.capitalized }
             let simPicker = AVCaptureIndexPicker("Sim", symbolName: "film", localizedIndexTitles: simTitles)
-            let current = stack.simID.flatMap { id in sims.firstIndex { $0.id == id } }.map { $0 + 1 } ?? 0
-            simPicker.selectedIndex = current
+            let loaded = FilmCatalog.sim(stack.simID)?.id
+            simPicker.selectedIndex = sims.firstIndex { $0.id == loaded } ?? 0
             simPicker.setActionQueue(.main) { [weak self] i in
                 guard let self else { return }
-                self.stack.simID = i == 0 ? nil : sims[min(sims.count - 1, i - 1)].id
+                self.stack.simID = sims[min(sims.count - 1, max(0, i))].id
             }
             let lookPicker = AVCaptureIndexPicker("Look", symbolName: "camera.filters", localizedIndexTitles: Look.allCases.map { $0.title.capitalized })
             lookPicker.selectedIndex = stack.look.rawValue
@@ -416,8 +431,9 @@ final class CameraModel: NSObject, ObservableObject {
     // MARK: swiping through films
 
     func stepSim(_ by: Int) {
-        let ids: [String?] = [nil] + FilmCatalog.sims.map { $0.id }
-        let i = ids.firstIndex(where: { $0 == stack.simID }) ?? 0
+        let ids: [String] = FilmCatalog.sims.map { $0.id }
+        let loaded = FilmCatalog.sim(stack.simID)?.id
+        let i = ids.firstIndex(where: { $0 == loaded }) ?? 0
         let n = ids.count
         stack.simID = ids[((i + by) % n + n) % n]
         UISelectionFeedbackGenerator().selectionChanged()
@@ -474,7 +490,9 @@ final class CameraModel: NSObject, ObservableObject {
                 out = data
                 type = self.settings.proFormat == .heif ? .heic : .jpeg
             } else {
-                let (img, alpha) = Darkroom.develop(src, shot.develop, date: shot.date, preview: false)
+                let (developed, alpha) = Darkroom.develop(src, shot.develop, date: shot.date, preview: false)
+                let recipe = Recipe.describe(shot.develop.stack, megapixels: shot.develop.megapixels)
+                let img = developed.settingProperties(Recipe.properties(from: src.properties, recipe: recipe))
                 thumbSource = img
                 guard let cs = CGColorSpace(name: CGColorSpace.sRGB) else { return }
                 if alpha {
@@ -544,9 +562,10 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate {
             lock.lock(); _latest = small; lock.unlock()
         }
         let img: CIImage
-        if m == .pro {
+        let amount = digiAmount()
+        if amount <= 0 {
             img = src
-            if frameCount % 6 == 0 {
+            if m == .pro && frameCount % 6 == 0 {
                 let s: CGFloat = 160 / max(src.extent.width, 1)
                 updateHistogram(src.transformed(by: CGAffineTransform(scaleX: s, y: s)))
             }
@@ -555,7 +574,15 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate {
             // shape sit where they will on the print, then turn it back for the viewfinder.
             let t = turn
             let upright = Self.rotated(src, clockwise: t)
-            let developed = Darkroom.develop(upright, dev, date: Date(), preview: true).0
+            var developed = Darkroom.develop(upright, dev, date: Date(), preview: true, dateShift: 1 - amount).0
+            if amount < 1 {
+                // Switching modes: the film fades in or out and the date slides with it.
+                let f = CIFilter.dissolveTransition()
+                f.inputImage = upright
+                f.targetImage = developed
+                f.time = Float(amount)
+                developed = (f.outputImage ?? developed).cropped(to: developed.extent.union(upright.extent))
+            }
             img = t == 0 ? developed : Self.rotated(developed, clockwise: 360 - t)
         }
         let pixel = m == .digi && dev.stack.look.pixelWidth != nil

@@ -87,16 +87,22 @@ enum Digicam {
         return out
     }
 
+    /// A CCD's colour noise is blotchy chroma, a few pixels across, not single hot pixels.
     static func colorNoise(_ i: CIImage, amount: CGFloat) -> CIImage {
-        guard let rnd = CIFilter.randomGenerator().outputImage else { return i }
-        let two: CGFloat = amount * 2
+        guard let rnd0 = CIFilter.randomGenerator().outputImage else { return i }
+        let cell: CGFloat = max(2, min(i.extent.width, i.extent.height) / 420)
+        let blur = CIFilter.gaussianBlur()
+        blur.inputImage = rnd0.transformed(by: CGAffineTransform(scaleX: cell, y: cell))
+        blur.radius = Float(cell * 0.8)
+        guard let rnd = blur.outputImage else { return i }
+        let two: CGFloat = amount * 2 * 2.4
         let m = CIFilter.colorMatrix()
-        m.inputImage = rnd.transformed(by: CGAffineTransform(scaleX: 2, y: 2))
+        m.inputImage = rnd
         m.rVector = CIVector(x: two, y: 0, z: 0, w: 0)
         m.gVector = CIVector(x: 0, y: two, z: 0, w: 0)
         m.bVector = CIVector(x: 0, y: 0, z: two, w: 0)
         m.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
-        m.biasVector = CIVector(x: -amount, y: -amount, z: -amount, w: 0)
+        m.biasVector = CIVector(x: -two / 2, y: -two / 2, z: -two / 2, w: 0)
         guard let n = m.outputImage?.cropped(to: i.extent) else { return i }
         let add = CIFilter.additionCompositing()
         add.inputImage = n

@@ -64,7 +64,7 @@ struct ContactSheet: View {
             if atTop && v.translation.height > 120 && abs(v.translation.height) > abs(v.translation.width) { onClose?() } else { onDrag?(0) }
         })
         .fullScreenCover(item: $open) { o in
-            FullPhoto(asset: o.asset, library: library)
+            PhotoViewer(library: library, current: o.asset.localIdentifier)
         }
     }
 }
@@ -101,49 +101,6 @@ private struct Thumb: View {
             .overlay { if let img { Image(uiImage: img).resizable().scaledToFit() } }
             .clipped()
             .onAppear { library.thumbnail(asset, side: 320) { img = $0 } }
-    }
-}
-
-private struct FullPhoto: View {
-    let asset: PHAsset
-    let library: Library
-    @Environment(\.dismiss) private var dismiss
-    @State private var img: UIImage?
-    @State private var file: URL?
-    @State private var zoomed = false
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            if let img { ZoomableImage(image: img, zoomed: $zoomed).ignoresSafeArea() } else { ProgressView() }
-            VStack {
-                HStack {
-                    RoundButton(action: { dismiss() }) { Image(systemName: "xmark").font(.system(size: 16, weight: .semibold)) }
-                        .accessibilityLabel("Close")
-                    Spacer()
-                }
-                Spacer()
-                if let file, !zoomed {
-                    ShareLink(item: file) {
-                        Label("SEND", systemImage: "square.and.arrow.up").font(XA.display(15))
-                            .padding(.horizontal, 20).padding(.vertical, 11).background(XA.orange).foregroundStyle(.black)
-                    }
-                }
-            }
-            .padding(16)
-        }
-        .foregroundStyle(.white)
-        .simultaneousGesture(DragGesture().onEnded { v in if !zoomed && v.translation.height > 120 { dismiss() } })
-        .onAppear {
-            library.full(asset) { img = $0 }
-            library.data(asset) { d, uti in
-                guard let d else { return }
-                let ext = (uti.flatMap { UTType($0)?.preferredFilenameExtension }) ?? "jpg"
-                let url = FileManager.default.temporaryDirectory.appendingPathComponent("XA-\(asset.localIdentifier.prefix(8)).\(ext)")
-                try? d.write(to: url)
-                file = url
-            }
-        }
     }
 }
 

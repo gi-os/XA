@@ -1,5 +1,6 @@
 import XCTest
 import CoreImage
+import ImageIO
 @testable import XA
 
 final class FilmTests: XCTestCase {
@@ -43,10 +44,24 @@ final class FilmTests: XCTestCase {
 
     // MARK: sims
 
-    func testThereAreSevenPresetsWithUniqueIDs() {
-        XCTAssertEqual(Sim.presets.count, 7)
-        XCTAssertEqual(Set(Sim.presets.map(\.id)).count, 7)
-        XCTAssertEqual(Set(Sim.presets.map(\.name)).count, 7)
+    func testNeutralAndSevenStocksWithUniqueIDs() {
+        XCTAssertEqual(Sim.presets.count, 8)
+        XCTAssertEqual(Sim.presets.first?.id, Sim.neutral.id)
+        XCTAssertEqual(Set(Sim.presets.map(\.id)).count, 8)
+        XCTAssertEqual(Set(Sim.presets.map(\.name)).count, 8)
+    }
+
+    func testNoSimIsNeutral() {
+        XCTAssertEqual(FilmCatalog.sim(nil)?.id, Sim.neutral.id)
+        XCTAssertEqual(FilmCatalog.sim("gone")?.id, Sim.neutral.id)
+    }
+
+    func testTheRecipeNamesTheWholeStack() {
+        let r = Recipe.describe(Stack(simID: "nocturne", look: .sixteen, shape: .porthole), megapixels: 2)
+        XCTAssertEqual(r, "XA DIGI 2MP · NOCTURNE 800T + SIXTEEN + PORTHOLE")
+        let p = Recipe.properties(from: [kCGImagePropertyOrientation as String: 6], recipe: r)
+        XCTAssertEqual(p[kCGImagePropertyOrientation as String] as? Int, 1)
+        XCTAssertEqual((p[kCGImagePropertyExifDictionary as String] as? [String: Any])?[kCGImagePropertyExifUserComment as String] as? String, r)
     }
 
     func testASimSurvivesARoundTrip() throws {
@@ -129,13 +144,15 @@ final class FilmTests: XCTestCase {
 
     func testSwipingThroughFilmsWraps() {
         let cam = CameraModel(settings: AppSettings())
-        cam.stack = Stack(simID: nil, look: .none, shape: .none)
+        cam.stack = Stack(simID: Sim.neutral.id, look: .none, shape: .none)
         cam.stepLook(-1)
         XCTAssertEqual(cam.stack.look, Look.allCases.last)
         cam.stepLook(1)
         XCTAssertEqual(cam.stack.look, Look.none)
         cam.stepSim(1)
-        XCTAssertEqual(cam.stack.simID, FilmCatalog.sims.first?.id)
+        XCTAssertEqual(cam.stack.simID, FilmCatalog.sims[1].id)
+        cam.stepSim(-2)
+        XCTAssertEqual(cam.stack.simID, FilmCatalog.sims.last?.id)
     }
 
     func testAShapeLeavesTransparentPixels() {

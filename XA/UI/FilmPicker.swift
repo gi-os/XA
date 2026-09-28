@@ -18,7 +18,7 @@ struct FilmPicker: View {
                     SectionLabel(text: "SIMS · PICK ONE").padding(.top, 6)
                     LazyVGrid(columns: cols, spacing: 12) {
                         ForEach(FilmCatalog.sims) { s in
-                            card(.sim(s), on: camera.stack.simID == s.id) { camera.stack.simID = s.id; applySaved(s) }
+                            card(.sim(s), on: FilmCatalog.sim(camera.stack.simID)?.id == s.id) { camera.stack.simID = s.id; applySaved(s) }
                                 .contextMenu {
                                     Button("Edit") { editing = s }
                                     if !s.isPreset { Button("Delete", role: .destructive) { delete(s) } }
@@ -123,7 +123,7 @@ struct FilmPicker: View {
 
     private func delete(_ s: Sim) {
         FilmCatalog.setCustom(FilmCatalog.custom.filter { $0.id != s.id })
-        if camera.stack.simID == s.id { camera.stack.simID = nil }
+        if camera.stack.simID == s.id { camera.stack.simID = Sim.neutral.id }
         tick += 1
         camera.rebuildControls()
     }

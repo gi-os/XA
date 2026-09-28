@@ -136,6 +136,44 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
         images.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: o) { img, _ in done(img) }
     }
 
+    /// Straight to Recently Deleted; iOS asks first.
+    func delete(_ asset: PHAsset, _ done: ((Bool) -> Void)? = nil) {
+        PHPhotoLibrary.shared().performChanges({
+            PHAssetChangeRequest.deleteAssets([asset] as NSArray)
+        }, completionHandler: { ok, _ in DispatchQueue.main.async { done?(ok) } })
+    }
+
+    /// What the file says about itself, as label/value rows.
+    func metadata(_ asset: PHAsset, _ done: @escaping ([(String, String)]) -> Void) {
+        data(asset) { d, uti in
+            var rows: [(String, String)] = []
+            let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .short
+            if let date = asset.creationDate { rows.append(("Taken", df.string(from: date))) }
+            if let d, let src = CGImageSourceCreateWithData(d as CFData, nil),
+               let p = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [String: Any] {
+                let exif = p[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
+                let tiff = p[kCGImagePropertyTIFFDictionary as String] as? [String: Any] ?? [:]
+                let recipe = (exif[kCGImagePropertyExifUserComment as String] as? String) ?? (tiff[kCGImagePropertyTIFFImageDescription as String] as? String)
+                if let recipe, recipe.hasPrefix("XA") { rows.append(("Film", recipe)) }
+                if let w = p[kCGImagePropertyPixelWidth as String] as? Int, let h = p[kCGImagePropertyPixelHeight as String] as? Int {
+                    rows.append(("Size", "\(w) × \(h) · \(CaptureMode.megapixels(CGSize(width: w, height: h)))MP"))
+                }
+                if let t = exif[kCGImagePropertyExifExposureTime as String] as? Double, t > 0 {
+                    rows.append(("Shutter", Exposure.shutterLabel(Int64(t * 1e9))))
+                }
+                if let f = exif[kCGImagePropertyExifFNumber as String] as? Double { rows.append(("Aperture", String(format: "ƒ/%.1f", f))) }
+                if let iso = (exif[kCGImagePropertyExifISOSpeedRatings as String] as? [Int])?.first { rows.append(("ISO", "\(iso)")) }
+                if let fl = exif[kCGImagePropertyExifFocalLenIn35mmFilm as String] as? Int { rows.append(("Focal length", "\(fl) mm")) }
+                if let lens = exif[kCGImagePropertyExifLensModel as String] as? String { rows.append(("Lens", lens)) }
+                if let model = tiff[kCGImagePropertyTIFFModel as String] as? String { rows.append(("Camera", model)) }
+            }
+            if let uti, let t = UTType(uti) { rows.append(("Format", (t.preferredFilenameExtension ?? uti).uppercased())) }
+            if let d { rows.append(("File", ByteCountFormatter.string(fromByteCount: Int64(d.count), countStyle: .file))) }
+            if let loc = asset.location { rows.append(("Place", String(format: "%.4f, %.4f", loc.coordinate.latitude, loc.coordinate.longitude))) }
+            DispatchQueue.main.async { done(rows) }
+        }
+    }
+
     /// The original file, for sharing a shaped PNG with its transparency intact.
     func data(_ asset: PHAsset, _ done: @escaping (Data?, String?) -> Void) {
         let o = PHImageRequestOptions(); o.isNetworkAccessAllowed = true; o.version = .current

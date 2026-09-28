@@ -1,5 +1,6 @@
 import CoreImage
 import Foundation
+import ImageIO
 
 /// One sim, one look, one shape. Any of them can be empty.
 struct Stack: Codable, Equatable, Hashable {
@@ -29,9 +30,10 @@ enum FilmCatalog {
 
     static var sims: [Sim] { Sim.presets + custom }
 
+    /// No sim is Neutral: there is always a film loaded.
     static func sim(_ id: String?) -> Sim? {
-        guard let id else { return nil }
-        return sims.first { $0.id == id }
+        guard let id else { return Sim.neutral }
+        return sims.first { $0.id == id } ?? Sim.neutral
     }
 
     static func setCustom(_ list: [Sim]) {
@@ -63,16 +65,18 @@ struct DevelopSettings {
 /// The darkroom: the same chain for the viewfinder and for the saved photograph.
 enum Darkroom {
     /// Returns the developed image and whether it has transparent pixels.
-    static func develop(_ src: CIImage, _ s: DevelopSettings, date: Date, preview: Bool) -> (CIImage, Bool) {
+    /// `dateShift` pushes the date back down and out of the frame (0 = in place, 1 = gone),
+    /// for the slide when switching from PRO to DIGI.
+    static func develop(_ src: CIImage, _ s: DevelopSettings, date: Date, preview: Bool, dateShift: CGFloat = 0) -> (CIImage, Bool) {
         var img = preview ? src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
                           : Digicam.shrink(src, megapixels: s.megapixels)
         let sim = FilmCatalog.sim(s.stack.simID)
-        if let sim { img = SimEngine.apply(sim, to: img, preview: preview) } else { img = Digicam.tone(img) }
+        if let sim, !sim.isNeutral { img = SimEngine.apply(sim, to: img, preview: preview) } else { img = Digicam.tone(img) }
         if s.stack.look != .none {
             let w: CGFloat? = s.stack.look.pixelWidth != nil && !preview ? img.extent.width : nil
             img = Looks.apply(s.stack.look, to: img, outputWidth: w)
         }
-        if !preview { img = Digicam.crunch(img, noise: CGFloat(s.noise) * 0.05) }
+        if !preview { img = Digicam.crunch(img, noise: CGFloat(s.noise) * 0.03) }
         let mono = (sim?.mono ?? false) || s.stack.look.mono
         var alpha = false
         var shapeForDate: FrameShape = .none
@@ -87,8 +91,41 @@ enum Darkroom {
             shapeForDate = shape
         }
         if let overlay = DateBack.overlayImage(size: img.extent.size, date: date, config: s.date, shape: shapeForDate, mono: mono, instant: instant) {
-            img = overlay.transformed(by: CGAffineTransform(translationX: img.extent.minX, y: img.extent.minY)).composited(over: img)
+            let e = img.extent
+            let drop: CGFloat = -dateShift * e.height * 0.35
+            let placed = overlay.transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY + drop)).cropped(to: e)
+            img = placed.composited(over: img)
         }
         return (img, alpha)
+    }
+}
+
+/// The line XA writes into a photo's metadata, so the roll can say how it was made.
+enum Recipe {
+    static func describe(_ s: Stack, megapixels: Int) -> String {
+        var parts: [String] = []
+        if let sim = FilmCatalog.sim(s.simID) { parts.append(sim.title) }
+        if s.look != .none { parts.append(s.look.title) }
+        if let shape = s.effectiveShape { parts.append(shape.title) }
+        let film = parts.isEmpty ? "NO FILM" : parts.joined(separator: " + ")
+        return "XA DIGI \(megapixels)MP · \(film)"
+    }
+
+    /// Metadata for a developed DIGI photo: the source's EXIF kept, orientation reset (the
+    /// pixels are already upright), and the recipe in the description and user comment.
+    static func properties(from src: [String: Any], recipe: String) -> [String: Any] {
+        var p = src
+        p[kCGImagePropertyOrientation as String] = 1
+        var tiff = (p[kCGImagePropertyTIFFDictionary as String] as? [String: Any]) ?? [:]
+        tiff[kCGImagePropertyTIFFOrientation as String] = 1
+        tiff[kCGImagePropertyTIFFSoftware as String] = "XA"
+        tiff[kCGImagePropertyTIFFImageDescription as String] = recipe
+        p[kCGImagePropertyTIFFDictionary as String] = tiff
+        var exif = (p[kCGImagePropertyExifDictionary as String] as? [String: Any]) ?? [:]
+        exif[kCGImagePropertyExifUserComment as String] = recipe
+        p[kCGImagePropertyExifDictionary as String] = exif
+        p.removeValue(forKey: kCGImagePropertyPixelWidth as String)
+        p.removeValue(forKey: kCGImagePropertyPixelHeight as String)
+        return p
     }
 }
