@@ -203,6 +203,24 @@ final class FilmTests: XCTestCase {
         XCTAssertTrue(first === second, "within a sixth of a second the frame is held")
     }
 
+    func testOnlyBrightLightGlows() {
+        let e = CGRect(x: 0, y: 0, width: 200, height: 200)
+        let dark = CIImage(color: CIColor(red: 0.3, green: 0.3, blue: 0.3)).cropped(to: e)
+        let out = SimEngine.glow(dark, halation: 1, tone: Tone(1, 0.3, 0.18), bloom: 1)
+        var a = [Float](repeating: 0, count: 4), b = [Float](repeating: 0, count: 4)
+        Looks.context.render(dark, toBitmap: &a, rowBytes: 16, bounds: CGRect(x: 100, y: 100, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        Looks.context.render(out, toBitmap: &b, rowBytes: 16, bounds: CGRect(x: 100, y: 100, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        XCTAssertEqual(a[0], b[0], accuracy: 0.001, "a grey wall does not glow")
+    }
+
+    func testAFilmSavedBeforeBloomStillLoads() throws {
+        var s = Sim.nocturne
+        s.bloomAmount = nil
+        let data = try JSONEncoder().encode(s)
+        let back = try JSONDecoder().decode(Sim.self, from: data)
+        XCTAssertEqual(back.bloom, 0)
+    }
+
     func testFocusPointsLandInTheSensorFrame() {
         // Portrait, back camera: the top-left of the viewfinder is the sensor's bottom-left.
         let p = FocusGeometry.devicePoint(fromView: CGPoint(x: 0, y: 0), front: false)

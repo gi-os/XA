@@ -44,6 +44,12 @@ struct Sim: Codable, Equatable, Identifiable, Hashable {
     var grainSize: Double = 0.3
     var halation: Double = 0
     var halationTone: Tone = Tone(1, 0.3, 0.18)
+    /// White glow around bright light. Optional so films saved before it existed still load.
+    var bloomAmount: Double? = nil
+    var bloom: Double {
+        get { bloomAmount ?? 0 }
+        set { bloomAmount = newValue }
+    }
     var vignette: Double = 0
 
     var frame: SimFrame = .none
@@ -71,6 +77,7 @@ struct Sim: Codable, Equatable, Identifiable, Hashable {
     /// Tungsten-balanced cinema stock: cool daylight, red halation round every highlight.
     static let nocturne: Sim = {
         var s = Sim(id: "nocturne", name: "Nocturne", iso: "800T", exposures: 36)
+        s.bloom = 0.3
         s.warmth = -0.55; s.tint = -0.08; s.saturation = 0.08; s.contrast = 0.12
         s.redHue = -0.08; s.blueHue = 0.12; s.blueSat = 0.1
         s.shadowTone = Tone(0.18, 0.46, 0.52); s.shadowAmount = 0.45
@@ -84,6 +91,7 @@ struct Sim: Codable, Equatable, Identifiable, Hashable {
     /// Portrait pro stock: soft contrast, forgiving skin, pastel greens.
     static let visage: Sim = {
         var s = Sim(id: "visage", name: "Visage", iso: "800", exposures: 36)
+        s.bloom = 0.25
         s.warmth = 0.12; s.saturation = -0.12; s.contrast = -0.18
         s.redHue = 0.08; s.redSat = -0.08; s.greenHue = -0.15; s.greenSat = -0.2; s.blueHue = -0.08
         s.highlightTone = Tone(0.98, 0.84, 0.72); s.highlightAmount = 0.25
@@ -97,6 +105,7 @@ struct Sim: Codable, Equatable, Identifiable, Hashable {
     /// Consumer 400 from the green box: punchy, cool-green shadows, bright blues.
     static let prima: Sim = {
         var s = Sim(id: "prima", name: "Prima X", iso: "400", exposures: 36)
+        s.bloom = 0.1
         s.warmth = 0.04; s.tint = -0.1; s.saturation = 0.22; s.contrast = 0.2
         s.greenHue = 0.1; s.greenSat = 0.2; s.blueSat = 0.15; s.redSat = 0.1
         s.shadowTone = Tone(0.3, 0.55, 0.48); s.shadowAmount = 0.3
@@ -109,6 +118,7 @@ struct Sim: Codable, Equatable, Identifiable, Hashable {
     /// A purple cast: greens swing to violet, shadows go plum.
     static let amethyst: Sim = {
         var s = Sim(id: "amethyst", name: "Amethyst", iso: "400", exposures: 36)
+        s.bloom = 0.15
         s.warmth = -0.2; s.tint = 0.45; s.saturation = 0.1; s.contrast = 0.1
         s.greenHue = 1; s.greenSat = -0.25; s.blueHue = 0.35; s.redHue = -0.1
         s.shadowTone = Tone(0.45, 0.22, 0.62); s.shadowAmount = 0.6
@@ -121,6 +131,7 @@ struct Sim: Codable, Equatable, Identifiable, Hashable {
     /// Instant film: low contrast, milky blacks, teal shadows, printed on a white frame.
     static let sunday: Sim = {
         var s = Sim(id: "sunday", name: "Sunday", iso: "600", exposures: 8)
+        s.bloom = 0.35
         s.warmth = 0.18; s.saturation = -0.1; s.contrast = -0.28
         s.shadowTone = Tone(0.25, 0.52, 0.55); s.shadowAmount = 0.4
         s.highlightTone = Tone(0.98, 0.9, 0.74); s.highlightAmount = 0.25
@@ -141,6 +152,7 @@ struct Sim: Codable, Equatable, Identifiable, Hashable {
     /// High-contrast black and white, pushed two stops.
     static let onyx: Sim = {
         var s = Sim(id: "onyx", name: "Onyx", iso: "3200", exposures: 36)
+        s.bloom = 0.2
         s.mono = true; s.contrast = 0.6
         s.curve = [0, 0.18, 0.5, 0.84, 1]
         s.grain = 0.8; s.grainSize = 0.6; s.vignette = 0.3
@@ -273,7 +285,7 @@ enum SimEngine {
     static func cube(for s: Sim) -> Data {
         var key = s
         key.box = BoxDesign(); key.name = ""; key.id = ""; key.iso = ""
-        key.grain = 0; key.grainSize = 0; key.halation = 0; key.vignette = 0; key.look = nil; key.shape = nil; key.frame = .none
+        key.grain = 0; key.grainSize = 0; key.halation = 0; key.bloomAmount = nil; key.vignette = 0; key.look = nil; key.shape = nil; key.frame = .none
         lock.lock()
         if let d = cubes[key] { lock.unlock(); return d }
         lock.unlock()
@@ -288,13 +300,13 @@ enum SimEngine {
     /// The whole sim on an image: cube, then halation, grain and vignette.
     static func apply(_ s: Sim, to img: CIImage, preview: Bool) -> CIImage {
         let e = img.extent
+        let lit = (s.halation > 0 || s.bloom > 0) ? glow(img, halation: s.halation, tone: s.halationTone, bloom: s.bloom) : img
         let f = CIFilter.colorCubeWithColorSpace()
-        f.inputImage = img
+        f.inputImage = lit
         f.cubeDimension = 32
         f.cubeData = cube(for: s)
         if let cs = CGColorSpace(name: CGColorSpace.sRGB) { f.colorSpace = cs }
         var out = (f.outputImage ?? img).cropped(to: e)
-        if s.halation > 0 { out = halation(out, s) }
         if s.grain > 0 { out = grain(out, amount: s.grain, size: s.grainSize) }
         if s.vignette > 0 {
             let v = CIFilter.vignetteEffect()
@@ -309,28 +321,89 @@ enum SimEngine {
         return out
     }
 
-    static func halation(_ img: CIImage, _ s: Sim) -> CIImage {
+    /// How far each pixel goes past `threshold`, in linear light, colour kept. With an HDR
+    /// photo a lamp is several times brighter than white paper, so only real light sources glow.
+    static func excess(_ img: CIImage, over threshold: CGFloat) -> CIImage {
+        let k: CGFloat = 1 / max(0.05, 1 - threshold)
+        let m = CIFilter.colorMatrix()
+        m.inputImage = img
+        m.rVector = CIVector(x: k, y: 0, z: 0, w: 0)
+        m.gVector = CIVector(x: 0, y: k, z: 0, w: 0)
+        m.bVector = CIVector(x: 0, y: 0, z: k, w: 0)
+        m.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        m.biasVector = CIVector(x: -threshold * k, y: -threshold * k, z: -threshold * k, w: 0)
+        let c = CIFilter.colorClamp()
+        c.inputImage = m.outputImage
+        c.minComponents = CIVector(x: 0, y: 0, z: 0, w: 0)
+        c.maxComponents = CIVector(x: 8, y: 8, z: 8, w: 1)
+        return c.outputImage ?? img
+    }
+
+    /// A long-tailed glow: four blurs, tight to wide, summed. Worked at a quarter size (glow is
+    /// all low frequency) and scaled back up.
+    static func spread(_ src: CIImage, extent e: CGRect, widths: [CGFloat], weights: [CGFloat]) -> CIImage? {
+        let q: CGFloat = 0.25
+        let small = src.transformed(by: CGAffineTransform(scaleX: q, y: q)).clampedToExtent()
+        let diag: CGFloat = hypot(e.width, e.height) * q
+        var sum: CIImage?
+        for (w, wt) in zip(widths, weights) {
+            let b = CIFilter.gaussianBlur()
+            b.inputImage = small
+            b.radius = Float(diag * w)
+            guard let blurred = b.outputImage else { continue }
+            let m = CIFilter.colorMatrix()
+            m.inputImage = blurred
+            m.rVector = CIVector(x: wt, y: 0, z: 0, w: 0)
+            m.gVector = CIVector(x: 0, y: wt, z: 0, w: 0)
+            m.bVector = CIVector(x: 0, y: 0, z: wt, w: 0)
+            m.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+            guard let layer = m.outputImage else { continue }
+            if let s0 = sum {
+                let add = CIFilter.additionCompositing(); add.inputImage = layer; add.backgroundImage = s0
+                sum = add.outputImage
+            } else { sum = layer }
+        }
+        return sum?.transformed(by: CGAffineTransform(scaleX: 1 / q, y: 1 / q)).cropped(to: e)
+    }
+
+    /// Bloom: white light scattering round bright sources, in their own colour.
+    /// Halation: the red ring from light bouncing off the film base into the red layer. The
+    /// core stays white (it is already clipped), so the red shows as a ring around it.
+    static func glow(_ img: CIImage, halation: Double, tone: Tone, bloom: Double) -> CIImage {
         let e = img.extent
-        let th = CIFilter.colorThreshold()
-        th.inputImage = img
-        th.threshold = 0.8
-        guard let mask = th.outputImage else { return img }
-        let tint = CIFilter.colorMatrix()
-        tint.inputImage = mask
-        let a = CGFloat(s.halation)
-        tint.rVector = CIVector(x: CGFloat(s.halationTone.r) * a * 0.5, y: 0, z: 0, w: 0)
-        tint.gVector = CIVector(x: 0, y: CGFloat(s.halationTone.g) * a * 0.5, z: 0, w: 0)
-        tint.bVector = CIVector(x: 0, y: 0, z: CGFloat(s.halationTone.b) * a * 0.5, w: 0)
-        tint.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
-        guard let glow0 = tint.outputImage else { return img }
-        let blur = CIFilter.gaussianBlur()
-        blur.inputImage = glow0.clampedToExtent()
-        blur.radius = Float(max(e.width, e.height) * 0.012)
-        guard let glow = blur.outputImage?.cropped(to: e) else { return img }
-        let add = CIFilter.additionCompositing()
-        add.inputImage = glow
-        add.backgroundImage = img
-        return (add.outputImage ?? img).cropped(to: e)
+        var out = img
+        if bloom > 0, let g = spread(excess(img, over: 0.72), extent: e, widths: [0.004, 0.012, 0.035, 0.09], weights: [0.35, 0.3, 0.22, 0.13]) {
+            let t = CIFilter.colorMatrix(); t.inputImage = g
+            let a = CGFloat(bloom) * 0.9
+            t.rVector = CIVector(x: a, y: 0, z: 0, w: 0)
+            t.gVector = CIVector(x: 0, y: a * 0.97, z: 0, w: 0)
+            t.bVector = CIVector(x: 0, y: 0, z: a * 0.9, w: 0)
+            t.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+            if let tinted = t.outputImage {
+                let add = CIFilter.additionCompositing(); add.inputImage = tinted; add.backgroundImage = out
+                out = (add.outputImage ?? out).cropped(to: e)
+            }
+        }
+        if halation > 0 {
+            // The glow's brightness, not its colour: halation is red whatever the light was.
+            let lum = CIFilter.colorMatrix(); lum.inputImage = excess(img, over: 0.86)
+            let l = CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0)
+            lum.rVector = l; lum.gVector = l; lum.bVector = l
+            lum.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+            if let bright = lum.outputImage, let g = spread(bright, extent: e, widths: [0.003, 0.01, 0.03], weights: [0.42, 0.35, 0.23]) {
+                let t = CIFilter.colorMatrix(); t.inputImage = g
+                let a = CGFloat(halation) * 1.4
+                t.rVector = CIVector(x: CGFloat(tone.r) * a, y: 0, z: 0, w: 0)
+                t.gVector = CIVector(x: 0, y: CGFloat(tone.g) * a, z: 0, w: 0)
+                t.bVector = CIVector(x: 0, y: 0, z: CGFloat(tone.b) * a, w: 0)
+                t.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+                if let tinted = t.outputImage {
+                    let add = CIFilter.additionCompositing(); add.inputImage = tinted; add.backgroundImage = out
+                    out = (add.outputImage ?? out).cropped(to: e)
+                }
+            }
+        }
+        return out
     }
 
     static func grain(_ img: CIImage, amount: Double, size: Double) -> CIImage {

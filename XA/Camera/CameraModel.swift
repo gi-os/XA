@@ -24,7 +24,7 @@ enum ProControl: String, CaseIterable, Identifiable {
 /// behind the live viewfinder.
 final class CameraModel: NSObject, ObservableObject {
     // VIDEO
-    @Published var videoLook: VideoLook = .clean { didSet { UserDefaults.standard.set(videoLook.rawValue, forKey: "videoLook"); lock.lock(); _videoLook = videoLook; lock.unlock() } }
+    @Published var videoLook: VideoLook = .clean { didSet { UserDefaults.standard.set(videoLook.rawValue, forKey: "videoLook"); lock.lock(); frameVideoLook = videoLook; lock.unlock() } }
     @Published private(set) var recording = false
     @Published private(set) var recordSeconds: Double = 0
     // FOCUS
@@ -73,10 +73,10 @@ final class CameraModel: NSObject, ObservableObject {
     private let audioOutput = AVCaptureAudioDataOutput()
     private let audioQueue = DispatchQueue(label: "xa.audio")
     private var audioInput: AVCaptureDeviceInput?
-    private var _videoLook: VideoLook = .clean
+    private var frameVideoLook: VideoLook = .clean
     private var _wantRecord = false
     private var _lockedTurn: CGFloat?
-    private var _segments: [TakeSegment] = []
+    private var frameSegments: [TakeSegment] = []
     private var _recorder: VideoRecorder?
     private let fx = VideoFX()
     private var recordTimer: Timer?
@@ -114,7 +114,7 @@ final class CameraModel: NSObject, ObservableObject {
         self.settings = settings
         super.init()
         if let s: Stack = AppSettings.load("stack") { stack = s }
-        if let v = VideoLook(rawValue: UserDefaults.standard.integer(forKey: "videoLook")) { videoLook = v; _videoLook = v }
+        if let v = VideoLook(rawValue: UserDefaults.standard.integer(forKey: "videoLook")) { videoLook = v; frameVideoLook = v }
         let last = CaptureMode(rawValue: UserDefaults.standard.string(forKey: "mode") ?? "") ?? .digi
         switch settings.openIn {
         case .last: mode = last
@@ -638,14 +638,14 @@ final class CameraModel: NSObject, ObservableObject {
         guard !recording else { return }
         fx.reset()
         // The turn locks when the clip starts, so a take never flips halfway.
-        lock.lock(); _wantRecord = true; _lockedTurn = _turn; _segments = []; lock.unlock()
+        lock.lock(); _wantRecord = true; _lockedTurn = _turn; frameSegments = []; lock.unlock()
         segments = []
         recording = true
         recordSeconds = 0
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         recordTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             guard let self else { return }
-            self.lock.lock(); let d = self._recorder?.duration ?? 0; let segs = self._segments; self.lock.unlock()
+            self.lock.lock(); let d = self._recorder?.duration ?? 0; let segs = self.frameSegments; self.lock.unlock()
             self.recordSeconds = d
             if segs != self.segments { self.segments = segs }
         }
@@ -654,7 +654,7 @@ final class CameraModel: NSObject, ObservableObject {
     func stopRecording() {
         guard recording else { return }
         recordTimer?.invalidate(); recordTimer = nil
-        lock.lock(); let r = _recorder; _recorder = nil; _wantRecord = false; _lockedTurn = nil; let segs = _segments; lock.unlock()
+        lock.lock(); let r = _recorder; _recorder = nil; _wantRecord = false; _lockedTurn = nil; let segs = frameSegments; lock.unlock()
         recording = false
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         guard let r else { return }
@@ -707,7 +707,10 @@ final class CameraModel: NSObject, ObservableObject {
     private func develop(_ data: Data, _ shot: Shot) {
         developQueue.async {
             defer { DispatchQueue.main.async { self.developing = max(0, self.developing - 1) } }
-            guard let src = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return }
+            // DIGI expands the photo's HDR gain map, so a lamp is brighter than white paper and
+            // only real light sources bloom. PRO keeps the file untouched anyway.
+            let opts: [CIImageOption: Any] = shot.mode == .pro ? [.applyOrientationProperty: true] : [.applyOrientationProperty: true, .expandToHDR: true]
+            guard let src = CIImage(data: data, options: opts) ?? CIImage(data: data, options: [.applyOrientationProperty: true]) else { return }
             var out: Data?
             var type: UTType = .jpeg
             var thumbSource = src
@@ -795,7 +798,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         }
         lock.lock()
         if _switchPending { _switchPending = false; _switchStart = CACurrentMediaTime() }
-        let vlook = _videoLook
+        let vlook = frameVideoLook
         lock.unlock()
         if m == .video {
             lock.lock(); let t = _lockedTurn ?? _turn; lock.unlock()
@@ -810,7 +813,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             if let r {
                 // A new segment whenever the tape changes mid-take.
                 let at = r.duration
-                if _segments.last?.look != vlook { _segments.append(TakeSegment(look: vlook, start: at)) }
+                if frameSegments.last?.look != vlook { frameSegments.append(TakeSegment(look: vlook, start: at)) }
             }
             lock.unlock()
             r?.append(frame, at: pts)

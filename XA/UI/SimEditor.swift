@@ -121,7 +121,8 @@ struct SimEditor: View {
     @ViewBuilder private var grainTab: some View {
         FlatSlider(label: "Grain", value: $sim.grain, format: pct)
         FlatSlider(label: "Grain size", value: $sim.grainSize, format: pct)
-        FlatSlider(label: "Halation", value: $sim.halation, format: pct)
+        FlatSlider(label: "Bloom · white glow", value: $sim.bloom, format: pct)
+        FlatSlider(label: "Halation · red ring", value: $sim.halation, format: pct)
         FlatSlider(label: "Vignette", value: $sim.vignette, format: pct)
         SectionLabel(text: "PRINT").padding(.top, 8)
         Segmented(items: [(SimFrame.none, "None"), (.instant, "Instant"), (.round, "Round")], selection: $sim.frame)

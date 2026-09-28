@@ -112,7 +112,8 @@ enum Looks {
         tone.point3 = CGPoint(x: 0.75, y: 0.8); tone.point4 = CGPoint(x: 1, y: 0.94)
         let cc = CIFilter.colorControls(); cc.inputImage = tone.outputImage; cc.saturation = 1.06; cc.contrast = 1.02
         let vig = CIFilter.vignette(); vig.inputImage = cc.outputImage?.cropped(to: e); vig.intensity = 0.45; vig.radius = Float(max(e.width, e.height) / 700)
-        return FilmGrain.apply((vig.outputImage ?? input).cropped(to: e), amount: 0.6, size: 0.45)
+        let lit = SimEngine.glow((vig.outputImage ?? input).cropped(to: e), halation: 0.2, tone: Tone(1, 0.35, 0.18), bloom: 0.25)
+        return FilmGrain.apply(lit, amount: 0.6, size: 0.45)
     }
 
     private static func purikura(_ input: CIImage) -> CIImage {
