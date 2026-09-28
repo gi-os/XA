@@ -126,19 +126,37 @@ enum Looks {
     typealias RGB = (Float, Float, Float)
 
     /// The same sixteen colors as m-cas: a 15-bit palette from a handheld with the backlight off.
-    static let sixteen: [RGB] = [
-        (8, 8, 16), (24, 24, 48), (40, 48, 88), (64, 80, 136), (48, 160, 136), (136, 216, 176), (248, 240, 200), (224, 200, 144),
-        (160, 104, 48), (88, 48, 32), (224, 64, 64), (248, 152, 56), (248, 216, 72), (240, 128, 160), (128, 88, 176), (168, 168, 184)
-    ].map { (Float($0.0) / 255, Float($0.1) / 255, Float($0.2) / 255) }
+    private static func palette(_ v: [Int]) -> [RGB] {
+        var out: [RGB] = []
+        var i = 0
+        while i + 2 < v.count {
+            let r: Float = Float(v[i]) / 255
+            let g: Float = Float(v[i + 1]) / 255
+            let b: Float = Float(v[i + 2]) / 255
+            out.append((r, g, b))
+            i += 3
+        }
+        return out
+    }
 
-    static let gameboy: [RGB] = [(15, 56, 15), (48, 98, 48), (139, 172, 15), (155, 188, 15)].map { (Float($0.0) / 255, Float($0.1) / 255, Float($0.2) / 255) }
+    /// The same sixteen colors as m-cas: a 15-bit palette from a handheld with the backlight off.
+    static let sixteen: [RGB] = palette([
+        8, 8, 16, 24, 24, 48, 40, 48, 88, 64, 80, 136, 48, 160, 136, 136, 216, 176, 248, 240, 200, 224, 200, 144,
+        160, 104, 48, 88, 48, 32, 224, 64, 64, 248, 152, 56, 248, 216, 72, 240, 128, 160, 128, 88, 176, 168, 168, 184
+    ])
+
+    static let gameboy: [RGB] = palette([15, 56, 15, 48, 98, 48, 139, 172, 15, 155, 188, 15])
 
     static func makeCube(_ map: (RGB) -> RGB) -> Data {
         let n = 32
         var v = [Float](repeating: 0, count: n * n * n * 4)
         var i = 0
         for b in 0..<n { for g in 0..<n { for r in 0..<n {
-            let c = map((Float(r) / Float(n - 1), Float(g) / Float(n - 1), Float(b) / Float(n - 1)))
+            let top: Float = Float(n - 1)
+            let rf: Float = Float(r) / top
+            let gf: Float = Float(g) / top
+            let bf: Float = Float(b) / top
+            let c = map((rf, gf, bf))
             v[i] = c.0; v[i + 1] = c.1; v[i + 2] = c.2; v[i + 3] = 1
             i += 4
         } } }
@@ -166,9 +184,11 @@ enum Looks {
 
     static let sixteenCube = makeCube { nearest($0, in: sixteen) }
     static let gameboyCube = makeCube { gameboy[min(3, Int(luma($0) * 4))] }
-    static let oneBitCube = makeCube { luma($0) < 0.5 ? (0.06, 0.06, 0.1) : (0.97, 0.94, 0.78) }
+    static let oneBitDark: RGB = (0.06, 0.06, 0.1)
+    static let oneBitLight: RGB = (0.97, 0.94, 0.78)
+    static let oneBitCube = makeCube { luma($0) < 0.5 ? oneBitDark : oneBitLight }
     static let thermalCube: Data = {
-        let ramp: [RGB] = [(0, 0, 0.1), (0.2, 0, 0.6), (0.7, 0, 0.7), (1, 0.2, 0.2), (1, 0.6, 0), (1, 0.95, 0.3), (1, 1, 1)]
+        let ramp: [RGB] = palette([0, 0, 26, 51, 0, 153, 178, 0, 178, 255, 51, 51, 255, 153, 0, 255, 242, 77, 255, 255, 255])
         return makeCube { c in
             let t = min(0.9999, max(0, luma(c))) * Float(ramp.count - 1)
             let i = Int(t), f = t - Float(i)
