@@ -7,15 +7,19 @@ struct CameraView: View {
     var onRoll: () -> Void
     var onCustomize: () -> Void
     var onFilm: () -> Void
+    /// The film rows are open; folded, the loaded film sits in the mode row as a little box.
+    @State private var filmOpen = true
 
     var body: some View {
         VStack(spacing: 8) {
             viewfinder
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 24).onEnded(swipe))
-            if camera.mode == .digi { FilmControls(camera: camera, onFilm: onFilm) } else { ProRows(camera: camera) }
+            if camera.mode == .digi {
+                if filmOpen { FilmControls(camera: camera, open: $filmOpen, onFilm: onFilm).transition(.opacity) }
+            } else { ProRows(camera: camera) }
             VStack(spacing: 8) {
-                ModeRow(camera: camera, settings: settings, onCustomize: onCustomize)
+                ModeRow(camera: camera, settings: settings, filmOpen: $filmOpen, onCustomize: onCustomize)
                 ShutterRow(camera: camera, onRoll: onRoll)
             }
             .contentShape(Rectangle())
@@ -86,43 +90,35 @@ private struct GridLines: View {
 /// few seconds untouched they fold into one button showing what is loaded.
 private struct FilmControls: View {
     @ObservedObject var camera: CameraModel
+    @Binding var open: Bool
     var onFilm: () -> Void
     @State private var row = 0
-    @State private var open = true
     @State private var touched = Date()
 
     var body: some View {
-        ZStack {
-            if open {
-                VStack(spacing: 6) {
-                    StackRow(stack: camera.stack, onTap: { poke() }, onSlot: { i in withAnimation(.snappy) { row = i }; poke() })
-                    HStack(spacing: 8) {
-                        Button(action: onFilm) {
-                            Image(systemName: "square.grid.2x2").font(.system(size: 18, weight: .medium))
-                                .frame(width: 44, height: 53).background(XA.fill)
-                        }
-                        .buttonStyle(.plain).foregroundStyle(.white)
-                        .accessibilityLabel("See every film")
-                        RowPicker(row: $row)
-                        FilmStrip(camera: camera, row: row, onPick: poke)
-                            .id(row)
-                            .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
-                    }
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(DragGesture(minimumDistance: 16).onEnded { v in
-                        guard abs(v.translation.height) > abs(v.translation.width), abs(v.translation.height) > 24 else { return }
-                        withAnimation(.snappy) { row = min(2, max(0, row + (v.translation.height < 0 ? 1 : -1))) }
-                        poke()
-                    })
+        VStack(spacing: 6) {
+            StackRow(stack: camera.stack, onTap: { poke() }, onSlot: { i in withAnimation(.snappy) { row = i }; poke() })
+            HStack(spacing: 8) {
+                Button(action: onFilm) {
+                    Image(systemName: "square.grid.2x2").font(.system(size: 18, weight: .medium))
+                        .frame(width: 44, height: 53).background(XA.fill)
                 }
-                .transition(.opacity)
-            } else {
-                FilmButton(stack: camera.stack) { withAnimation(.snappy) { open = true }; poke() }
-                    .transition(.opacity)
+                .buttonStyle(.plain).foregroundStyle(.white)
+                .accessibilityLabel("See every film")
+                RowPicker(row: $row)
+                FilmStrip(camera: camera, row: row, onPick: poke)
+                    .id(row)
+                    .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
             }
+            .contentShape(Rectangle())
+            .simultaneousGesture(DragGesture(minimumDistance: 16).onEnded { v in
+                guard abs(v.translation.height) > abs(v.translation.width), abs(v.translation.height) > 24 else { return }
+                withAnimation(.snappy) { row = min(2, max(0, row + (v.translation.height < 0 ? 1 : -1))) }
+                poke()
+            })
         }
         .frame(height: 94)
-        .onChange(of: camera.stack) { _, _ in if open { poke() } }
+        .onChange(of: camera.stack) { _, _ in poke() }
         .task(id: touched) {
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             if !Task.isCancelled && Date().timeIntervalSince(touched) >= 3.9 { withAnimation(.easeInOut(duration: 0.3)) { open = false } }
@@ -130,6 +126,33 @@ private struct FilmControls: View {
     }
 
     private func poke() { touched = Date() }
+}
+
+/// The folded film: the sim's box with the shape (or look) box tucked on it. Tap to open the rows.
+struct FannedFilm: View {
+    let stack: Stack
+    var action: () -> Void
+    var body: some View {
+        let sim = FilmCatalog.sim(stack.simID)
+        let second: FilmItem? = stack.effectiveShape.map { FilmItem.shape($0) } ?? (stack.look != .none ? FilmItem.look(stack.look) : nil)
+        Button(action: action) {
+            ZStack(alignment: .topLeading) {
+                Group {
+                    if let sim { FilmBox(item: .sim(sim), width: 62) } else {
+                        Rectangle().fill(XA.fill).frame(width: 62, height: 41).overlay(Text("NO SIM").font(XA.display(9)).foregroundStyle(XA.faint))
+                    }
+                }
+                .rotationEffect(.degrees(-4))
+                .shadow(color: .black.opacity(0.6), radius: 5, y: 3)
+                if let second {
+                    FilmBox(item: second, width: 34).rotationEffect(.degrees(7)).offset(x: 42, y: 14)
+                }
+            }
+            .frame(width: 80, height: 48, alignment: .topLeading)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Film: \(sim?.title ?? "no sim"). Show the film rows")
+    }
 }
 
 /// SIM · LOOK · SHAPE, stacked; the lit one is the row showing.
@@ -146,39 +169,6 @@ private struct RowPicker: View {
             }
         }
         .frame(width: 40, alignment: .leading)
-    }
-}
-
-/// The folded state: the loaded sim's box and what is stacked on it. Tap to open the rows.
-struct FilmButton: View {
-    let stack: Stack
-    var action: () -> Void
-    var body: some View {
-        let sim = FilmCatalog.sim(stack.simID)
-        Button(action: action) {
-            HStack(spacing: 12) {
-                if let sim { FilmBox(item: .sim(sim), width: 72) } else {
-                    Rectangle().fill(XA.fill).frame(width: 72, height: 48).overlay(Text("NO SIM").font(XA.display(10)).foregroundStyle(XA.faint))
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(sim?.title ?? "NO SIM").font(XA.display(15)).foregroundStyle(XA.orange).lineLimit(1)
-                    Text(extras).font(XA.display(11, bold: false)).foregroundStyle(XA.dim).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.up").font(.system(size: 14, weight: .semibold)).foregroundStyle(XA.dim)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(XA.fill)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Film: \(sim?.title ?? "no sim"). Show the film rows")
-    }
-
-    private var extras: String {
-        var parts: [String] = []
-        if stack.look != .none { parts.append(stack.look.title) }
-        if let s = stack.effectiveShape { parts.append(s.title) }
-        return parts.isEmpty ? "SWIPE THE FRAME: ← → SIM · ↑ ↓ LOOK" : parts.joined(separator: " + ")
     }
 }
 
@@ -345,11 +335,13 @@ private struct Dial: View {
 private struct ModeRow: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
+    @Binding var filmOpen: Bool
     var onCustomize: () -> Void
     var body: some View {
         HStack {
             RoundButton(action: onCustomize) { Image(systemName: "slider.horizontal.3").font(.system(size: 18)) }
                 .accessibilityLabel("Customize")
+                .frame(width: 80, alignment: .leading)
             Spacer()
             HStack(spacing: 2) {
                 ForEach(CaptureMode.allCases) { m in
@@ -365,6 +357,19 @@ private struct ModeRow: View {
             }
             .padding(3).background(XA.fill, in: Capsule())
             Spacer()
+            Group {
+                if camera.mode == .digi && !filmOpen {
+                    FannedFilm(stack: camera.stack) { withAnimation(.snappy) { filmOpen = true } }
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                } else {
+                    mpMenu
+                }
+            }
+            .frame(width: 80, alignment: .trailing)
+        }
+    }
+
+    private var mpMenu: some View {
             Menu {
                 if camera.mode == .digi {
                     ForEach(AppSettings.digiOptions, id: \.self) { mp in
@@ -384,7 +389,6 @@ private struct ModeRow: View {
                     .padding(.horizontal, 10).frame(minWidth: 44, minHeight: 44).background(XA.fill, in: Capsule())
             }
             .accessibilityLabel("Resolution \(spec)")
-        }
     }
     private var shownPro: Int { CaptureMode.megapixels(camera.photoSize) }
     private var spec: String {
