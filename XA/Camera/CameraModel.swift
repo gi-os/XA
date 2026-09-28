@@ -441,6 +441,9 @@ final class CameraModel: NSObject, ObservableObject {
         }
     }
 
+    /// The roll button shows the newest picture on the roll, from launch on.
+    func showThumb(_ img: UIImage?) { if let img { lastShot = img } }
+
     // MARK: swiping through films
 
     func stepSim(_ by: Int) {

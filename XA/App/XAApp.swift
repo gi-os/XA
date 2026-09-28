@@ -55,16 +55,24 @@ struct RootView: View {
             camera.onStackChange = { pushContext() }
             camera.start()
             pushContext()
+            syncThumb()
         }
         .onChange(of: phase) { _, p in if p == .active { camera.resume() } else if p == .background { camera.stop() } }
         .onChange(of: settings.date) { _, _ in camera.syncFrameSettings(); pushContext() }
         .onChange(of: settings.digiMegapixels) { _, _ in camera.applyResolution(); pushContext() }
         .onChange(of: settings.proMegapixels) { _, _ in camera.applyResolution() }
         .task { await ingestLockScreenShots() }
+        .onChange(of: library.assets.first?.localIdentifier) { _, _ in syncThumb() }
+        .onChange(of: library.authorized) { _, _ in syncThumb() }
     }
 
     private var camView: some View {
         CameraView(camera: camera, settings: settings, onRoll: openRoll, onCustomize: { showCustomize = true }, onFilm: { showFilm = true })
+    }
+
+    private func syncThumb() {
+        guard let first = library.assets.first else { return }
+        library.thumbnail(first, side: 150) { camera.showThumb($0) }
     }
 
     private func openRoll() { pull = 0; withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { showRoll = true } }

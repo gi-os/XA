@@ -38,6 +38,14 @@ struct CustomizeView: View {
                             Segmented(items: [(ProSlide.exposure, "Exposure"), (.zoom, "Zoom")], selection: $settings.proSlide)
                         }
                     }
+                    group("CAMERA SCREEN") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Roll button", isOn: $settings.showRollButton).tint(XA.orange).font(.system(size: 15))
+                            Toggle("Flip button", isOn: $settings.showFlipButton).tint(XA.orange).font(.system(size: 15))
+                            Text("Without them: swipe up for the roll, double-tap the viewfinder to flip.")
+                                .font(.system(size: 12)).foregroundStyle(XA.faint)
+                        }
+                    }
                     group("OPENS IN") {
                         Segmented(items: [(OpenIn.last, "Last mode"), (.digi, "DIGI"), (.pro, "PRO")], selection: $settings.openIn)
                     }

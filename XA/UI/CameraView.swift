@@ -15,13 +15,15 @@ struct CameraView: View {
             viewfinder
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 24).onEnded(swipe))
+                // Double-tap flips between the back and front cameras; a single tap folds the film rows.
+                .onTapGesture(count: 2) { camera.flip(); UIImpactFeedbackGenerator(style: .light).impactOccurred() }
                 .onTapGesture { if filmOpen { withAnimation(.snappy) { filmOpen = false } } }
             if camera.mode == .digi {
                 if filmOpen { FilmControls(camera: camera, open: $filmOpen, onFilm: onFilm).transition(.opacity) }
             } else { ProRows(camera: camera) }
             VStack(spacing: 8) {
                 ModeRow(camera: camera, settings: settings, filmOpen: $filmOpen, onCustomize: onCustomize)
-                ShutterRow(camera: camera, onRoll: onRoll)
+                ShutterRow(camera: camera, settings: settings, onRoll: onRoll)
             }
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 24).onEnded { v in
@@ -407,9 +409,25 @@ private struct ModeRow: View {
 
 private struct ShutterRow: View {
     @ObservedObject var camera: CameraModel
+    @ObservedObject var settings: AppSettings
     var onRoll: () -> Void
     var body: some View {
         HStack(spacing: 28) {
+            if settings.showRollButton { rollButton } else { Color.clear.frame(width: 50, height: 50) }
+            Button { camera.shoot() } label: {
+                Capsule().fill(Color.white).frame(width: 118, height: 40)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Take picture")
+            if settings.showFlipButton {
+                RoundButton(size: 50, action: { camera.flip() }) { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 20, weight: .medium)) }
+                    .accessibilityLabel("Switch camera")
+            } else { Color.clear.frame(width: 50, height: 50) }
+        }
+        .frame(height: 76)
+    }
+
+    private var rollButton: some View {
             Button(action: onRoll) {
                 ZStack {
                     Rectangle().fill(XA.fill)
@@ -421,14 +439,5 @@ private struct ShutterRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open the roll")
-            Button { camera.shoot() } label: {
-                Capsule().fill(Color.white).frame(width: 118, height: 40)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Take picture")
-            RoundButton(size: 50, action: { camera.flip() }) { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 20, weight: .medium)) }
-                .accessibilityLabel("Switch camera")
-        }
-        .frame(height: 76)
     }
 }
