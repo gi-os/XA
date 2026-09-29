@@ -36,11 +36,23 @@ final class PreviewView: MTKView {
 
     /// Call from any queue.
     func show(_ img: CIImage, pixelated: Bool) {
-        sizeLock.lock(); let ds = _size; sizeLock.unlock()
-        guard ds.width > 0, ds.height > 0, let layer = self.layer as? CAMetalLayer,
+        sizeLock.lock(); let known = _size; sizeLock.unlock()
+        guard known.width > 0, known.height > 0, let layer = self.layer as? CAMetalLayer,
               let drawable = layer.nextDrawable(), let cb = queue?.makeCommandBuffer() else { return }
-        let e = img.extent
+        // Size from the texture actually handed out, not the one remembered at the last layout.
+        // The viewfinder changes height when PRO's dials come in; a stale size left strips of the
+        // texture undrawn along the top and right, showing whatever was in them before.
+        let ds = CGSize(width: drawable.texture.width, height: drawable.texture.height)
+        // Whole pixels only. A downscaled frame ends mid-pixel on its far edges (top and right in
+        // Core Image), and scaling that again for the screen blends the half-covered row with
+        // transparency: a faint line along the top and right. PRO shows it because nothing else
+        // crops the raw frame. Clamp, then crop to the whole pixels inside.
+        let f = img.extent
+        let e = CGRect(x: f.minX.rounded(.up), y: f.minY.rounded(.up),
+                       width: f.maxX.rounded(.down) - f.minX.rounded(.up),
+                       height: f.maxY.rounded(.down) - f.minY.rounded(.up))
         guard e.width > 0, e.height > 0 else { return }
+        let img = img.clampedToExtent().cropped(to: e)
         // Fit, not fill: an instant print is square and must not be cropped.
         let s = min(ds.width / e.width, ds.height / e.height)
         var src = pixelated ? img.samplingNearest() : img
