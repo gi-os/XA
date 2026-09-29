@@ -275,7 +275,6 @@ private struct VideoRows: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
-                Text("SWIPE ↑↓ FOR LOOKS").font(XA.display(10)).foregroundStyle(XA.faint)
             }
             }
             ScrollViewReader { proxy in
@@ -328,7 +327,6 @@ struct TakeBar: View {
             .frame(height: 8)
             HStack {
                 Circle().fill(Color.red).frame(width: 7, height: 7)
-                Text("SWIPE ↑↓ TO CHANGE TAPE MID-TAKE").font(XA.display(10)).foregroundStyle(XA.dim)
                 Spacer()
                 Text(spans.map { $0.0.title }.joined(separator: " → ")).font(XA.display(10)).foregroundStyle(XA.dim).lineLimit(1)
             }
