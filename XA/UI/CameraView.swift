@@ -544,24 +544,17 @@ private struct ShutterRow: View {
     }
 }
 
-/// The shutter as a two-stage button: touch down is the half-press (focus and exposure lock),
-/// lift is the shot. Slide off before lifting to cancel.
+/// The on-screen shutter fires the instant a finger lands. No half-press here: focus comes
+/// from tapping the frame, and the two-stage press lives on Camera Control.
 private struct ShutterKey<Label: View>: View {
     @ObservedObject var camera: CameraModel
     @ViewBuilder var label: () -> Label
     @State private var down = false
     var body: some View {
-        label()
-            .contentShape(Rectangle())
+        label().contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    if !down { down = true; if camera.mode != .video { camera.halfPress() } }
-                }
-                .onEnded { v in
-                    down = false
-                    let inside = abs(v.translation.width) < 90 && abs(v.translation.height) < 70
-                    if inside { camera.fullPress() } else { camera.releaseHalfPress() }
-                })
+                .onChanged { _ in if !down { down = true; camera.fullPress() } }
+                .onEnded { _ in down = false })
     }
 }
 
