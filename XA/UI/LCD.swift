@@ -72,25 +72,15 @@ private struct DigiLCD: View {
 
     var body: some View {
         let sim = FilmCatalog.sim(camera.stack.simID) ?? Sim.neutral
-        let flash = settings.flash == .on ? "F ON" : (settings.flash == .auto ? "F A" : "F OFF")
-        let look = camera.stack.look == .none ? "" : camera.stack.look.title
-        let shape = camera.stack.effectiveShape?.title ?? ""
-        let extra = [look, shape].filter { !$0.isEmpty }.joined(separator: " + ")
+        let film = ([sim.title] + [camera.stack.look == .none ? nil : camera.stack.look.title, camera.stack.effectiveShape?.title].compactMap { $0 }).joined(separator: " + ")
         GreenPanel()
-            .overlay(alignment: .leading) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack {
-                        dot(">" + sim.title, 9)
-                        Spacer()
-                        dot("\(settings.digiMegapixels)M", 9)
-                    }
-                    HStack {
-                        dot(extra.isEmpty ? flash : flash + "  " + extra, 11)
-                        Spacer()
-                        if settings.date.placement != .off { dot(Self.dateText(), 11) }
-                    }
+            .overlay {
+                HStack {
+                    dot(film, 14)
+                    Spacer(minLength: 8)
+                    if settings.date.placement != .off { dot(Self.dateText(), 14) }
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 10)
                 .modifier(ColdWake())
             }
     }

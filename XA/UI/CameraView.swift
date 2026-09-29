@@ -22,7 +22,7 @@ struct CameraView: View {
                 case .digi:
                     if filmOpen { FilmControls(camera: camera, open: $filmOpen, onFilm: onFilm).transition(Self.rows) }
                 case .video:
-                    VideoRows(camera: camera, onFilm: onFilm).transition(Self.rows)
+                    if filmOpen || camera.recording { VideoRows(camera: camera, open: $filmOpen, onFilm: onFilm).transition(Self.rows) }
                 case .pro:
                     ProRows(camera: camera).transition(Self.rows)
                 }
@@ -86,7 +86,7 @@ struct CameraView: View {
             }
         }
         .aspectRatio(3 / 4, contentMode: .fit)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 }
 
@@ -259,7 +259,9 @@ struct FilmStrip: View {
 /// Video looks as tapes and cartridges, and the sim they are shot through.
 private struct VideoRows: View {
     @ObservedObject var camera: CameraModel
+    @Binding var open: Bool
     var onFilm: () -> Void
+    @State private var touched = Date()
     var body: some View {
         VStack(spacing: 6) {
             if camera.recording {
@@ -298,6 +300,13 @@ private struct VideoRows: View {
             .frame(height: 59)
         }
         .frame(height: 94)
+        // Like the film rows: untouched for a few seconds, the tapes fold into the box in the mode row.
+        .onChange(of: camera.videoLook) { _, _ in touched = Date() }
+        .simultaneousGesture(TapGesture().onEnded { touched = Date() })
+        .task(id: touched) {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if !Task.isCancelled && !camera.recording && Date().timeIntervalSince(touched) >= 3.9 { withAnimation(.easeInOut(duration: 0.3)) { open = false } }
+        }
     }
 }
 
@@ -473,10 +482,12 @@ private struct ModeRow: View {
             .padding(3).background(XA.fill, in: Capsule())
             Spacer()
             Group {
-                if camera.mode == .video {
-                    FannedTape(look: camera.videoLook) { camera.stepTape(1) }
+                if camera.mode == .video && !filmOpen && !camera.recording {
+                    FannedTape(look: camera.videoLook) { withAnimation(.snappy) { filmOpen = true } }
                         .modifier(SwipeToStep { camera.stepTape($0) })
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
+                } else if camera.mode == .video {
+                    Color.clear.frame(width: 44, height: 44)
                 } else if camera.mode == .digi && !filmOpen {
                     FannedFilm(stack: camera.stack) { withAnimation(.snappy) { filmOpen = true } }
                         .modifier(SwipeToStep { camera.stepSim($0) })

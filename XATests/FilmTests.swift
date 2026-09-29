@@ -239,6 +239,23 @@ final class FilmTests: XCTestCase {
         XCTAssertTrue(first === second, "within a sixth of a second the frame is held")
     }
 
+    /// One NaN pixel must not come out of the glow as a black square.
+    func testABadPixelDoesNotSpreadThroughTheGlow() {
+        let w = 64, h = 64
+        var px = [Float](repeating: 0.5, count: w * h * 4)
+        for i in 0..<(w * h) { px[i * 4 + 3] = 1 }
+        let bad = (32 * w + 32) * 4
+        px[bad] = .nan; px[bad + 1] = .infinity; px[bad + 2] = .nan
+        let data = px.withUnsafeBufferPointer { Data(buffer: $0) }
+        let img = CIImage(bitmapData: data, bytesPerRow: w * 16, size: CGSize(width: w, height: h), format: .RGBAf, colorSpace: nil)
+        let out = SimEngine.apply(Sim.prima, to: img, preview: true)
+        var res = [Float](repeating: 0, count: w * h * 4)
+        Looks.context.render(out, toBitmap: &res, rowBytes: w * 16, bounds: CGRect(x: 0, y: 0, width: w, height: h), format: .RGBAf, colorSpace: nil)
+        XCTAssertFalse(res.contains { $0.isNaN }, "no NaN left")
+        let near = (30 * w + 30) * 4
+        XCTAssertGreaterThan(res[near + 1], 0.05, "the pixels around it are not black")
+    }
+
     func testOnlyBrightLightGlows() {
         let e = CGRect(x: 0, y: 0, width: 200, height: 200)
         let dark = CIImage(color: CIColor(red: 0.3, green: 0.3, blue: 0.3)).cropped(to: e)

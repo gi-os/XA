@@ -323,21 +323,70 @@ enum VHSOverlay {
     private static var key = ""
     private static var cached: CIImage?
 
+    /// A camcorder's on-screen display, the way the character generator drew it: chunky 5x7
+    /// blocks, white with a hard black edge, PLAY and a solid arrow top left, SP top right,
+    /// the time and date bottom left. No system font and no emoji.
+    static let rom: [Character: [String]] = [
+        "A": ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+        "B": ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+        "C": ["01110", "10001", "10000", "10000", "10000", "10001", "01110"],
+        "D": ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+        "E": ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+        "F": ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
+        "G": ["01110", "10001", "10000", "10111", "10001", "10001", "01111"],
+        "J": ["00111", "00010", "00010", "00010", "00010", "10010", "01100"],
+        "L": ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+        "M": ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
+        "N": ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
+        "O": ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+        "P": ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
+        "R": ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+        "S": ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+        "T": ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+        "U": ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
+        "V": ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
+        "Y": ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
+        ">": ["10000", "11000", "11100", "11110", "11100", "11000", "10000"],
+    ]
+
+    static func glyph(_ ch: Character) -> [String]? { rom[ch] ?? DateBack.glyphs[ch] }
+
     static func image(size: CGSize, date: Date) -> CIImage? {
-        let f = DateFormatter(); f.dateFormat = "MMM.dd yyyy  h:mm a"
-        let text = f.string(from: date).uppercased()
-        let k = "\(Int(size.width))x\(Int(size.height))|\(text)"
+        let df = DateFormatter(); df.locale = Locale(identifier: "en_US_POSIX")
+        df.dateFormat = "MMM. d yyyy"; let day = df.string(from: date).uppercased()
+        df.dateFormat = "a h:mm"; let time = df.string(from: date).uppercased()
+        let k = "\(Int(size.width))x\(Int(size.height))|\(day)|\(time)"
         lock.lock(); if k == key, let c = cached { lock.unlock(); return c }; lock.unlock()
         let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 1; fmt.opaque = false
-        let font = XA.uiFont("RobotoCondensed-Bold", size.height / 20)
-        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.white]
-        let stroke: [NSAttributedString.Key: Any] = [.font: font, .strokeColor: UIColor.black, .strokeWidth: 22]
-        let pad = size.height / 22
-        let img = UIGraphicsImageRenderer(size: size, format: fmt).image { _ in
-            for (s, p) in [("PLAY ▶", CGPoint(x: pad, y: pad)), (text, CGPoint(x: pad, y: size.height - pad - font.lineHeight))] {
-                (s as NSString).draw(at: p, withAttributes: stroke)
-                (s as NSString).draw(at: p, withAttributes: attrs)
+        let cell: CGFloat = max(2, (size.height / 30 / 7).rounded())   // one block of the 5x7 grid
+        let pad: CGFloat = cell * 6
+        let lineH: CGFloat = cell * 7
+        func width(_ s: String) -> CGFloat { CGFloat(s.count) * cell * 6 - cell }
+        let img = UIGraphicsImageRenderer(size: size, format: fmt).image { r in
+            let ctx = r.cgContext
+            ctx.setShouldAntialias(false)
+            func draw(_ s: String, x: CGFloat, y: CGFloat) {
+                // The black edge first, one block wide all round, then the white letters on it.
+                for pass in 0..<2 {
+                    ctx.setFillColor(pass == 0 ? UIColor.black.cgColor : UIColor.white.cgColor)
+                    var cx = x
+                    for ch in s {
+                        if let rows = glyph(ch) {
+                            for (ry, row) in rows.enumerated() {
+                                for (rx, bit) in row.enumerated() where bit == "1" {
+                                    let b = CGRect(x: cx + CGFloat(rx) * cell, y: y + CGFloat(ry) * cell, width: cell, height: cell)
+                                    ctx.fill(pass == 0 ? b.insetBy(dx: -cell * 0.5, dy: -cell * 0.5) : b)
+                                }
+                            }
+                        }
+                        cx += cell * 6
+                    }
+                }
             }
+            draw("PLAY >", x: pad, y: pad)
+            draw("SP", x: size.width - pad - width("SP"), y: pad)
+            draw(time, x: pad, y: size.height - pad - lineH * 2 - cell * 3)
+            draw(day, x: pad, y: size.height - pad - lineH)
         }
         guard let cg = img.cgImage else { return nil }
         let c = CIImage(cgImage: cg)

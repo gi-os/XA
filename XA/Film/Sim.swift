@@ -292,7 +292,8 @@ enum SimEngine {
     /// The whole sim on an image: cube, then halation, grain and vignette.
     static func apply(_ s: Sim, to img: CIImage, preview: Bool) -> CIImage {
         let e = img.extent
-        let lit = (s.halation > 0 || s.bloom > 0) ? glow(img, halation: s.halation, tone: s.halationTone, bloom: s.bloom) : img
+        let clean = Sanitize.apply(img)
+        let lit = (s.halation > 0 || s.bloom > 0) ? Sanitize.apply(glow(clean, halation: s.halation, tone: s.halationTone, bloom: s.bloom)) : clean
         let f = CIFilter.colorCubeWithColorSpace()
         f.inputImage = lit
         f.cubeDimension = 32
@@ -310,7 +311,7 @@ enum SimEngine {
             v.falloff = 0.6
             out = (v.outputImage ?? out).cropped(to: e)
         }
-        return out
+        return Sanitize.apply(out, floor: 0)
     }
 
     /// How far each pixel goes past `threshold`, in linear light, colour kept. With an HDR
