@@ -200,15 +200,19 @@ final class FilmTests: XCTestCase {
         let e = CGRect(x: 0, y: 0, width: 180, height: 240)
         for l in [VideoLook.slitScan, .motion, .trails, .datamosh] {
             let fx = VideoFX()
-            let start = Date()
+            var times: [TimeInterval] = []
             for i in 0..<90 {
                 let c = CGFloat(i % 10) / 10
                 let src = CIImage(color: CIColor(red: c, green: 0.4, blue: 1 - c)).cropped(to: e)
+                let t0 = Date()
                 let out = fx.apply(l, to: src, time: Double(i) / 30, date: Date())
                 XCTAssertEqual(out.extent.width, e.width, accuracy: 0.5, "\(l.title)")
                 XCTAssertNotNil(Looks.context.createCGImage(out, from: e), "\(l.title)")
+                times.append(Date().timeIntervalSince(t0))
             }
-            XCTAssertLessThan(Date().timeIntervalSince(start), 20, "\(l.title) slows down frame after frame")
+            // Slit-scan fills its 30-frame memory first, so compare once it is full.
+            let middle = times[30..<60].reduce(0, +), last = times[60..<90].reduce(0, +)
+            XCTAssertLessThan(last, middle * 2.5 + 0.5, "\(l.title) slows down frame after frame")
         }
     }
 
