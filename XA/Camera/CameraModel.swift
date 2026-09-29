@@ -487,6 +487,7 @@ final class CameraModel: NSObject, ObservableObject {
         guard mode != .pro || focusIndex == nil else { return }
         focusPoint = viewPoint
         focusLocked = false
+        if settings.sounds && mode != .video { CameraSounds.shared.play(.focus) }
         let continuous = settings.afMode == .continuous
         let front = self.front
         sessionQueue.async { self.aim(viewPoint, front: front, continuous: continuous) }
@@ -523,6 +524,7 @@ final class CameraModel: NSObject, ObservableObject {
     func halfPress() {
         guard mode != .video, !halfPressed else { return }
         halfPressed = true
+        if settings.sounds { CameraSounds.shared.play(.focus) }
         guard mode != .pro || focusIndex == nil else { focusLocked = true; return }
         let single = settings.afMode == .single
         let point = focusPoint ?? CGPoint(x: 0.5, y: 0.5)
@@ -687,6 +689,10 @@ final class CameraModel: NSObject, ObservableObject {
         let want = m.prioritization
         settingsP.photoQualityPrioritization = want.rawValue <= photoOutput.maxPhotoQualityPrioritization.rawValue ? want : photoOutput.maxPhotoQualityPrioritization
         settingsP.maxPhotoDimensions = shotDims(m)
+        let fm: AVCaptureDevice.FlashMode = settings.flash == .on ? .on : (settings.flash == .auto ? .auto : .off)
+        if photoOutput.supportedFlashModes.contains(fm) { settingsP.flashMode = fm }
+        // XA plays its own shutter; the system click is dropped where the law allows it.
+        if settings.sounds && photoOutput.isShutterSoundSuppressionSupported { settingsP.isShutterSoundSuppressionEnabled = true }
         if let c = photoOutput.connection(with: .video), let rc = rotation {
             let a = rc.videoRotationAngleForHorizonLevelCapture
             if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
@@ -695,6 +701,7 @@ final class CameraModel: NSObject, ObservableObject {
         let (_, dev) = frameState()
         pending[settingsP.uniqueID] = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date())
         photoOutput.capturePhoto(with: settingsP, delegate: self)
+        if settings.sounds && settingsP.isShutterSoundSuppressionEnabled { CameraSounds.shared.play(.shutter) }
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         flash = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { self.flash = false }

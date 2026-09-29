@@ -68,6 +68,8 @@ enum Darkroom {
     /// `dateShift` pushes the date back down and out of the frame (0 = in place, 1 = gone),
     /// for the slide when switching from PRO to DIGI.
     static func develop(_ src: CIImage, _ s: DevelopSettings, date: Date, preview: Bool, dateShift: CGFloat = 0) -> (CIImage, Bool) {
+        // Read before any filter: the photo's EXIF says whether the flash fired and how dark it was.
+        let conditions = DigicamFX.Conditions(properties: src.properties)
         var img = preview ? src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
                           : Digicam.shrink(src, megapixels: s.megapixels)
         let sim = FilmCatalog.sim(s.stack.simID)
@@ -76,7 +78,10 @@ enum Darkroom {
             let w: CGFloat? = s.stack.look.pixelWidth != nil && !preview ? img.extent.width : nil
             img = Looks.apply(s.stack.look, to: img, outputWidth: w)
         }
-        if !preview { img = Digicam.crunch(img, noise: CGFloat(s.noise) * 0.03) }
+        if !preview {
+            img = Digicam.crunch(img, noise: CGFloat(s.noise) * 0.03)
+            img = DigicamFX.apply(img, conditions, pixel: s.stack.look.pixelWidth != nil)
+        }
         let mono = (sim?.mono ?? false) || s.stack.look.mono
         var alpha = false
         var shapeForDate: FrameShape = .none

@@ -51,6 +51,7 @@ struct RootView: View {
         .sheet(isPresented: $showCustomize) { CustomizeView(settings: settings, camera: camera) }
         .sheet(isPresented: $showFilm, onDismiss: { camera.rebuildControls() }) { FilmPicker(camera: camera) }
         .onAppear {
+            CameraSounds.shared.prepare()
             camera.library = library
             camera.onStackChange = { pushContext() }
             camera.start()

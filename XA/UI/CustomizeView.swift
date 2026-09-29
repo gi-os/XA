@@ -38,6 +38,13 @@ struct CustomizeView: View {
                                 .font(.system(size: 12)).foregroundStyle(XA.faint)
                         }
                     }
+                    group("SOUND") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("XA camera sounds", isOn: $settings.sounds).tint(XA.orange).font(.system(size: 15))
+                            Text("An AF motor when you aim focus, a fast metal shutter when you shoot. Off uses the iPhone's click. The silent switch mutes both.")
+                                .font(.system(size: 12)).foregroundStyle(XA.faint)
+                        }
+                    }
                     group("CAMERA CONTROL") {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Slide in DIGI").font(.system(size: 15))

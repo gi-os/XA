@@ -434,9 +434,20 @@ private struct ModeRow: View {
     var onCustomize: () -> Void
     var body: some View {
         HStack {
-            RoundButton(action: onCustomize) { Image(systemName: "slider.horizontal.3").font(.system(size: 18)) }
-                .accessibilityLabel("Customize")
-                .frame(width: 64, alignment: .leading)
+            HStack(spacing: 4) {
+                RoundButton(size: 38, action: onCustomize) { Image(systemName: "slider.horizontal.3").font(.system(size: 16)) }
+                    .accessibilityLabel("Customize")
+                if camera.mode != .video {
+                    // Flash: off, auto, on. A shot the flash lit gets DIGI's party-flash look.
+                    RoundButton(size: 38, action: { settings.flash = settings.flash.next }) {
+                        Image(systemName: settings.flash.icon).font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(settings.flash == .on ? XA.orange : .white)
+                    }
+                    .accessibilityLabel(settings.flash.label)
+                    .transition(.opacity)
+                }
+            }
+            .frame(width: 80, alignment: .leading)
             Spacer(minLength: 4)
             HStack(spacing: 2) {
                 ForEach(CaptureMode.allCases) { m in
@@ -463,7 +474,7 @@ private struct ModeRow: View {
                     mpMenu
                 }
             }
-            .frame(width: 72, alignment: .trailing)
+            .frame(width: 80, alignment: .trailing)
         }
     }
 

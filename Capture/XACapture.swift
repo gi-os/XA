@@ -68,6 +68,7 @@ struct LockedCameraView: View {
         .task {
             await loadContext()
             camera.library = Library()
+            CameraSounds.shared.prepare()
             camera.start()
         }
     }

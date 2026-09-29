@@ -5,6 +5,13 @@ enum ProFormat: String, CaseIterable, Codable { case heif, jpeg }
 enum DigiSlide: String, CaseIterable, Codable { case sim, look }
 enum ProSlide: String, CaseIterable, Codable { case exposure, zoom }
 enum OpenIn: String, CaseIterable, Codable { case last, digi, pro }
+/// The flash. In DIGI a shot the flash lit gets the party-flash look.
+enum FlashSetting: String, CaseIterable, Codable {
+    case off, auto, on
+    var next: FlashSetting { self == .off ? .auto : (self == .auto ? .on : .off) }
+    var icon: String { self == .off ? "bolt.slash" : (self == .auto ? "bolt.badge.automatic" : "bolt.fill") }
+    var label: String { self == .off ? "Flash off" : (self == .auto ? "Flash auto" : "Flash on") }
+}
 
 /// Everything in Customize, saved as it changes.
 final class AppSettings: ObservableObject {
@@ -24,6 +31,9 @@ final class AppSettings: ObservableObject {
     @Published var grid: Bool { didSet { d.set(grid, forKey: "grid") } }
     @Published var afMode: AFMode { didSet { d.set(afMode.rawValue, forKey: "afMode") } }
     @Published var afArea: AFArea { didSet { d.set(afArea.rawValue, forKey: "afArea") } }
+    @Published var flash: FlashSetting { didSet { d.set(flash.rawValue, forKey: "flash") } }
+    /// XA's own focus and shutter sounds instead of the system click.
+    @Published var sounds: Bool { didSet { d.set(sounds, forKey: "sounds") } }
     @Published var showRollButton: Bool { didSet { d.set(showRollButton, forKey: "showRollButton") } }
     @Published var showFlipButton: Bool { didSet { d.set(showFlipButton, forKey: "showFlipButton") } }
 
@@ -42,6 +52,8 @@ final class AppSettings: ObservableObject {
         afArea = AFArea(rawValue: d.string(forKey: "afArea") ?? "") ?? .auto
         showRollButton = d.object(forKey: "showRollButton") as? Bool ?? true
         showFlipButton = d.object(forKey: "showFlipButton") as? Bool ?? true
+        flash = FlashSetting(rawValue: d.string(forKey: "flash") ?? "") ?? .off
+        sounds = d.object(forKey: "sounds") as? Bool ?? true
     }
 
     private func save<T: Encodable>(_ v: T, _ key: String) {
