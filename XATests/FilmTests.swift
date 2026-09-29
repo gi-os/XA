@@ -102,7 +102,8 @@ final class FilmTests: XCTestCase {
     func testEveryShapeSitsInsideTheFrameAndCoversTheMiddle() {
         // Portrait and landscape: a landscape photo must not make a corner radius too big.
         for r in [CGRect(x: 0, y: 0, width: 300, height: 400), CGRect(x: 0, y: 0, width: 400, height: 300)] {
-            for s in FrameShape.allCases where s != .none {
+            // Instant prints print on paper instead of cutting an outline.
+            for s in FrameShape.allCases where s != .none && s.instant == nil {
                 let p = s.path(in: r)!
                 XCTAssertTrue(r.insetBy(dx: -1, dy: -1).contains(p.boundingBox), "\(s) in \(r.size)")
                 XCTAssertTrue(p.contains(CGPoint(x: r.midX, y: r.midY)), "\(s) in \(r.size)")
