@@ -5,7 +5,9 @@ import CoreImage.CIFilterBuiltins
 /// frame rather than to the pixels, and weighted to the midtones. Deep shadows and clean
 /// highlights stay quieter, the way a negative does.
 enum FilmGrain {
-    static func apply(_ img: CIImage, amount: Double, size: Double) -> CIImage {
+    /// `moving`: a fresh patch of noise each call, so video grain dances instead of sitting
+    /// on the lens like dirt. Stills leave it off and stay repeatable.
+    static func apply(_ img: CIImage, amount: Double, size: Double, moving: Bool = false) -> CIImage {
         guard amount > 0, let rnd = CIFilter.randomGenerator().outputImage else { return img }
         let e = img.extent
         // A grain is a fraction of the frame, never a single pixel: at 2MP a fine grain is about
@@ -21,7 +23,8 @@ enum FilmGrain {
         mono.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
         mono.biasVector = CIVector(x: 0, y: 0, z: 0, w: 1)
         guard let grey = mono.outputImage else { return img }
-        let scaled = grey.transformed(by: CGAffineTransform(scaleX: cell, y: cell))
+        let jump = moving ? CGAffineTransform(translationX: CGFloat.random(in: -4000...4000), y: CGFloat.random(in: -4000...4000)) : .identity
+        let scaled = grey.transformed(by: jump).transformed(by: CGAffineTransform(scaleX: cell, y: cell))
         // Clumps: a little blur, then the contrast the blur took away put back.
         let blur = CIFilter.gaussianBlur()
         blur.inputImage = scaled

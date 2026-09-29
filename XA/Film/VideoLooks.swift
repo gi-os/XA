@@ -116,7 +116,7 @@ final class VideoFX {
         cc.saturation = 0.9; cc.contrast = 1.12
         cc.brightness = Float.random(in: -0.025...0.025)
         img = (cc.outputImage ?? img).cropped(to: e)
-        img = FilmGrain.apply(img, amount: 0.7, size: 0.7)
+        img = FilmGrain.apply(img, amount: 0.7, size: 0.7, moving: true)
         let v = CIFilter.vignetteEffect(); v.inputImage = img
         v.center = CGPoint(x: e.midX, y: e.midY); v.radius = Float(hypot(e.width, e.height) * 0.46); v.intensity = 0.9; v.falloff = 0.5
         img = (v.outputImage ?? img).cropped(to: e)
@@ -144,14 +144,25 @@ final class VideoFX {
             .cropped(to: e)
         let cc = CIFilter.colorControls(); cc.inputImage = img; cc.saturation = 1.3; cc.contrast = 1.05
         img = (cc.outputImage ?? img).cropped(to: e)
-        // Chroma bleed: red a little right, blue a little left.
-        let shift: CGFloat = max(2, e.width / 240)
-        let red = channel(img, r: 1, g: 0, b: 0).transformed(by: CGAffineTransform(translationX: shift, y: 0))
-        let blue = channel(img, r: 0, g: 0, b: 1).transformed(by: CGAffineTransform(translationX: -shift, y: 0))
+        // Chromatic aberration: the three channels don't land in the same place. Red is
+        // magnified a touch and pushed right, blue shrunk and pushed left, so fringes widen
+        // toward the edges the way a cheap camcorder lens and a worn head smear them.
+        let shift: CGFloat = max(3, e.width / 160)
+        let spread: CGFloat = 0.012
+        let c = CGPoint(x: e.midX, y: e.midY)
+        func about(_ scale: CGFloat, dx: CGFloat) -> CGAffineTransform {
+            CGAffineTransform(translationX: -c.x, y: -c.y)
+                .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+                .concatenating(CGAffineTransform(translationX: c.x + dx, y: c.y))
+        }
+        let red = channel(img.clampedToExtent(), r: 1, g: 0, b: 0).transformed(by: about(1 + spread, dx: shift)).cropped(to: e)
+        let blue = channel(img.clampedToExtent(), r: 0, g: 0, b: 1).transformed(by: about(1 - spread, dx: -shift)).cropped(to: e)
         let green = channel(img, r: 0, g: 1, b: 0)
         let rg = CIFilter.additionCompositing(); rg.inputImage = red; rg.backgroundImage = green
         let rgb = CIFilter.additionCompositing(); rgb.inputImage = blue; rgb.backgroundImage = rg.outputImage
         img = (rgb.outputImage ?? img).cropped(to: e)
+        // Tape noise, alive: coarse grain that moves every frame.
+        img = FilmGrain.apply(img, amount: 0.8, size: 0.9, moving: true)
         // Scanlines.
         let stripes = CIFilter.stripesGenerator()
         stripes.color0 = CIColor(red: 0, green: 0, blue: 0, alpha: 0.22)
@@ -238,7 +249,7 @@ final class VideoFX {
         let k: CGFloat = 480 / max(e.width, 1)
         var img = (tint.outputImage ?? src).cropped(to: e)
             .transformed(by: CGAffineTransform(scaleX: k, y: k)).transformed(by: CGAffineTransform(scaleX: 1 / k, y: 1 / k)).cropped(to: e)
-        img = FilmGrain.apply(img, amount: 0.5, size: 0.2)
+        img = FilmGrain.apply(img, amount: 0.5, size: 0.2, moving: true)
         if let osd = CCTVOverlay.image(size: e.size, date: date) {
             img = osd.transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY)).composited(over: img)
         }
