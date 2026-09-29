@@ -63,15 +63,16 @@ enum Digicam {
     static func tone(_ i: CIImage) -> CIImage {
         let c = CIFilter.colorControls()
         c.inputImage = i
-        c.saturation = 1.18
-        c.contrast = 1.06
+        c.saturation = 1.03
+        c.contrast = 1.02
+        // Close to straight: a hair of lift in the blacks and a soft shoulder, no clipping.
         let t = CIFilter.toneCurve()
         t.inputImage = c.outputImage ?? i
-        t.point0 = CGPoint(x: 0, y: 0.03)
-        t.point1 = CGPoint(x: 0.25, y: 0.21)
-        t.point2 = CGPoint(x: 0.5, y: 0.53)
-        t.point3 = CGPoint(x: 0.75, y: 0.86)
-        t.point4 = CGPoint(x: 0.9, y: 1)
+        t.point0 = CGPoint(x: 0, y: 0.02)
+        t.point1 = CGPoint(x: 0.25, y: 0.24)
+        t.point2 = CGPoint(x: 0.5, y: 0.51)
+        t.point3 = CGPoint(x: 0.75, y: 0.77)
+        t.point4 = CGPoint(x: 1, y: 0.98)
         return (t.outputImage ?? i).cropped(to: i.extent)
     }
 

@@ -194,6 +194,24 @@ final class FilmTests: XCTestCase {
         }
     }
 
+    /// Slit-scan, Motion, Trails and Datamosh keep frames between calls. A minute of frames
+    /// must stay a picture, not a recipe that grows every frame (that took the camera down).
+    func testLooksThatRememberFramesStayBounded() {
+        let e = CGRect(x: 0, y: 0, width: 180, height: 240)
+        for l in [VideoLook.slitScan, .motion, .trails, .datamosh] {
+            let fx = VideoFX()
+            let start = Date()
+            for i in 0..<90 {
+                let c = CGFloat(i % 10) / 10
+                let src = CIImage(color: CIColor(red: c, green: 0.4, blue: 1 - c)).cropped(to: e)
+                let out = fx.apply(l, to: src, time: Double(i) / 30, date: Date())
+                XCTAssertEqual(out.extent.width, e.width, accuracy: 0.5, "\(l.title)")
+                XCTAssertNotNil(Looks.context.createCGImage(out, from: e), "\(l.title)")
+            }
+            XCTAssertLessThan(Date().timeIntervalSince(start), 20, "\(l.title) slows down frame after frame")
+        }
+    }
+
     func testHeldLooksRepeatFrames() {
         let fx = VideoFX()
         let a = CIImage(color: .red).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))

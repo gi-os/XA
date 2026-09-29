@@ -1,3 +1,4 @@
+import Metal
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import UIKit
@@ -63,8 +64,47 @@ final class VideoFX {
     private var keyframeAt: Double = 0
     private var leakUntil: Double = 0
     private var noiseBandY: CGFloat = -1
-    /// Recent camera frames, newest last, for Motion and Slit-scan.
+    /// Recent camera frames, newest last, for Motion and Slit-scan. Each one is baked into a
+    /// buffer of our own at half size: holding the camera's own buffers starves its small pool
+    /// and the camera stops.
     private var history: [CIImage] = []
+    private let ctx: CIContext = {
+        if let d = MTLCreateSystemDefaultDevice() { return CIContext(mtlDevice: d, options: [.cacheIntermediates: false]) }
+        return CIContext(options: [.cacheIntermediates: false])
+    }()
+    private var pools: [String: CVPixelBufferPool] = [:]
+    private static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
+
+    /// Renders `img` now into a buffer XA owns, so what is kept between frames is a picture,
+    /// not a recipe. A recipe that points at the last frame's recipe grows every frame
+    /// (Trails, Datamosh) until it takes the app down.
+    func bake(_ img: CIImage, scale: CGFloat = 1) -> CIImage {
+        let e = img.extent
+        let w = max(1, Int((e.width * scale).rounded())), h = max(1, Int((e.height * scale).rounded()))
+        let key = "\(w)x\(h)"
+        if pools[key] == nil {
+            let attrs: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: w, kCVPixelBufferHeightKey as String: h,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any]()
+            ]
+            var pool: CVPixelBufferPool?
+            CVPixelBufferPoolCreate(nil, [kCVPixelBufferPoolMinimumBufferCountKey as String: 34] as CFDictionary, attrs as CFDictionary, &pool)
+            pools[key] = pool
+        }
+        var pb: CVPixelBuffer?
+        guard let pool = pools[key], CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pb) == kCVReturnSuccess, let pb else { return img }
+        let sx = CGFloat(w) / e.width, sy = CGFloat(h) / e.height
+        let placed = img.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY)).transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+        ctx.render(placed, to: pb, bounds: CGRect(x: 0, y: 0, width: w, height: h), colorSpace: Self.sRGB)
+        return CIImage(cvPixelBuffer: pb, options: [.colorSpace: Self.sRGB])
+            .transformed(by: CGAffineTransform(scaleX: 1 / sx, y: 1 / sy))
+            .transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY))
+    }
+
+    private static func same(_ a: CGRect, _ b: CGRect) -> Bool {
+        abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1 && abs(a.minX - b.minX) < 1 && abs(a.minY - b.minY) < 1
+    }
 
     func reset() { held = nil; heldAt = -1; previousOut = nil; previousIn = nil; keyframeAt = 0; history = [] }
 
@@ -75,9 +115,8 @@ final class VideoFX {
             if let held, time - heldAt < 1 / fps, held.extent == e { return held }
         }
         if look == .motion || look == .slitScan {
-            if let last = history.last, last.extent != e { history = [] }
-            // Kept small: a frame costs nothing until it is rendered.
-            history.append(src)
+            if let last = history.last, !Self.same(last.extent, e) { history = [] }
+            history.append(bake(src, scale: 0.5).cropped(to: e))
             if history.count > 30 { history.removeFirst(history.count - 30) }
         }
         var out: CIImage
@@ -203,9 +242,9 @@ final class VideoFX {
 
     /// Each frame laid over the last ones, so anything moving leaves a tail.
     private func trails(_ src: CIImage) -> CIImage {
-        guard let prev = previousOut, prev.extent == src.extent else { previousOut = src; return src }
+        guard let prev = previousOut, Self.same(prev.extent, src.extent) else { previousOut = bake(src).cropped(to: src.extent); return src }
         let d = CIFilter.dissolveTransition(); d.inputImage = prev; d.targetImage = src; d.time = 0.28
-        let out = (d.outputImage ?? src).cropped(to: src.extent)
+        let out = bake((d.outputImage ?? src).cropped(to: src.extent)).cropped(to: src.extent)
         previousOut = out
         return out
     }
@@ -260,17 +299,18 @@ final class VideoFX {
     /// A clean keyframe every few seconds.
     private func datamosh(_ src: CIImage, time: Double) -> CIImage {
         let e = src.extent
-        defer { previousIn = src }
-        guard let prev = previousOut, let lastIn = previousIn, prev.extent == e else { previousOut = src; keyframeAt = time; return src }
-        if time - keyframeAt > 3.2 { previousOut = src; keyframeAt = time; return src }
-        let diff = CIFilter.differenceBlendMode(); diff.inputImage = src; diff.backgroundImage = lastIn
+        let now = bake(src).cropped(to: e)
+        defer { previousIn = now }
+        guard let prev = previousOut, let lastIn = previousIn, Self.same(prev.extent, e), Self.same(lastIn.extent, e) else { previousOut = now; keyframeAt = time; return now }
+        if time - keyframeAt > 3.2 { previousOut = now; keyframeAt = time; return now }
+        let diff = CIFilter.differenceBlendMode(); diff.inputImage = now; diff.backgroundImage = lastIn
         let px = CIFilter.pixellate(); px.inputImage = diff.outputImage?.cropped(to: e); px.scale = Float(max(8, e.width / 60)); px.center = .zero
         let th = CIFilter.colorThreshold(); th.inputImage = px.outputImage?.cropped(to: e); th.threshold = 0.06
-        guard let mask = th.outputImage?.cropped(to: e) else { previousOut = src; return src }
+        guard let mask = th.outputImage?.cropped(to: e) else { previousOut = now; return now }
         let dx = e.width / 160, dy = -e.height / 220
         let smeared = prev.clampedToExtent().transformed(by: CGAffineTransform(translationX: dx, y: dy)).cropped(to: e)
-        let b = CIFilter.blendWithMask(); b.inputImage = smeared; b.backgroundImage = src; b.maskImage = mask
-        let out = (b.outputImage ?? src).cropped(to: e)
+        let b = CIFilter.blendWithMask(); b.inputImage = smeared; b.backgroundImage = now; b.maskImage = mask
+        let out = bake((b.outputImage ?? now).cropped(to: e)).cropped(to: e)
         previousOut = out
         return out
     }
