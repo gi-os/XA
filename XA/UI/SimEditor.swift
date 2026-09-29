@@ -124,8 +124,8 @@ struct SimEditor: View {
         FlatSlider(label: "Bloom · white glow", value: $sim.bloom, format: pct)
         FlatSlider(label: "Halation · red ring", value: $sim.halation, format: pct)
         FlatSlider(label: "Vignette", value: $sim.vignette, format: pct)
-        SectionLabel(text: "PRINT").padding(.top, 8)
-        Segmented(items: [(SimFrame.none, "None"), (.instant, "Instant"), (.round, "Round")], selection: $sim.frame)
+        Text("Instant prints (Polaroid, Pola Round, Instax, Instax Wide) live under SHAPE now.")
+            .font(.system(size: 12)).foregroundStyle(XA.faint).padding(.top, 8)
     }
 
     @ViewBuilder private var boxTab: some View {

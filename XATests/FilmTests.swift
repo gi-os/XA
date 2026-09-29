@@ -46,10 +46,10 @@ final class FilmTests: XCTestCase {
     // MARK: sims
 
     func testNeutralAndSevenStocksWithUniqueIDs() {
-        XCTAssertEqual(Sim.presets.count, 8)
+        XCTAssertEqual(Sim.presets.count, 7)
         XCTAssertEqual(Sim.presets.first?.id, Sim.neutral.id)
-        XCTAssertEqual(Set(Sim.presets.map(\.id)).count, 8)
-        XCTAssertEqual(Set(Sim.presets.map(\.name)).count, 8)
+        XCTAssertEqual(Set(Sim.presets.map(\.id)).count, 7)
+        XCTAssertEqual(Set(Sim.presets.map(\.name)).count, 7)
     }
 
     func testNoSimIsNeutral() {
@@ -164,10 +164,23 @@ final class FilmTests: XCTestCase {
         XCTAssertEqual(px[3], 0, "the corner should be empty")
     }
 
-    func testAnInstantSimTakesOverTheShape() {
-        let st = Stack(simID: "sunday", look: .none, shape: .crush)
-        XCTAssertNil(st.effectiveShape)
-        XCTAssertEqual(Stack(simID: "nocturne", look: .none, shape: .crush).effectiveShape, .crush)
+    func testInstantFilmIsAShape() {
+        XCTAssertEqual(Stack(simID: "sunday", look: .none, shape: .polaroid).effectiveShape, .polaroid)
+        XCTAssertEqual(FrameShape.polaroid.instant, .square)
+        XCTAssertEqual(FrameShape.polaRound.instant, .round)
+        XCTAssertEqual(FrameShape.instax.instant, .mini)
+        XCTAssertEqual(FrameShape.instaxWide.instant, .wide)
+        XCTAssertNil(FrameShape.crush.instant)
+    }
+
+    func testInstantPrintsHaveTheirFilmsProportions() {
+        let src = CIImage(color: .gray).cropped(to: CGRect(x: 0, y: 0, width: 1200, height: 1600))
+        let mini = Shapes.instant(src, kind: .mini).extent.size
+        XCTAssertEqual(mini.width / mini.height, 54.0 / 86.0, accuracy: 0.02, "Instax Mini is 54 x 86")
+        let wide = Shapes.instant(src, kind: .wide).extent.size
+        XCTAssertEqual(wide.width / wide.height, 108.0 / 86.0, accuracy: 0.02, "Instax Wide is 108 x 86")
+        let pola = Shapes.instant(src, kind: .square).extent.size
+        XCTAssertEqual(pola.width / pola.height, 1.12 / 1.276, accuracy: 0.02, "Polaroid: square window, thick chin")
     }
 
     func testAStackSurvivesARoundTrip() throws {

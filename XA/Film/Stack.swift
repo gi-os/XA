@@ -85,10 +85,15 @@ enum Darkroom {
         let mono = (sim?.mono ?? false) || s.stack.look.mono
         var alpha = false
         var shapeForDate: FrameShape = .none
-        var instant: SimFrame = .none
-        if let sim, sim.frame != .none {
-            img = Shapes.instant(img, round: sim.frame == .round)
-            instant = sim.frame
+        var instant: InstantKind = .none
+        if let kind = s.stack.effectiveShape?.instant {
+            img = Shapes.instant(img, kind: kind)
+            instant = kind
+        } else if let sim, sim.frame != .none {
+            // Sims made before instant film became a shape.
+            let kind: InstantKind = sim.frame == .round ? .round : .square
+            img = Shapes.instant(img, kind: kind)
+            instant = kind
         } else if let shape = s.stack.effectiveShape {
             let bg = preview ? Shapes.checker(extent: img.extent) : nil
             img = Shapes.apply(shape, to: img, background: bg)

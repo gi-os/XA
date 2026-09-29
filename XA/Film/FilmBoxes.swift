@@ -418,7 +418,7 @@ private struct PresetSimBox: View {
             print(round: false).tr(12, 10)
             T("SUNDAY", f, 18, fg).tl(10, 10)
             T("600", f, 18, Color(hex: "#E07A5F")).tl(10, 34)
-            T("XA INSTANT · 8 SHOTS", f, 9, fg, 1).bl(10, 8)
+            T("XA INSTANT COLOR", f, 9, fg, 1).bl(10, 8)
         }
     }
 
@@ -452,6 +452,7 @@ private struct ShapeBox: View {
         case .porthole: porthole
         case .window: window
         case .crush: crush
+        case .polaroid, .polaRound, .instax, .instaxWide: InstantShapeBox(shape: shape)
         default: nova
         }
     }
@@ -697,6 +698,54 @@ private struct TapeBox: View {
             }
             T("DATA", f, 16, Color(hex: "#00A6D6")).tl(12, 10)
             T("MOSH", f, 16, Color(hex: "#E24DA0")).tl(10, 28)
+        }
+    }
+}
+
+/// Instant film packs: the print itself on the box, in its own proportions.
+private struct InstantShapeBox: View {
+    let shape: FrameShape
+    var body: some View {
+        switch shape {
+        case .polaroid:
+            pack(bg: Color(hex: "#F7F5F0"), fg: Color(hex: "#1A1A1A"), font: "Nunito-Black", title: "POLAROID", sub: "XA INSTANT · 600",
+                 stripe: true, print: CGSize(width: 52, height: 62), window: CGSize(width: 44, height: 44), round: false)
+        case .polaRound:
+            pack(bg: Color(hex: "#1A1A1A"), fg: Color(hex: "#F7F5F0"), font: "Fredoka-Bold", title: "POLA ROUND", sub: "XA INSTANT · ROUND",
+                 stripe: false, print: CGSize(width: 52, height: 62), window: CGSize(width: 44, height: 44), round: true)
+        case .instax:
+            pack(bg: Color(hex: "#F4D6E0"), fg: Color(hex: "#3A2233"), font: "Fredoka-Bold", title: "INSTAX", sub: "MINI · 54 x 86",
+                 stripe: false, print: CGSize(width: 40, height: 64), window: CGSize(width: 34, height: 46), round: false)
+        default:
+            pack(bg: Color(hex: "#CFE3EE"), fg: Color(hex: "#15303F"), font: "Fredoka-Bold", title: "INSTAX WIDE", sub: "WIDE · 108 x 86",
+                 stripe: false, print: CGSize(width: 70, height: 56), window: CGSize(width: 64, height: 40), round: false)
+        }
+    }
+
+    private func pack(bg: Color, fg: Color, font: String, title: String, sub: String, stripe: Bool, print: CGSize, window: CGSize, round: Bool) -> some View {
+        BoxCanvas(bg: bg) {
+            if stripe {
+                HStack(spacing: 0) {
+                    ForEach(["#D8412F", "#F28C28", "#F2B51E", "#3F9A45", "#1B4FA0"], id: \.self) { Rectangle().fill(Color(hex: $0)).frame(width: 5) }
+                }
+                .frame(height: 106).offset(x: 0)
+            }
+            ZStack(alignment: .top) {
+                Rectangle().fill(Color.white).shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                Group {
+                    if round {
+                        Circle().fill(LinearGradient(colors: [Color(hex: "#E56B9E"), Color(hex: "#F2B51E")], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    } else {
+                        Rectangle().fill(LinearGradient(colors: [Color(hex: "#7FC8C4"), Color(hex: "#E07A5F")], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    }
+                }
+                .frame(width: window.width, height: window.height).padding(.top, (print.width - window.width) / 2)
+            }
+            .frame(width: print.width, height: print.height)
+            .rotationEffect(.degrees(4))
+            .tr(12, 12)
+            T(title, font, title.count > 8 ? 15 : 18, fg).tl(stripe ? 32 : 10, 10)
+            T(sub, font, 9, fg, 1).bl(stripe ? 32 : 10, 8)
         }
     }
 }

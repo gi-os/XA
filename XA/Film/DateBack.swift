@@ -367,9 +367,9 @@ enum DateBack {
 
     // MARK: drawing
 
-    static func draw(in ctx: CGContext, size: CGSize, date: Date, config: DateConfig, shape: FrameShape, mono: Bool, instant: SimFrame = .none) {
+    static func draw(in ctx: CGContext, size: CGSize, date: Date, config: DateConfig, shape: FrameShape, mono: Bool, instant: InstantKind = .none) {
         if instant != .none {
-            drawInstant(ctx, size: size, date: date, config: config)
+            drawInstant(ctx, size: size, date: date, config: config, kind: instant)
             return
         }
         guard config.placement != .off else { return }
@@ -449,11 +449,10 @@ enum DateBack {
     }
 
     /// Instant prints get the date written by hand on the frame, and nothing else.
-    private static func drawInstant(_ ctx: CGContext, size: CGSize, date: Date, config: DateConfig) {
+    private static func drawInstant(_ ctx: CGContext, size: CGSize, date: Date, config: DateConfig, kind: InstantKind) {
         guard config.placement != .off else { return }
-        let side: CGFloat = size.width / 1.12
-        let m: CGFloat = side * 0.06
-        let border = CGRect(x: 0, y: m + side, width: size.width, height: m * 3.6)
+        let border = Shapes.instantBorder(paper: size, kind: kind)
+        let m: CGFloat = border.height * 0.28
         let f = XA.uiFont("Caveat-Bold", border.height * 0.34)
         let text = format(date, style: .marker, format: config.format == .own ? .own : config.format, time: false) as NSString
         let w = text.size(withAttributes: [.font: f]).width
@@ -469,7 +468,7 @@ enum DateBack {
     // MARK: images
 
     /// The date on a clear image the size of the frame, or nil when there is nothing to draw.
-    static func overlay(size: CGSize, date: Date, config: DateConfig, shape: FrameShape, mono: Bool, instant: SimFrame = .none) -> CGImage? {
+    static func overlay(size: CGSize, date: Date, config: DateConfig, shape: FrameShape, mono: Bool, instant: InstantKind = .none) -> CGImage? {
         guard config.placement != .off, size.width >= 8, size.height >= 8 else { return nil }
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = 1
@@ -490,7 +489,7 @@ enum DateBack {
     private static var cached: CIImage?
 
     /// CIImage version, cached: the viewfinder asks for the same overlay thirty times a second.
-    static func overlayImage(size: CGSize, date: Date, config: DateConfig, shape: FrameShape, mono: Bool, instant: SimFrame) -> CIImage? {
+    static func overlayImage(size: CGSize, date: Date, config: DateConfig, shape: FrameShape, mono: Bool, instant: InstantKind) -> CIImage? {
         guard config.placement != .off || instant != .none else { return nil }
         let text = format(date, style: config.style, format: config.format, time: config.time)
         let key = "\(Int(size.width))x\(Int(size.height))|\(text)|\(config.style)|\(config.placement)|\(config.color?.r ?? -1)\(config.color?.g ?? -1)\(config.color?.b ?? -1)|\(shape.rawValue)|\(mono)|\(instant)"

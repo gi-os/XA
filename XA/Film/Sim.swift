@@ -72,7 +72,7 @@ struct Sim: Codable, Equatable, Identifiable, Hashable {
 
     /// Neutral, then the seven XA stocks. Names and boxes are XA's own; the looks are what the
     /// films they are modelled on are known for.
-    static let presets: [Sim] = [neutral, nocturne, visage, prima, amethyst, sunday, sundayRound, onyx]
+    static let presets: [Sim] = [neutral, nocturne, visage, prima, amethyst, sunday, onyx]
 
     /// Tungsten-balanced cinema stock: cool daylight, red halation round every highlight.
     static let nocturne: Sim = {
@@ -130,22 +130,14 @@ struct Sim: Codable, Equatable, Identifiable, Hashable {
 
     /// Instant film: low contrast, milky blacks, teal shadows, printed on a white frame.
     static let sunday: Sim = {
-        var s = Sim(id: "sunday", name: "Sunday", iso: "600", exposures: 8)
+        var s = Sim(id: "sunday", name: "Sunday", iso: "600", exposures: 36)
         s.bloom = 0.35
         s.warmth = 0.18; s.saturation = -0.1; s.contrast = -0.28
         s.shadowTone = Tone(0.25, 0.52, 0.55); s.shadowAmount = 0.4
         s.highlightTone = Tone(0.98, 0.9, 0.74); s.highlightAmount = 0.25
         s.fade = 0.28; s.rolloff = 0.85
         s.grain = 0.18; s.vignette = 0.25
-        s.frame = .instant
         s.box = BoxDesign(bg: "#F7F5F0", fg: "#1A1A1A", accent: "#E07A5F", second: "#7FC8C4", font: .nunito, pattern: .plain)
-        return s
-    }()
-
-    static let sundayRound: Sim = {
-        var s = sunday
-        s.id = "sundayRound"; s.name = "Sunday Round"; s.frame = .round
-        s.box = BoxDesign(bg: "#1A1A1A", fg: "#F7F5F0", accent: "#F2B51E", second: "#E56B9E", font: .fredoka, pattern: .plain)
         return s
     }()
 

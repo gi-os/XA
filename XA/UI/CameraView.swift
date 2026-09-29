@@ -16,14 +16,18 @@ struct CameraView: View {
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 24).onEnded(swipe))
                 .overlay { FocusTapLayer(camera: camera, filmOpen: $filmOpen) }
-            switch camera.mode {
-            case .digi:
-                if filmOpen { FilmControls(camera: camera, open: $filmOpen, onFilm: onFilm).transition(.opacity) }
-            case .video:
-                VideoRows(camera: camera, onFilm: onFilm)
-            case .pro:
-                ProRows(camera: camera)
+            LCDStrip(camera: camera, settings: settings)
+            ZStack {
+                switch camera.mode {
+                case .digi:
+                    if filmOpen { FilmControls(camera: camera, open: $filmOpen, onFilm: onFilm).transition(Self.rows) }
+                case .video:
+                    VideoRows(camera: camera, onFilm: onFilm).transition(Self.rows)
+                case .pro:
+                    ProRows(camera: camera).transition(Self.rows)
+                }
             }
+            .animation(.snappy(duration: 0.32), value: camera.mode)
             VStack(spacing: 8) {
                 ModeRow(camera: camera, settings: settings, filmOpen: $filmOpen, onCustomize: onCustomize)
                 ShutterRow(camera: camera, settings: settings, onRoll: onRoll)
@@ -38,6 +42,11 @@ struct CameraView: View {
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
     }
+
+    /// Mode rows: the old one drops away, the new one rises in after it.
+    static let rows: AnyTransition = .asymmetric(
+        insertion: .move(edge: .bottom).combined(with: .opacity).animation(.snappy(duration: 0.32).delay(0.12)),
+        removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)).animation(.easeIn(duration: 0.16)))
 
     /// On the frame: left and right change the sim, up and down the look. In PRO, up opens the roll.
     private func swipe(_ v: DragGesture.Value) {
@@ -465,10 +474,12 @@ private struct ModeRow: View {
             Spacer()
             Group {
                 if camera.mode == .video {
-                    Text(camera.recording ? "REC" : "HD").font(XA.mono(12)).foregroundStyle(camera.recording ? Color.red : .white)
-                        .padding(.horizontal, 10).frame(minWidth: 44, minHeight: 44).background(XA.fill, in: Capsule())
+                    FannedTape(look: camera.videoLook) { camera.stepTape(1) }
+                        .modifier(SwipeToStep { camera.stepTape($0) })
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
                 } else if camera.mode == .digi && !filmOpen {
                     FannedFilm(stack: camera.stack) { withAnimation(.snappy) { filmOpen = true } }
+                        .modifier(SwipeToStep { camera.stepSim($0) })
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 } else {
                     mpMenu
@@ -620,5 +631,46 @@ private struct Corners: Shape {
             p.move(to: CGPoint(x: c.x + l * CGFloat(dx), y: c.y)); p.addLine(to: c); p.addLine(to: CGPoint(x: c.x, y: c.y + l * CGFloat(dy)))
         }
         return p
+    }
+}
+
+
+/// Swipe a film (or tape) box sideways to load the next or previous one; a tap still does
+/// whatever the box does. The box follows the finger a little, then springs back.
+struct SwipeToStep: ViewModifier {
+    var step: (Int) -> Void
+    @State private var drag: CGFloat = 0
+    func body(content: Content) -> some View {
+        content
+            .offset(x: drag * 0.35)
+            .rotationEffect(.degrees(Double(drag) * 0.04))
+            .highPriorityGesture(DragGesture(minimumDistance: 12)
+                .onChanged { v in if abs(v.translation.width) > abs(v.translation.height) { drag = v.translation.width } }
+                .onEnded { v in
+                    let dx = v.translation.width
+                    if abs(dx) > 28 && abs(dx) > abs(v.translation.height) { step(dx < 0 ? 1 : -1) }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { drag = 0 }
+                })
+            .accessibilityAction(named: "Next") { step(1) }
+            .accessibilityAction(named: "Previous") { step(-1) }
+    }
+}
+
+/// The loaded tape, folded into the mode row the way the film box is in DIGI.
+struct FannedTape: View {
+    let look: VideoLook
+    var action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            FilmBox(item: .video(look), width: 62)
+                .rotationEffect(.degrees(-4))
+                .shadow(color: .black.opacity(0.6), radius: 5, y: 3)
+                .frame(width: 80, height: 48, alignment: .topLeading)
+                .id(look)
+                .transition(.push(from: .trailing))
+        }
+        .buttonStyle(.plain)
+        .animation(.snappy(duration: 0.25), value: look)
+        .accessibilityLabel("Tape: \(look.title)")
     }
 }

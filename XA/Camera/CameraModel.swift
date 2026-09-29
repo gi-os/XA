@@ -51,6 +51,9 @@ final class CameraModel: NSObject, ObservableObject {
     @Published private(set) var zoom: CGFloat = 1
     @Published private(set) var photoSize: CGSize = .zero
     @Published private(set) var histogram: [Float] = []
+    /// What the camera is metering right now, for the PRO panel.
+    @Published private(set) var meterShutter: Double = 1.0 / 60
+    @Published private(set) var meterISO: Float = 100
     /// Photo sizes PRO can ask the sensor for, in megapixels, smallest first.
     @Published private(set) var proOptions: [Int] = []
 
@@ -595,6 +598,14 @@ final class CameraModel: NSObject, ObservableObject {
 
     // MARK: swiping through films
 
+    /// Next or previous tape in VIDEO.
+    func stepTape(_ by: Int) {
+        let all = VideoLook.allCases, n = all.count
+        let i = all.firstIndex(of: videoLook) ?? 0
+        videoLook = all[((i + by) % n + n) % n]
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
     func stepSim(_ by: Int) {
         let ids: [String] = FilmCatalog.sims.map { $0.id }
         let loaded = FilmCatalog.sim(stack.simID)?.id
@@ -835,6 +846,10 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             if m == .pro && frameCount % 6 == 0 {
                 let s: CGFloat = 160 / max(src.extent.width, 1)
                 updateHistogram(src.transformed(by: CGAffineTransform(scaleX: s, y: s)))
+            }
+            if m == .pro && frameCount % 15 == 0, let dev = device {
+                let d = dev.exposureDuration.seconds, iso = dev.iso
+                DispatchQueue.main.async { self.meterShutter = d; self.meterISO = iso }
             }
         } else {
             // Develop the frame the way the photograph will be turned, so the date back and the

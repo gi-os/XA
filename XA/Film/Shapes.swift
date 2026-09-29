@@ -4,7 +4,7 @@ import UIKit
 
 /// Photo shapes. Everything outside the shape is saved as empty pixels.
 enum FrameShape: Int, CaseIterable, Codable, Identifiable {
-    case none, capsule, porthole, window, crush, nova
+    case none, capsule, porthole, window, crush, nova, polaroid, polaRound, instax, instaxWide
 
     var id: Int { rawValue }
     var title: String {
@@ -15,6 +15,21 @@ enum FrameShape: Int, CaseIterable, Codable, Identifiable {
         case .window: return "WINDOW"
         case .crush: return "CRUSH"
         case .nova: return "NOVA"
+        case .polaroid: return "POLAROID"
+        case .polaRound: return "POLA ROUND"
+        case .instax: return "INSTAX"
+        case .instaxWide: return "INSTAX WIDE"
+        }
+    }
+
+    /// Instant film prints the photo on paper instead of cutting it out.
+    var instant: InstantKind? {
+        switch self {
+        case .polaroid: return .square
+        case .polaRound: return .round
+        case .instax: return .mini
+        case .instaxWide: return .wide
+        default: return nil
         }
     }
 
@@ -22,7 +37,7 @@ enum FrameShape: Int, CaseIterable, Codable, Identifiable {
     func path(in r: CGRect) -> CGPath? {
         let w = r.width, h = r.height
         switch self {
-        case .none:
+        case .none, .polaroid, .polaRound, .instax, .instaxWide:
             return nil
         case .capsule:
             // Upright in a portrait frame, lying down in a landscape one.
@@ -151,31 +166,40 @@ enum Shapes {
         let border: CGRect
     }
 
-    static func instantLayout(for size: CGSize) -> InstantLayout {
-        let side: CGFloat = min(size.width, size.height)
-        let m: CGFloat = side * 0.06
-        let bottom: CGFloat = m * 3.6
-        let paper = CGSize(width: side + 2 * m, height: side + m + bottom)
-        let window = CGRect(x: m, y: m, width: side, height: side)
-        let border = CGRect(x: 0, y: m + side, width: paper.width, height: bottom)
+    /// Paper and window for each instant film, from the window's width.
+    /// Polaroid: square window, thick chin. Instax Mini: 46 x 62 mm on 54 x 86. Instax Wide: 99 x 62 on 108 x 86.
+    static func instantLayout(for size: CGSize, kind: InstantKind = .square) -> InstantLayout {
+        let aspect = kind.aspect   // window width / height
+        var ww: CGFloat = size.width, wh: CGFloat = size.width / aspect
+        if wh > size.height { wh = size.height; ww = wh * aspect }
+        let side = ww * kind.side, top = ww * kind.top, bottom = ww * kind.bottom
+        let paper = CGSize(width: ww + 2 * side, height: wh + top + bottom)
+        let window = CGRect(x: side, y: top, width: ww, height: wh)
+        let border = CGRect(x: 0, y: top + wh, width: paper.width, height: bottom)
         return InstantLayout(paper: paper, window: window, border: border)
     }
 
-    /// Print the photo on instant film: square window (or a round one) on a white frame.
-    static func instant(_ img: CIImage, round: Bool) -> CIImage {
+    /// The chin of a print of `paper` size, in top-left coordinates, for the handwritten date.
+    static func instantBorder(paper: CGSize, kind: InstantKind) -> CGRect {
+        let ww = paper.width / (1 + 2 * kind.side)
+        let bottom = ww * kind.bottom
+        return CGRect(x: 0, y: paper.height - bottom, width: paper.width, height: bottom)
+    }
+
+    /// Print the photo on instant film: the window cropped from the middle of the frame, on paper.
+    static func instant(_ img: CIImage, kind: InstantKind) -> CIImage {
         let e = img.extent
-        let layout = instantLayout(for: e.size)
-        let side = layout.window.width
-        let crop = CGRect(x: e.midX - side / 2, y: e.midY - side / 2, width: side, height: side)
+        let layout = instantLayout(for: e.size, kind: kind)
+        let win = layout.window.size
+        let crop = CGRect(x: e.midX - win.width / 2, y: e.midY - win.height / 2, width: win.width, height: win.height)
         var photo = img.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
         let paperRect = CGRect(origin: .zero, size: layout.paper)
         let paperImg = CIImage(color: paper).cropped(to: paperRect)
-        if round {
-            let d: CGFloat = side * 0.92
-            let inset: CGFloat = (side - d) / 2
-            let circle = CGRect(x: inset, y: inset, width: d, height: d)
+        if kind == .round {
+            let d: CGFloat = min(win.width, win.height) * 0.92
+            let circle = CGRect(x: (win.width - d) / 2, y: (win.height - d) / 2, width: d, height: d)
             let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 1; fmt.opaque = false
-            let maskImg = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: fmt).image { ctx in
+            let maskImg = UIGraphicsImageRenderer(size: win, format: fmt).image { ctx in
                 ctx.cgContext.setFillColor(UIColor.white.cgColor)
                 ctx.cgContext.fillEllipse(in: circle)
             }
@@ -192,4 +216,24 @@ enum Shapes {
         let placed = photo.transformed(by: CGAffineTransform(translationX: layout.window.minX, y: fromBottom))
         return placed.composited(over: paperImg).cropped(to: paperRect)
     }
+
+    /// Older sims that printed their own frame.
+    static func instant(_ img: CIImage, round: Bool) -> CIImage { instant(img, kind: round ? .round : .square) }
+}
+
+/// Instant film formats.
+enum InstantKind: String, Codable {
+    case none, square, round, mini, wide
+    /// Window width / height.
+    var aspect: CGFloat {
+        switch self {
+        case .mini: return 46.0 / 62.0
+        case .wide: return 99.0 / 62.0
+        default: return 1
+        }
+    }
+    /// Margins as fractions of the window width.
+    var side: CGFloat { self == .mini ? 4.0 / 46.0 : (self == .wide ? 4.5 / 99.0 : 0.06) }
+    var top: CGFloat { self == .mini ? 6.5 / 46.0 : (self == .wide ? 6.5 / 99.0 : 0.06) }
+    var bottom: CGFloat { self == .mini ? 17.5 / 46.0 : (self == .wide ? 17.5 / 99.0 : 0.216) }
 }
