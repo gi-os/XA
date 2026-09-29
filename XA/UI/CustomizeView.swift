@@ -32,10 +32,9 @@ struct CustomizeView: View {
                     }
                     group("FOCUS") {
                         VStack(alignment: .leading, spacing: 8) {
-                            Segmented(items: [(ShutterStyle.twoPress, "Two presses: focus, then shoot"), (.onePress, "One press")], selection: $settings.shutterStyle)
                             Segmented(items: [(AFMode.single, "AF-S · lock on half-press"), (.continuous, "AF-C · keep tracking")], selection: $settings.afMode)
                             Segmented(items: [(AFArea.auto, "Auto"), (.point, "Point"), (.eye, "Eye")], selection: $settings.afArea)
-                            Text("Press once to lock focus, press again to shoot: the second press fires the moment it lands. Tap the frame to aim; long-press to hand focus back to the camera. Eye finds the nearer eye and follows it.")
+                            Text("Hold the shutter to lock focus, let go to shoot. Tap the frame to aim; long-press to hand focus back to the camera. Eye finds the nearer eye and follows it.")
                                 .font(.system(size: 12)).foregroundStyle(XA.faint)
                         }
                     }

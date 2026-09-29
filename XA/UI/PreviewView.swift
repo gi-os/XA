@@ -62,9 +62,10 @@ struct Viewfinder: UIViewRepresentable {
     func makeUIView(context: Context) -> PreviewView {
         let v = PreviewView()
         camera.preview = v
-        // Buttons act on the way down: the first press locks focus, the second fires.
+        // Two-stage button: Camera Control's light press is the first stage (the system's own);
+        // the full press fires the instant it goes down, not when the button comes back up.
         let shutter = AVCaptureEventInteraction { event in
-            if event.phase == .began { camera.press() }
+            if event.phase == .began { camera.fullPress() }
         }
         v.addInteraction(shutter)
         return v

@@ -561,21 +561,6 @@ final class CameraModel: NSObject, ObservableObject {
         releaseHalfPress()
     }
 
-    /// A press on the shutter, on the way down. With two presses the first arms (focus and
-    /// exposure lock) and the second fires the instant it lands; unused, the lock lets go after 6 s.
-    func press() {
-        if mode == .video { toggleRecording(); return }
-        if settings.shutterStyle == .onePress || halfPressed { fullPress(); return }
-        halfPress()
-        armToken += 1
-        let token = armToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
-            guard let self, self.armToken == token, self.halfPressed else { return }
-            self.releaseHalfPress()
-        }
-    }
-    private var armToken = 0
-
     func releaseHalfPress() {
         guard halfPressed else { return }
         halfPressed = false
