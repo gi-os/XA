@@ -24,6 +24,7 @@ final class AppSettings: ObservableObject {
     @Published var grid: Bool { didSet { d.set(grid, forKey: "grid") } }
     @Published var afMode: AFMode { didSet { d.set(afMode.rawValue, forKey: "afMode") } }
     @Published var afArea: AFArea { didSet { d.set(afArea.rawValue, forKey: "afArea") } }
+    @Published var shutterStyle: ShutterStyle { didSet { d.set(shutterStyle.rawValue, forKey: "shutterStyle") } }
     @Published var showRollButton: Bool { didSet { d.set(showRollButton, forKey: "showRollButton") } }
     @Published var showFlipButton: Bool { didSet { d.set(showFlipButton, forKey: "showFlipButton") } }
 
@@ -40,6 +41,7 @@ final class AppSettings: ObservableObject {
         grid = d.object(forKey: "grid") as? Bool ?? false
         afMode = AFMode(rawValue: d.string(forKey: "afMode") ?? "") ?? .single
         afArea = AFArea(rawValue: d.string(forKey: "afArea") ?? "") ?? .auto
+        shutterStyle = ShutterStyle(rawValue: d.string(forKey: "shutterStyle") ?? "") ?? .twoPress
         showRollButton = d.object(forKey: "showRollButton") as? Bool ?? true
         showFlipButton = d.object(forKey: "showFlipButton") as? Bool ?? true
     }

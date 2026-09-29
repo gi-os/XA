@@ -61,3 +61,6 @@ enum EyeFinder {
         return pick.map(FocusGeometry.viewPoint(fromVision:))
     }
 }
+
+/// Two presses: the first locks focus, the second fires the moment it lands. Or one press, straight away.
+enum ShutterStyle: String, CaseIterable, Codable { case twoPress, onePress }
