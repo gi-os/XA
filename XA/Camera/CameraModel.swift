@@ -802,7 +802,9 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             return
         }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let raw = CIImage(cvPixelBuffer: pb)
+        // Cleaned at the door: a sensor pixel below the legal video range decodes to NaN, and every
+        // blur and resize downstream would spread it into a black square.
+        let raw = Sanitize.apply(CIImage(cvPixelBuffer: pb), floor: 0)
         let e = raw.extent
         let k: CGFloat = min(1, 1080 / max(e.width, 1))
         let src = raw.transformed(by: CGAffineTransform(scaleX: k, y: k))

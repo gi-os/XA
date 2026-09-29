@@ -11,10 +11,10 @@ enum Sanitize {
         let src = """
         kernel vec4 xaSanitize(__sample s, float lo) {
             vec4 c = s;
-            c.r = (c.r == c.r) ? clamp(c.r, lo, 64.0) : 0.0;
-            c.g = (c.g == c.g) ? clamp(c.g, lo, 64.0) : 0.0;
-            c.b = (c.b == c.b) ? clamp(c.b, lo, 64.0) : 0.0;
-            c.a = (c.a == c.a) ? clamp(c.a, 0.0, 1.0) : 1.0;
+            c.r = (c.r == c.r) ? max(min(c.r, 64.0), lo) : 0.0;
+            c.g = (c.g == c.g) ? max(min(c.g, 64.0), lo) : 0.0;
+            c.b = (c.b == c.b) ? max(min(c.b, 64.0), lo) : 0.0;
+            c.a = (c.a == c.a) ? max(min(c.a, 1.0), 0.0) : 1.0;
             return c;
         }
         """

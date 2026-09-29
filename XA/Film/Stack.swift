@@ -70,6 +70,7 @@ enum Darkroom {
     static func develop(_ src: CIImage, _ s: DevelopSettings, date: Date, preview: Bool, dateShift: CGFloat = 0) -> (CIImage, Bool) {
         // Read before any filter: the photo's EXIF says whether the flash fired and how dark it was.
         let conditions = DigicamFX.Conditions(properties: src.properties)
+        let src = Sanitize.apply(src)
         var img = preview ? src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
                           : Digicam.shrink(src, megapixels: s.megapixels)
         let sim = FilmCatalog.sim(s.stack.simID)
