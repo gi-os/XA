@@ -79,7 +79,7 @@ final class DigicamFXTests: XCTestCase {
         let out = DigicamFX.apply(img, DigicamFX.Conditions(flashFired: true, iso: 3200), recipe: off)
         XCTAssertTrue(out === img || out.extent == img.extent)
         var px = [Float](repeating: 0, count: 4)
-        CIContext().render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 10, y: 10, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        CIContext().render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 10, y: 10, width: 1, height: 1), format: .RGBAf, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
         XCTAssertEqual(px[0], 0.5, accuracy: 0.02)
     }
 
