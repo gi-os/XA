@@ -117,11 +117,11 @@ enum DigicamFX {
     static func jpeg(_ img: CIImage) -> CIImage {
         let e = img.extent
         let origin = img.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY))
-        // Rendered the safe way: a GPU frame that comes back black is redone on the CPU.
+        // Rendered the safe way: a GPU frame that comes back with black tiles is redone on the CPU.
         let k: CGFloat = 64 / max(e.width, 1)
         let tiny = origin.transformed(by: CGAffineTransform(scaleX: k, y: k))
-        let expect = Encoder.gpu.createCGImage(tiny, from: tiny.extent).map(Encoder.brightness)
-        guard let cg = Encoder.render(origin, expectBrightness: expect) else { return img }
+        let reference = Encoder.gpu.createCGImage(tiny, from: tiny.extent.integral)
+        guard let cg = Encoder.render(origin, reference: reference) else { return img }
         let data = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else { return img }
         CGImageDestinationAddImage(dest, cg, [kCGImageDestinationLossyCompressionQuality: jpegQuality] as CFDictionary)
