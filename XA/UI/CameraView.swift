@@ -124,7 +124,6 @@ struct CameraView: View {
                     .aspectRatio(3 / 4, contentMode: .fit)
                     .overlay { if settings.grid && camera.mode == .pro { GridLines() } }
                     .overlay { FocusBracket(camera: camera) }
-                    .overlay { if camera.reviewing { ReviewOverlay(camera: camera, settings: settings).transition(.opacity) } }
                     .overlay { if camera.flash { Color.white.opacity(0.7) } }
             }
         }
@@ -565,39 +564,5 @@ struct FannedTape: View {
         .buttonStyle(.plain)
         .animation(.snappy(duration: 0.25), value: look)
         .accessibilityLabel("Tape: \(look.title)")
-    }
-}
-
-/// DIGI's instant review: the shot held on the LCD for a moment, soft and scanned, with its
-/// file number, while an orange bar drains. Half-press (or shoot again) to skip it.
-private struct ReviewOverlay: View {
-    @ObservedObject var camera: CameraModel
-    @ObservedObject var settings: AppSettings
-    @State private var left: CGFloat = 1
-    var body: some View {
-        ZStack(alignment: .bottom) {
-            Canvas { ctx, size in
-                var y: CGFloat = 0
-                var p = Path()
-                while y < size.height { p.addRect(CGRect(x: 0, y: y, width: size.width, height: 1)); y += 3 }
-                ctx.fill(p, with: .color(.black.opacity(0.22)))
-            }
-            VStack(spacing: 4) {
-                Rectangle().fill(XA.orange).frame(height: 3)
-                    .scaleEffect(x: left, anchor: .leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                HStack {
-                    Text("▶ " + camera.reviewFile).foregroundStyle(XA.orange)
-                    Spacer()
-                    Text("\(settings.digiMegapixels)MP · FINE · \((FilmCatalog.sim(camera.stack.simID) ?? Sim.neutral).title.uppercased())")
-                        .foregroundStyle(.white.opacity(0.85)).lineLimit(1)
-                }
-                .font(XA.mono(10))
-            }
-            .padding(.horizontal, 8).padding(.vertical, 6)
-            .background(Color.black.opacity(0.6))
-        }
-        .allowsHitTesting(false)
-        .onAppear { withAnimation(.linear(duration: CameraModel.reviewSeconds)) { left = 0 } }
     }
 }

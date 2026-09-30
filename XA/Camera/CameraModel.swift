@@ -818,13 +818,6 @@ final class CameraModel: NSObject, ObservableObject {
 
     // MARK: instant review
 
-    static func reviewLook(_ img: CIImage) -> CIImage {
-        let e = img.extent
-        let blur = CIFilter.gaussianBlur(); blur.inputImage = img.clampedToExtent(); blur.radius = Float(max(0.8, e.width / 900))
-        let c = CIFilter.colorControls(); c.inputImage = (blur.outputImage ?? img).cropped(to: e); c.contrast = 1.06; c.saturation = 1.08
-        return (c.outputImage ?? img).cropped(to: e)
-    }
-
     private func startReview() {
         let n = UserDefaults.standard.integer(forKey: "fileNumber") + 1
         UserDefaults.standard.set(n, forKey: "fileNumber")
@@ -949,8 +942,8 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         if !holding { _lastShown = img }
         lock.unlock()
         if holding {
-            // The shot stays up the way a digicam's LCD showed it: a little soft.
-            if drawHeld, let held { preview?.show(Self.reviewLook(held), pixelated: pixel) }
+            // The shot stays up on the viewfinder, as it was, until the review is over.
+            if drawHeld, let held { preview?.show(held, pixelated: pixel) }
             return
         }
         // Drawn right here on the frame queue: the main thread can be busy without the viewfinder stuttering.
