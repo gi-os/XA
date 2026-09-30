@@ -9,10 +9,6 @@ struct ContactSheet: View {
     /// Live drag distance while pulling the roll down, so the layer follows the finger.
     var onDrag: ((CGFloat) -> Void)?
     @State private var open: Opened?
-    /// How far the grid is pulled down past its top, in points.
-    @State private var overscroll: CGFloat = 0
-
-    private let cols = Array(repeating: GridItem(.flexible(), spacing: 3), count: 3)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -45,26 +41,7 @@ struct ContactSheet: View {
                 Text("Nothing on the roll yet.").foregroundStyle(XA.dim)
                 Spacer()
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
-                        ForEach(library.days, id: \.title) { day in
-                            Text(day.title).font(.system(size: 12, weight: .semibold)).tracking(1)
-                                .foregroundStyle(XA.faint).padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 8)
-                            LazyVGrid(columns: cols, spacing: 3) {
-                                ForEach(day.assets, id: \.localIdentifier) { a in
-                                    Thumb(asset: a, library: library).onTapGesture { open = Opened(asset: a) }
-                                }
-                            }
-                            .padding(.horizontal, 3)
-                        }
-                    }
-                    .padding(.bottom, 40)
-                }
-                // Pulled past the top and let go: close, the way a sheet does.
-                .onScrollGeometryChange(for: CGFloat.self, of: { -($0.contentOffset.y + $0.contentInsets.top) }) { _, v in overscroll = max(0, v) }
-                .onScrollPhaseChange { old, new in
-                    if old == .interacting && new != .interacting && overscroll > 70 { onClose?() }
-                }
+                RollTable(library: library, onOpen: { open = Opened(asset: $0) }, onPullClose: onClose)
             }
         }
         .background(Color.black.ignoresSafeArea())

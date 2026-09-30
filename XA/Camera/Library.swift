@@ -101,6 +101,13 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
 
     /// Shaped pictures are PNGs with empty pixels; Photos' own thumbnails flatten them, so they
     /// are decoded from the file to keep the transparency.
+    private var transparent: [String: Bool] = [:]
+    /// isTransparent, remembered: the roll asks for every print as it lays the table out.
+    func isTransparentCached(_ asset: PHAsset) -> Bool {
+        if let v = transparent[asset.localIdentifier] { return v }
+        let v = isTransparent(asset); transparent[asset.localIdentifier] = v; return v
+    }
+
     func isTransparent(_ asset: PHAsset) -> Bool {
         PHAssetResource.assetResources(for: asset).contains { $0.uniformTypeIdentifier == UTType.png.identifier }
     }
@@ -176,6 +183,14 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     }
 
     /// Straight to Recently Deleted; iOS asks first.
+    /// Several at once, so Photos asks once.
+    func delete(_ assets: [PHAsset], _ done: ((Bool) -> Void)? = nil) {
+        guard !assets.isEmpty else { done?(true); return }
+        PHPhotoLibrary.shared().performChanges({
+            PHAssetChangeRequest.deleteAssets(assets as NSArray)
+        }, completionHandler: { ok, _ in DispatchQueue.main.async { done?(ok) } })
+    }
+
     func delete(_ asset: PHAsset, _ done: ((Bool) -> Void)? = nil) {
         PHPhotoLibrary.shared().performChanges({
             PHAssetChangeRequest.deleteAssets([asset] as NSArray)
