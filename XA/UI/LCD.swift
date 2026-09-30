@@ -6,6 +6,8 @@ import SwiftUI
 struct LCDStrip: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
+    @State private var slideFrom: CGFloat?
+    @State private var showZoom = false
 
     var body: some View {
         ZStack {
@@ -19,8 +21,37 @@ struct LCDStrip: View {
         .padding(3)
         .background(Color(white: 0.025))
         .clipped()
+        .overlay(alignment: .center) {
+            if showZoom {
+                Text(Self.zoomText(camera.zoom * camera.zoomMultiplier))
+                    .font(.custom("IBMPlexSansCond-Bold", fixedSize: 15)).foregroundStyle(.white)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(Color.black.opacity(0.78), in: Capsule())
+                    .transition(.opacity)
+            }
+        }
         .animation(.easeInOut(duration: 0.26), value: camera.mode)
+        .contentShape(Rectangle())
+        // Slide along the strip to zoom, the way the system camera's zoom dial works:
+        // left is closer, right is wider, and it keeps going as long as the finger does.
+        .gesture(DragGesture(minimumDistance: 6)
+            .onChanged { v in
+                if slideFrom == nil { slideFrom = camera.zoom; withAnimation(.easeOut(duration: 0.12)) { showZoom = true } }
+                let f = (slideFrom ?? 1) * CGFloat(exp(Double(-v.translation.width) / 140))
+                camera.setZoom(f)
+            }
+            .onEnded { _ in
+                slideFrom = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { if slideFrom == nil { withAnimation(.easeIn(duration: 0.25)) { showZoom = false } } }
+            })
         .accessibilityElement(children: .combine)
+        .accessibilityAdjustableAction { dir in
+            camera.setZoom(camera.zoom * (dir == .increment ? 1.25 : 0.8), ramp: true)
+        }
+    }
+
+    static func zoomText(_ z: CGFloat) -> String {
+        z < 10 ? String(format: "%.1f×", z) : String(format: "%.0f×", z)
     }
 
     static let swap: AnyTransition = .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.12).delay(0.22)),

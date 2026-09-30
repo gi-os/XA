@@ -28,42 +28,9 @@ struct LockedCameraView: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
-            Viewfinder(camera: camera)
-                .aspectRatio(3 / 4, contentMode: .fit)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay { if camera.flash { Color.white.opacity(0.7) } }
-            if camera.mode == .digi { StackRow(stack: camera.stack, onTap: {}) }
-            HStack(spacing: 2) {
-                ForEach([CaptureMode.digi, .pro]) { m in
-                    let on = camera.mode == m
-                    Button { camera.mode = m } label: {
-                        Text(m.title).font(XA.display(18))
-                            .padding(.horizontal, 18).padding(.vertical, 7)
-                            .foregroundStyle(on ? .black : .white.opacity(0.82))
-                            .background(on ? (m == .digi ? XA.orange : Color.white) : Color.clear, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(3).background(XA.fill, in: Capsule())
-            HStack(spacing: 28) {
-                Button { open() } label: {
-                    Image(systemName: "photo.on.rectangle").font(.system(size: 18))
-                        .frame(width: 50, height: 50).background(XA.fill)
-                }
-                .buttonStyle(.plain).accessibilityLabel("Open XA")
-                Button { camera.shoot() } label: { Capsule().fill(Color.white).frame(width: 118, height: 40) }
-                    .buttonStyle(.plain).accessibilityLabel("Take picture")
-                RoundButton(size: 50, action: { camera.flip() }) { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 20)) }
-                    .accessibilityLabel("Switch camera")
-            }
-            .frame(height: 76)
-        }
-        .padding(.horizontal, 11)
-        .background(Color.black.ignoresSafeArea())
-        .foregroundStyle(.white)
-        .preferredColorScheme(.dark)
+        // The same camera screen as the app, so the Lock Screen, the Action button and Camera
+        // Control open exactly what you know. Anything that needs the unlocked app opens it.
+        CameraView(camera: camera, settings: settings, onRoll: { open() }, onCustomize: { open() }, onFilm: {}, modes: [.digi, .pro])
         .environment(\.scenePhase, .active)
         .task {
             await loadContext()

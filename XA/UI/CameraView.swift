@@ -7,6 +7,7 @@ struct CameraView: View {
     var onRoll: () -> Void
     var onCustomize: () -> Void
     var onFilm: () -> Void
+    var modes: [CaptureMode] = CaptureMode.allCases
     /// The film rows are open; folded, the loaded film sits in the mode row as a little box.
     @State private var filmOpen = true
     /// Pinch anchor: the zoom when the pinch started, so the gesture scales from there
@@ -15,9 +16,12 @@ struct CameraView: View {
 
     var body: some View {
         VStack(spacing: 8) {
+            // The tap layer is part of the view the gestures sit on: laid over it afterwards, it
+            // swallowed every touch and the pinch and swipes never arrived.
             viewfinder
+                .overlay { FocusTapLayer(camera: camera, filmOpen: $filmOpen) }
                 .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 24).onEnded(swipe))
+                .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded(swipe))
                 .simultaneousGesture(
                     MagnifyGesture()
                         .onChanged { v in
@@ -26,7 +30,6 @@ struct CameraView: View {
                         }
                         .onEnded { _ in pinchFrom = nil }
                 )
-                .overlay { FocusTapLayer(camera: camera, filmOpen: $filmOpen) }
             LCDStrip(camera: camera, settings: settings)
             ZStack {
                 switch camera.mode {
@@ -40,7 +43,7 @@ struct CameraView: View {
             }
             .animation(.snappy(duration: 0.32), value: camera.mode)
             VStack(spacing: 8) {
-                ModeRow(camera: camera, settings: settings, filmOpen: $filmOpen, onCustomize: onCustomize)
+                ModeRow(camera: camera, settings: settings, filmOpen: $filmOpen, modes: modes, onCustomize: onCustomize)
                 ShutterRow(camera: camera, settings: settings, onRoll: onRoll)
             }
             .contentShape(Rectangle())
@@ -49,7 +52,8 @@ struct CameraView: View {
             })
         }
         .padding(.horizontal, 11)
-        .padding(.bottom, 6)
+        // The shutter sits where the system camera's does, so thumbs find it without looking.
+        .padding(.bottom, 44)
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
     }
@@ -61,6 +65,7 @@ struct CameraView: View {
 
     /// On the frame: left and right change the sim, up and down the look. In PRO, up opens the roll.
     private func swipe(_ v: DragGesture.Value) {
+        guard pinchFrom == nil else { return }
         let dx = v.translation.width, dy = v.translation.height
         let horizontal = abs(dx) > abs(dy)
         guard max(abs(dx), abs(dy)) > 50 else { return }
@@ -458,6 +463,7 @@ private struct ModeRow: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
     @Binding var filmOpen: Bool
+    var modes: [CaptureMode] = CaptureMode.allCases
     var onCustomize: () -> Void
     var body: some View {
         HStack {
@@ -477,7 +483,7 @@ private struct ModeRow: View {
             .frame(width: 80, alignment: .leading)
             Spacer(minLength: 4)
             HStack(spacing: 2) {
-                ForEach(CaptureMode.allCases) { m in
+                ForEach(modes) { m in
                     let on = camera.mode == m
                     Button { withAnimation(.snappy) { camera.mode = m } } label: {
                         Text(m.title).font(XA.display(16)).tracking(0.5)

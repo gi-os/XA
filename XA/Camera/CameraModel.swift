@@ -49,6 +49,8 @@ final class CameraModel: NSObject, ObservableObject {
     @Published private(set) var lastShot: UIImage?
     @Published private(set) var lenses: [Lens] = []
     @Published private(set) var zoom: CGFloat = 1
+    /// Device zoom factor x this = the number iOS shows (0.5 when there's an ultra wide).
+    @Published private(set) var zoomMultiplier: CGFloat = 1
     @Published private(set) var photoSize: CGSize = .zero
     @Published private(set) var histogram: [Float] = []
     /// What the camera is metering right now, for the PRO panel.
@@ -281,7 +283,7 @@ final class CameraModel: NSObject, ObservableObject {
             dev.videoZoomFactor = min(main, maxZ)
             dev.unlockForConfiguration()
         }
-        DispatchQueue.main.async { self.lenses = stops; self.zoom = main }
+        DispatchQueue.main.async { self.lenses = stops; self.zoom = main; self.zoomMultiplier = mult }
     }
 
     /// Camera Control. DIGI: slide through sims or looks. PRO: exposure or zoom.
@@ -386,11 +388,14 @@ final class CameraModel: NSObject, ObservableObject {
         }
     }
 
-    func setZoom(_ f: CGFloat) {
+    /// Zoom to a device factor. Pinches and slides set it directly, frame by frame, the way the
+    /// system camera does; lens buttons ramp.
+    func setZoom(_ f: CGFloat, ramp: Bool = false) {
         sessionQueue.async {
             guard let dev = self.device, (try? dev.lockForConfiguration()) != nil else { return }
-            let z = min(max(f, dev.minAvailableVideoZoomFactor), dev.maxAvailableVideoZoomFactor)
-            dev.ramp(toVideoZoomFactor: z, withRate: 14)
+            let hi: CGFloat = min(dev.maxAvailableVideoZoomFactor, 20 / max(dev.displayVideoZoomFactorMultiplier, 0.01))
+            let z = min(max(f, dev.minAvailableVideoZoomFactor), hi)
+            if ramp { dev.ramp(toVideoZoomFactor: z, withRate: 14) } else { dev.cancelVideoZoomRamp(); dev.videoZoomFactor = z }
             dev.unlockForConfiguration()
             DispatchQueue.main.async { self.zoom = z }
         }

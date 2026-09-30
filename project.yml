@@ -7,7 +7,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.10.1"
+    MARKETING_VERSION: "0.10.2"
     CURRENT_PROJECT_VERSION: "1"
     TARGETED_DEVICE_FAMILY: "1"
     DEVELOPMENT_TEAM: ""
@@ -88,6 +88,8 @@ targets:
       - path: XA/UI/PreviewView.swift
       - path: XA/UI/Theme.swift
       - path: XA/UI/StackRow.swift
+      - path: XA/UI/CameraView.swift
+      - path: XA/UI/LCD.swift
       - path: XA/Resources/Fonts
         buildPhase: resources
     info:

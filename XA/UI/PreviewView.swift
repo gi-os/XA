@@ -62,6 +62,11 @@ final class PreviewView: MTKView {
         let bounds = CGRect(origin: .zero, size: ds)
         let bg = CIImage(color: .black).cropped(to: bounds)
         ci.render(src.composited(over: bg), to: drawable.texture, commandBuffer: cb, bounds: bounds, colorSpace: CGColorSpaceCreateDeviceRGB())
+        // The frame's pixel buffer belongs to the camera's small pool. If it goes back to the pool
+        // while the GPU is still reading it, the camera writes the next frame into it mid-read and
+        // squares of the picture come out white, black or from another frame. Hold it until done.
+        let source = img
+        cb.addCompletedHandler { _ in withExtendedLifetime(source) {} }
         cb.present(drawable)
         cb.commit()
     }
