@@ -224,9 +224,7 @@ final class CameraModel: NSObject, ObservableObject {
         videoOutput.setSampleBufferDelegate(self, queue: frameQueue)
         if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
         photoOutput.maxPhotoQualityPrioritization = .quality
-        if photoOutput.isResponsiveCaptureSupported { photoOutput.isResponsiveCaptureEnabled = true }
-        if photoOutput.isFastCapturePrioritizationSupported { photoOutput.isFastCapturePrioritizationEnabled = true }
-        if photoOutput.isZeroShutterLagSupported { photoOutput.isZeroShutterLagEnabled = true }
+        applyCapturePolicy(flash: settings.flash != .off)
         let m = mode
         setupPhotoOutput(dev, m)
         addControls(dev, m)
@@ -702,7 +700,7 @@ final class CameraModel: NSObject, ObservableObject {
         } else {
             settingsP = AVCapturePhotoSettings()
         }
-        let want = m.prioritization
+        let want: AVCapturePhotoOutput.QualityPrioritization = settings.flash != .off && m != .pro ? .balanced : m.prioritization
         settingsP.photoQualityPrioritization = want.rawValue <= photoOutput.maxPhotoQualityPrioritization.rawValue ? want : photoOutput.maxPhotoQualityPrioritization
         settingsP.maxPhotoDimensions = shotDims(m)
         let fm: AVCaptureDevice.FlashMode = settings.flash == .on ? .on : (settings.flash == .auto ? .auto : .off)
@@ -716,16 +714,36 @@ final class CameraModel: NSObject, ObservableObject {
         syncFrameSettings()
         let (_, dev) = frameState()
         pending[settingsP.uniqueID] = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date())
+        if settings.sounds && settingsP.isShutterSoundSuppressionEnabled { quietShots.insert(settingsP.uniqueID) }
         photoOutput.capturePhoto(with: settingsP, delegate: self)
-        if settings.sounds && settingsP.isShutterSoundSuppressionEnabled { CameraSounds.shared.play(.shutter) }
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
-        flash = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { self.flash = false }
         developing += 1
+    }
+
+    /// Zero shutter lag hands back a frame from the moment you pressed, which with the flash on
+    /// is the frame from before it fired. So with the flash on (or auto) the fast paths go off
+    /// and the camera waits for its own flash; with it off, the shot is instant again.
+    private func applyCapturePolicy(flash: Bool) {
+        let fast = !flash
+        if photoOutput.isResponsiveCaptureSupported { photoOutput.isResponsiveCaptureEnabled = fast }
+        if photoOutput.isFastCapturePrioritizationSupported { photoOutput.isFastCapturePrioritizationEnabled = fast }
+        if photoOutput.isZeroShutterLagSupported { photoOutput.isZeroShutterLagEnabled = fast }
+    }
+
+    /// Called when the flash setting changes.
+    func flashChanged() {
+        let on = settings.flash != .off
+        sessionQueue.async {
+            self.session.beginConfiguration()
+            self.applyCapturePolicy(flash: on)
+            self.session.commitConfiguration()
+        }
     }
 
     private struct Shot { let mode: CaptureMode; let develop: DevelopSettings; let crunch: Double; let date: Date }
     private var pending: [Int64: Shot] = [:]
+    /// Shots whose system click was dropped, so XA plays its own when the picture is really taken.
+    private var quietShots: Set<Int64> = []
 
     private func develop(_ data: Data, _ shot: Shot) {
         developQueue.async {
@@ -882,6 +900,17 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
 }
 
 extension CameraModel: AVCapturePhotoCaptureDelegate {
+    /// The moment the sensor actually exposes, after any pre-flash: that is when the shutter sounds
+    /// and the screen blinks, so neither happens before the flash.
+    func photoOutput(_ output: AVCapturePhotoOutput, willCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
+        let id = resolvedSettings.uniqueID
+        DispatchQueue.main.async {
+            if self.quietShots.remove(id) != nil { CameraSounds.shared.play(.shutter) }
+            self.flash = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { self.flash = false }
+        }
+    }
+
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         let id = photo.resolvedSettings.uniqueID
         let data = photo.fileDataRepresentation()

@@ -53,28 +53,54 @@ enum DigicamFX {
     /// the room behind falls off into the dark.
     static func partyFlash(_ img: CIImage) -> CIImage {
         let e = img.extent
-        let cc = CIFilter.colorControls(); cc.inputImage = img
-        cc.contrast = 1.14; cc.saturation = 1.08
-        var out = (cc.outputImage ?? img).cropped(to: e)
-        let cool = CIFilter.temperatureAndTint(); cool.inputImage = out
-        cool.neutral = CIVector(x: 6500, y: 0); cool.targetNeutral = CIVector(x: 7200, y: 0)
-        out = (cool.outputImage ?? out).cropped(to: e)
-        // Highlights snap to white instead of rolling off.
-        let clip = CIFilter.toneCurve(); clip.inputImage = out
-        clip.point0 = CGPoint(x: 0, y: 0); clip.point1 = CGPoint(x: 0.25, y: 0.22)
-        clip.point2 = CGPoint(x: 0.5, y: 0.55); clip.point3 = CGPoint(x: 0.75, y: 0.9); clip.point4 = CGPoint(x: 0.88, y: 1)
-        out = (clip.outputImage ?? out).cropped(to: e)
-        // Falloff: the edges of the frame lose about a stop and a half.
-        let dark = CIFilter.exposureAdjust(); dark.inputImage = out; dark.ev = -1.5
+        // The colour of a point-and-shoot flash on cheap colour negative: whites a touch warm,
+        // faces bright and a little hot, and the shadows sliding green. One cube does it all.
+        let cube = CIFilter.colorCubeWithColorSpace()
+        cube.inputImage = img
+        cube.cubeDimension = Int32(flashCubeSize)
+        cube.cubeData = flashCube
+        if let cs = CGColorSpace(name: CGColorSpace.sRGB) { cube.colorSpace = cs }
+        let out = (cube.outputImage ?? img).cropped(to: e)
+        // Falloff: the far side of the room loses about a stop.
+        let dark = CIFilter.exposureAdjust(); dark.inputImage = out; dark.ev = -0.9
         let mask = CIFilter.radialGradient()
         mask.center = CGPoint(x: e.midX, y: e.midY)
-        mask.radius0 = Float(min(e.width, e.height) * 0.28)
-        mask.radius1 = Float(hypot(e.width, e.height) * 0.55)
+        mask.radius0 = Float(min(e.width, e.height) * 0.34)
+        mask.radius1 = Float(hypot(e.width, e.height) * 0.62)
         mask.color0 = CIColor(red: 1, green: 1, blue: 1); mask.color1 = CIColor(red: 0, green: 0, blue: 0)
         let blend = CIFilter.blendWithMask()
         blend.inputImage = out; blend.backgroundImage = dark.outputImage; blend.maskImage = mask.outputImage?.cropped(to: e)
         return (blend.outputImage ?? out).cropped(to: e)
     }
+
+    static let flashCubeSize = 32
+    /// Built once: a gentle S-curve with hot highlights, a warm lift in the brights and a green
+    /// (slightly teal) cast that grows as the tone gets darker.
+    static let flashCube: Data = {
+        let n = flashCubeSize
+        var d = [Float](repeating: 0, count: n * n * n * 4)
+        func smooth(_ a: Float, _ b: Float, _ x: Float) -> Float { let t = min(1, max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
+        var i = 0
+        for bi in 0..<n { for gi in 0..<n { for ri in 0..<n {
+            var r = Float(ri) / Float(n - 1), g = Float(gi) / Float(n - 1), b = Float(bi) / Float(n - 1)
+            let l = 0.299 * r + 0.587 * g + 0.114 * b
+            // Contrast and a little push, highlights running out to white early.
+            func curve(_ x: Float) -> Float { let y = x + 0.22 * x * (1 - x) * (x - 0.35) * 2.2 + 0.06 * x; return min(1, max(0, y * 1.04)) }
+            r = curve(r); g = curve(g); b = curve(b)
+            // Shadows go green: strongest in the darks, gone by the mid-tones.
+            let shadow = 1 - smooth(0.05, 0.5, l)
+            g += 0.045 * shadow; b += 0.012 * shadow; r -= 0.02 * shadow
+            // Brights a touch warm, like the flash tube on negative film.
+            let bright = smooth(0.55, 0.95, l)
+            r += 0.02 * bright; b -= 0.025 * bright
+            // A little more colour in the middle.
+            let m = (r + g + b) / 3
+            r = m + (r - m) * 1.08; g = m + (g - m) * 1.08; b = m + (b - m) * 1.08
+            d[i] = min(1, max(0, r)); d[i + 1] = min(1, max(0, g)); d[i + 2] = min(1, max(0, b)); d[i + 3] = 1
+            i += 4
+        } } }
+        return d.withUnsafeBufferPointer { Data(buffer: $0) }
+    }()
 
     /// Low light: the noise reduction smears fine detail a little and leaves faint colored
     /// blotches in the shadows. `amount` stays small (≤ 0.35).

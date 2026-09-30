@@ -40,6 +40,15 @@ final class DigicamFXTests: XCTestCase {
         XCTAssertLessThan(Int(px[1]), Int(mid[1]), "flash falls off toward the corners")
     }
 
+    func testFlashShadowsGoGreen() {
+        let dark = CIImage(color: CIColor(red: 0.18, green: 0.18, blue: 0.18)).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+        let out = DigicamFX.partyFlash(dark)
+        var px = [Float](repeating: 0, count: 4)
+        CIContext().render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 32, y: 32, width: 1, height: 1), format: .RGBAf, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        XCTAssertGreaterThan(px[1], px[0] + 0.02, "a dark grey comes out green")
+        XCTAssertGreaterThan(px[1], px[2], "green, not blue")
+    }
+
     func testSoundsAreShortAndNotSilent() {
         for s in [Synth.hunt(), Synth.fastMetal()] {
             XCTAssertLessThan(Double(s.count) / Synth.rate, 0.4)

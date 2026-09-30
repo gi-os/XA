@@ -472,7 +472,7 @@ private struct ModeRow: View {
                     .accessibilityLabel("Customize")
                 if camera.mode != .video {
                     // Flash: off, auto, on. A shot the flash lit gets DIGI's party-flash look.
-                    RoundButton(size: 38, action: { settings.flash = settings.flash.next }) {
+                    RoundButton(size: 38, action: { settings.flash = settings.flash.next; camera.flashChanged() }) {
                         Image(systemName: settings.flash.icon).font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(settings.flash == .on ? XA.orange : .white)
                     }
