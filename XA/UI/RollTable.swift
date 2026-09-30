@@ -153,8 +153,10 @@ private struct Table: View {
 private struct Tape: View {
     let text: String
     var body: some View {
+        // Caveat's last letter swings past its own width: the tape runs a little longer on the right.
         Text(text).font(.custom("Caveat-Bold", fixedSize: 19)).foregroundStyle(Color(hex: "#2A1A06"))
-            .padding(.horizontal, 16).padding(.vertical, 3)
+            .fixedSize()
+            .padding(.leading, 16).padding(.trailing, 22).padding(.vertical, 3)
             .background(Color(hex: "#ECE2C4").opacity(0.94))
             .rotationEffect(.degrees(-1.5))
             .shadow(color: .black.opacity(0.4), radius: 2, y: 2)

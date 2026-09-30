@@ -17,6 +17,8 @@ extension CaptureMode {
 struct ModeCollar<Center: View>: View {
     @ObservedObject var camera: CameraModel
     var modes: [CaptureMode]
+    /// The mode the shutter is being pushed toward, lit before it is let go.
+    var aimed: CaptureMode? = nil
     @ViewBuilder var center: () -> Center
 
     static var size: CGSize { CGSize(width: 164, height: 60) }
@@ -41,13 +43,15 @@ struct ModeCollar<Center: View>: View {
                         .shadow(color: m.lamp.opacity(0.6), radius: 3)
                         .transition(.opacity)
                 }
-                CurvedLabel(text: m.title, at: offset(i), radius: textRadius, color: on ? m.lamp : Color(white: 0.91).opacity(camera.recording ? 0.25 : 0.5))
+                CurvedLabel(text: m.title, at: offset(i), radius: textRadius, color: on || aimed == m ? m.lamp : Color(white: 0.91).opacity(camera.recording ? 0.25 : 0.5))
+                    .scaleEffect(aimed == m ? 1.08 : 1)
                     .allowsHitTesting(false)
             }
             center()
         }
         .frame(width: s.width, height: s.height)
         .animation(.snappy(duration: 0.22), value: camera.mode)
+        .animation(.snappy(duration: 0.15), value: aimed)
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: "Next mode") { step(1) }
         .accessibilityAction(named: "Previous mode") { step(-1) }

@@ -407,10 +407,11 @@ private struct ShutterRow: View {
     @ObservedObject var settings: AppSettings
     var modes: [CaptureMode]
     var onRoll: () -> Void
+    @State private var aimed: CaptureMode?
     var body: some View {
         HStack(spacing: 22) {
             if settings.showRollButton { rollButton } else { Color.clear.frame(width: 50, height: 50) }
-            ModeCollar(camera: camera, modes: modes) { shutter }
+            ModeCollar(camera: camera, modes: modes, aimed: aimed) { shutter }
             if settings.showFlipButton {
                 RoundButton(size: 50, action: { camera.flip() }) { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 20, weight: .medium)) }
                     .accessibilityLabel("Switch camera")
@@ -420,7 +421,7 @@ private struct ShutterRow: View {
     }
 
     private var shutter: some View {
-            ShutterKey(camera: camera) {
+            ShutterKey(camera: camera, modes: modes, aimed: $aimed) {
                 if camera.mode == .video {
                     ZStack {
                         Capsule().fill(camera.recording ? Color.red : Color.white)
@@ -457,17 +458,53 @@ private struct ShutterRow: View {
     }
 }
 
-/// The on-screen shutter fires the instant a finger lands. No half-press here: focus comes
-/// from tapping the frame, and the two-stage press lives on Camera Control.
+/// The on-screen shutter is also a joystick. Tap it to shoot; push it left or right and let go
+/// to change mode, the way the collar does. It follows the finger a little and springs back.
+/// Pushing is off while recording.
 private struct ShutterKey<Label: View>: View {
     @ObservedObject var camera: CameraModel
+    var modes: [CaptureMode]
+    @Binding var aimed: CaptureMode?
     @ViewBuilder var label: () -> Label
-    @State private var down = false
+    @State private var lean: CGFloat = 0
+    @State private var pressed = false
+    private let reach: CGFloat = 30
+
     var body: some View {
-        label().contentShape(Rectangle())
+        label()
+            .scaleEffect(pressed && aimed == nil ? 0.95 : 1)
+            .offset(x: lean)
+            .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { _ in if !down { down = true; camera.fullPress() } }
-                .onEnded { _ in down = false })
+                .onChanged { v in
+                    pressed = true
+                    guard !camera.recording else { return }
+                    let dx = v.translation.width
+                    lean = max(-22, min(22, dx * 0.55))
+                    let target = abs(dx) > reach ? neighbour(dx > 0 ? 1 : -1) : nil
+                    if target != aimed {
+                        aimed = target
+                        if target != nil { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+                    }
+                }
+                .onEnded { v in
+                    pressed = false
+                    if let m = aimed {
+                        withAnimation(.snappy) { camera.mode = m }
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    } else if hypot(v.translation.width, v.translation.height) < 20 {
+                        camera.fullPress()
+                    }
+                    aimed = nil
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.6)) { lean = 0 }
+                })
+            .animation(.snappy(duration: 0.12), value: pressed)
+    }
+
+    private func neighbour(_ by: Int) -> CaptureMode? {
+        guard let i = modes.firstIndex(of: camera.mode) else { return nil }
+        let j = i + by
+        return modes.indices.contains(j) ? modes[j] : nil
     }
 }
 

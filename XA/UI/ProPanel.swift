@@ -124,7 +124,14 @@ struct ProPanel: View {
                 Spacer(minLength: 0)
                 tap(.af) { label(ProField.af.value(camera, settings), 9) }
                 tap(.wb) { label("WB " + (camera.wbIndex == 0 ? "A" : camera.label(.wb)), 9) }
-                tap(.flash) { label("⚡" + (settings.flash == .off ? "OFF" : (settings.flash == .auto ? "A" : "ON")), 9) }
+                tap(.flash) {
+                    HStack(spacing: 1) {
+                        // A drawn bolt in the panel's ink, not the emoji.
+                        Image(systemName: "bolt.fill").font(.system(size: 8, weight: .heavy)).foregroundStyle(ink)
+                            .shadow(color: shade, radius: 0, x: 1.1, y: 1.1)
+                        label(settings.flash == .off ? "OFF" : (settings.flash == .auto ? "A" : "ON"), 9)
+                    }
+                }
             }
             .frame(height: 24)
             rule
