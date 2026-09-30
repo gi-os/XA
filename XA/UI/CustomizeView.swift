@@ -38,7 +38,7 @@ struct CustomizeView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Segmented(items: [(AFMode.single, "AF-S · lock on half-press"), (.continuous, "AF-C · keep tracking")], selection: $settings.afMode)
                             Segmented(items: [(AFArea.auto, "Auto"), (.point, "Point"), (.eye, "Eye")], selection: $settings.afArea)
-                            Text("Tap the shutter to shoot; push it left or right and let go to change mode. Camera Control: light press locks focus, full press shoots. Tap the frame to aim; long-press to hand focus back to the camera. Eye finds the nearer eye and follows it.")
+                            Text("The shutter fires the moment you touch it; drag the ring round it to change mode. Camera Control: light press locks focus, full press shoots. Tap the frame to aim; long-press to hand focus back to the camera. Eye finds the nearer eye and follows it.")
                                 .font(.system(size: 12)).foregroundStyle(XA.faint)
                         }
                     }
