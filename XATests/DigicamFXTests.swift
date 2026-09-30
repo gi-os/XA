@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 import CoreImage
 import ImageIO
 @testable import XA
@@ -59,5 +60,49 @@ final class DigicamFXTests: XCTestCase {
         let wav = Synth.wav([0, 0.5, -0.5])
         XCTAssertEqual(wav.count, 44 + 6)
         XCTAssertEqual(String(data: wav.prefix(4), encoding: .ascii), "RIFF")
+    }
+
+    func testDefaultRecipeIsHowXAShoots() {
+        let r = DigiRecipe()
+        XCTAssertEqual(r.jpegQuality, 0.42, accuracy: 0.001)
+        XCTAssertEqual(r.onCount, 4)
+        var off = r
+        for k in DigiRecipe.Key.allCases { off[k].on = false }
+        XCTAssertEqual(off.onCount, 0)
+        XCTAssertEqual(off[.jpeg].level, 0)
+    }
+
+    func testRecipeOffLeavesThePhotoAlone() {
+        let img = CIImage(color: CIColor(red: 0.5, green: 0.4, blue: 0.3)).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 48))
+        var off = DigiRecipe()
+        for k in DigiRecipe.Key.allCases { off[k].on = false }
+        let out = DigicamFX.apply(img, DigicamFX.Conditions(flashFired: true, iso: 3200), recipe: off)
+        XCTAssertTrue(out === img || out.extent == img.extent)
+        var px = [Float](repeating: 0, count: 4)
+        CIContext().render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 10, y: 10, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        XCTAssertEqual(px[0], 0.5, accuracy: 0.02)
+    }
+
+    func testSmearAndLeakKeepTheFrame() {
+        let img = CIImage(color: CIColor(red: 0.3, green: 0.3, blue: 0.3)).cropped(to: CGRect(x: 0, y: 0, width: 120, height: 90))
+        XCTAssertEqual(DigicamFX.smear(img, amount: 0.6).extent, img.extent)
+        for seed in 0..<4 { XCTAssertEqual(DigicamFX.leak(img, amount: 0.5, seed: seed).extent, img.extent) }
+    }
+
+    func testCollarPathIsContinuous() {
+        let r: CGFloat = 42
+        let total = ModeCollar<EmptyView>.pathLength(r: r)
+        var last = ModeCollar<EmptyView>.point(at: 0, r: r).p
+        var s: CGFloat = 1
+        while s <= total {
+            let p = ModeCollar<EmptyView>.point(at: s, r: r).p
+            XCTAssertLessThan(hypot(p.x - last.x, p.y - last.y), 1.5, "no jump at \(s)")
+            last = p
+            s += 1
+        }
+        let top = ModeCollar<EmptyView>.point(at: total / 2, r: r)
+        XCTAssertEqual(top.p.x, 82, accuracy: 0.5)
+        XCTAssertEqual(top.p.y, -12, accuracy: 0.5)
+        XCTAssertEqual(top.angle, 0, accuracy: 0.001)
     }
 }

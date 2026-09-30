@@ -47,6 +47,10 @@ final class CameraModel: NSObject, ObservableObject {
     @Published private(set) var flash = false
     @Published private(set) var hasCameraControl = false
     @Published private(set) var lastShot: UIImage?
+    /// DIGI's instant review: the shot held on the viewfinder for a moment, with its file number.
+    @Published private(set) var reviewing = false
+    @Published private(set) var reviewFile = ""
+    static let reviewSeconds: Double = 1.2
     @Published private(set) var lenses: [Lens] = []
     @Published private(set) var zoom: CGFloat = 1
     /// Device zoom factor x this = the number iOS shows (0.5 when there's an ultra wide).
@@ -56,6 +60,8 @@ final class CameraModel: NSObject, ObservableObject {
     /// What the camera is metering right now, for the PRO panel.
     @Published private(set) var meterShutter: Double = 1.0 / 60
     @Published private(set) var meterISO: Float = 100
+    /// The lens's f-number, for the PRO panel.
+    @Published private(set) var aperture: Float = 1.8
     /// Photo sizes PRO can ask the sensor for, in megapixels, smallest first.
     @Published private(set) var proOptions: [Int] = []
 
@@ -104,6 +110,12 @@ final class CameraModel: NSObject, ObservableObject {
     private var _frameMode: CaptureMode = .digi
     private var _develop = DevelopSettings()
     private var _latest: CIImage?
+    // Instant review, read on the frame queue: until when the viewfinder holds, whether the held
+    // frame has been drawn, and the last frame shown (the one that gets held).
+    private var _reviewUntil: CFTimeInterval = 0
+    private var _reviewDrawn = true
+    private var _lastShown: CIImage?
+    private var reviewToken = 0
     // Mode switch: DIGI's processing fades in or out over half a second.
     private var _switchStart: CFTimeInterval = 0
     private var _toDigi = true
@@ -139,6 +151,7 @@ final class CameraModel: NSObject, ObservableObject {
         d.megapixels = settings.digiMegapixels
         d.noise = settings.noise
         d.date = settings.date
+        d.recipe = settings.recipe
         lock.lock(); _develop = d; _frameMode = mode; lock.unlock()
     }
 
@@ -165,6 +178,7 @@ final class CameraModel: NSObject, ObservableObject {
     private func modeChanged(_ old: CaptureMode) {
         UserDefaults.standard.set(mode.rawValue, forKey: "mode")
         if old != mode {
+            skipReview()
             lock.lock(); _switchPending = true; _switchStart = CACurrentMediaTime(); _toDigi = mode.developed; lock.unlock()
             if old == .video && recording { stopRecording() }
         }
@@ -281,7 +295,8 @@ final class CameraModel: NSObject, ObservableObject {
             dev.videoZoomFactor = min(main, maxZ)
             dev.unlockForConfiguration()
         }
-        DispatchQueue.main.async { self.lenses = stops; self.zoom = main; self.zoomMultiplier = mult }
+        let ap = dev.lensAperture
+        DispatchQueue.main.async { self.lenses = stops; self.zoom = main; self.zoomMultiplier = mult; if ap > 0 { self.aperture = ap } }
     }
 
     /// Camera Control. DIGI: slide through sims or looks. PRO: exposure or zoom.
@@ -528,6 +543,7 @@ final class CameraModel: NSObject, ObservableObject {
 
     /// First stage: focus (and, in AF-S, exposure) lock where it is aimed.
     func halfPress() {
+        skipReview()
         guard mode != .video, !halfPressed else { return }
         halfPressed = true
         if settings.sounds { CameraSounds.shared.play(.focus) }
@@ -693,6 +709,7 @@ final class CameraModel: NSObject, ObservableObject {
     func shoot() {
         guard authorized == true, input != nil else { return }
         if mode == .video { toggleRecording(); return }
+        skipReview()
         let m = mode
         let settingsP: AVCapturePhotoSettings
         if m == .pro && settings.proFormat == .heif && photoOutput.availablePhotoCodecTypes.contains(.hevc) {
@@ -799,6 +816,36 @@ final class CameraModel: NSObject, ObservableObject {
         try? data.write(to: url)
     }
 
+    // MARK: instant review
+
+    static func reviewLook(_ img: CIImage) -> CIImage {
+        let e = img.extent
+        let blur = CIFilter.gaussianBlur(); blur.inputImage = img.clampedToExtent(); blur.radius = Float(max(0.8, e.width / 900))
+        let c = CIFilter.colorControls(); c.inputImage = (blur.outputImage ?? img).cropped(to: e); c.contrast = 1.06; c.saturation = 1.08
+        return (c.outputImage ?? img).cropped(to: e)
+    }
+
+    private func startReview() {
+        let n = UserDefaults.standard.integer(forKey: "fileNumber") + 1
+        UserDefaults.standard.set(n, forKey: "fileNumber")
+        reviewFile = String(format: "100-%04d", n % 10000)
+        reviewToken += 1
+        let token = reviewToken
+        lock.lock(); _reviewUntil = CACurrentMediaTime() + Self.reviewSeconds; _reviewDrawn = false; lock.unlock()
+        reviewing = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.reviewSeconds) {
+            if self.reviewToken == token { self.reviewing = false }
+        }
+    }
+
+    /// Back to live view now: a half-press, a new shot or a mode change skips the review.
+    func skipReview() {
+        guard reviewing else { return }
+        reviewToken += 1
+        lock.lock(); _reviewUntil = 0; lock.unlock()
+        reviewing = false
+    }
+
     // MARK: histogram
 
     private func updateHistogram(_ img: CIImage) {
@@ -894,6 +941,18 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             img = t == 0 ? developed : Self.rotated(developed, clockwise: 360 - t)
         }
         let pixel = m == .digi && dev.stack.look.pixelWidth != nil
+        lock.lock()
+        let holding = CACurrentMediaTime() < _reviewUntil
+        let drawHeld = holding && !_reviewDrawn
+        if drawHeld { _reviewDrawn = true }
+        let held = _lastShown
+        if !holding { _lastShown = img }
+        lock.unlock()
+        if holding {
+            // The shot stays up the way a digicam's LCD showed it: a little soft.
+            if drawHeld, let held { preview?.show(Self.reviewLook(held), pixelated: pixel) }
+            return
+        }
         // Drawn right here on the frame queue: the main thread can be busy without the viewfinder stuttering.
         preview?.show(img, pixelated: pixel)
     }
@@ -906,6 +965,7 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
         let id = resolvedSettings.uniqueID
         DispatchQueue.main.async {
             if self.quietShots.remove(id) != nil { CameraSounds.shared.play(.shutter) }
+            if self.pending[id]?.mode == .digi && self.settings.instantReview { self.startReview() }
             self.flash = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { self.flash = false }
         }

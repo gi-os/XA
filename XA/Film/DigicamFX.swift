@@ -38,21 +38,25 @@ enum DigicamFX {
     /// The whole set, in the order a camera's ISP would do it.
     /// Pixel looks (Pocket and friends) skip the lens and the JPEG: blocks and blur would
     /// spoil the pixels.
-    static func apply(_ img: CIImage, _ c: Conditions, pixel: Bool = false) -> CIImage {
+    static func apply(_ img: CIImage, _ c: Conditions, recipe r: DigiRecipe = DigiRecipe(), pixel: Bool = false, seed: Int = 0) -> CIImage {
         var out = img
-        if c.flashFired { out = partyFlash(out) }
-        if c.night > 0 { out = night(out, amount: c.night) }
+        if c.flashFired && r.flash.level > 0 { out = partyFlash(out, amount: r.flash.level) }
+        if c.night > 0 && r.night.level > 0 { out = night(out, amount: min(0.7, c.night * r.night.level * 2)) }
+        if r.smear.level > 0 { out = smear(out, amount: r.smear.level) }
         if !pixel {
-            out = lens(out)
-            out = jpeg(out)
+            if r.lens.level > 0 { out = lens(out, amount: r.lens.level) }
+            if r.jpeg.level > 0 { out = jpeg(out, quality: r.jpegQuality) }
         }
+        if r.leak.level > 0 { out = leak(out, amount: r.leak.level, seed: seed) }
+        if r.grain.level > 0 { out = FilmGrain.apply(out, amount: r.grain.level, size: 0.5) }
         return out
     }
 
     /// Flash from the camera body: what is near is blown bright and flat, a little cool, and
     /// the room behind falls off into the dark.
-    static func partyFlash(_ img: CIImage) -> CIImage {
+    static func partyFlash(_ img: CIImage, amount: Double = 0.5) -> CIImage {
         let e = img.extent
+        let a = min(1, max(0, amount))
         // The colour of a point-and-shoot flash on cheap colour negative: whites a touch warm,
         // faces bright and a little hot, and the shadows sliding green. One cube does it all.
         let cube = CIFilter.colorCubeWithColorSpace()
@@ -60,9 +64,13 @@ enum DigicamFX {
         cube.cubeDimension = Float(flashCubeSize)
         cube.cubeData = flashCube
         if let cs = CGColorSpace(name: CGColorSpace.sRGB) { cube.colorSpace = cs }
-        let out = (cube.outputImage ?? img).cropped(to: e)
-        // Falloff: the far side of the room loses about a stop.
-        let dark = CIFilter.exposureAdjust(); dark.inputImage = out; dark.ev = -0.9
+        var out = (cube.outputImage ?? img).cropped(to: e)
+        if a < 0.5 {
+            let mix = CIFilter.dissolveTransition(); mix.inputImage = img; mix.targetImage = out; mix.time = Float(a * 2)
+            out = (mix.outputImage ?? out).cropped(to: e)
+        }
+        // Falloff: the far side of the room loses about a stop (two at full).
+        let dark = CIFilter.exposureAdjust(); dark.inputImage = out; dark.ev = Float(-1.8 * a)
         let mask = CIFilter.radialGradient()
         mask.center = CGPoint(x: e.midX, y: e.midY)
         mask.radius0 = Float(min(e.width, e.height) * 0.34)
@@ -116,16 +124,17 @@ enum DigicamFX {
     }
 
     /// A cheap zoom lens, barely: a touch of barrel bulge and corners a little soft.
-    static func lens(_ img: CIImage) -> CIImage {
+    static func lens(_ img: CIImage, amount: Double = 0.5) -> CIImage {
         let e = img.extent
+        let a = CGFloat(min(1, max(0, amount))) * 2
         let bulge = CIFilter.bumpDistortion()
         bulge.inputImage = img.clampedToExtent()
         bulge.center = CGPoint(x: e.midX, y: e.midY)
         bulge.radius = Float(hypot(e.width, e.height) * 0.62)
-        bulge.scale = 0.035
+        bulge.scale = Float(0.035 * a)
         let bent = (bulge.outputImage ?? img).cropped(to: e)
         let blur = CIFilter.gaussianBlur(); blur.inputImage = bent.clampedToExtent()
-        blur.radius = Float(max(0.6, min(e.width, e.height) / 1400))
+        blur.radius = Float(max(0.6, min(e.width, e.height) / 1400) * a)
         let soft = (blur.outputImage ?? bent).cropped(to: e)
         let mask = CIFilter.radialGradient()
         mask.center = CGPoint(x: e.midX, y: e.midY)
@@ -140,7 +149,7 @@ enum DigicamFX {
     /// One pass through a low-quality JPEG before the real save: faint blocks in flat areas
     /// and a little smeared color, the way the camera's own encoder left them.
     static let jpegQuality: CGFloat = 0.42
-    static func jpeg(_ img: CIImage) -> CIImage {
+    static func jpeg(_ img: CIImage, quality: CGFloat = jpegQuality) -> CIImage {
         let e = img.extent
         let origin = img.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY))
         // Rendered the safe way: a GPU frame that comes back with black tiles is redone on the CPU.
@@ -150,7 +159,7 @@ enum DigicamFX {
         guard let cg = Encoder.render(origin, reference: reference) else { return img }
         let data = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else { return img }
-        CGImageDestinationAddImage(dest, cg, [kCGImageDestinationLossyCompressionQuality: jpegQuality] as CFDictionary)
+        CGImageDestinationAddImage(dest, cg, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
         guard CGImageDestinationFinalize(dest), let back = CIImage(data: data as Data) else { return img }
         return back.transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY))
     }

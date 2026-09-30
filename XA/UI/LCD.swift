@@ -6,6 +6,8 @@ import SwiftUI
 struct LCDStrip: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
+    /// PRO's selected panel field.
+    @Binding var proField: ProField
     @State private var slideFrom: CGFloat?
     @State private var showZoom = false
 
@@ -13,11 +15,12 @@ struct LCDStrip: View {
         ZStack {
             switch camera.mode {
             case .digi: DigiLCD(camera: camera, settings: settings).transition(Self.swap)
-            case .pro: ProLCD(camera: camera).transition(Self.swap)
+            case .pro: ProLCD(camera: camera, settings: settings, field: $proField).transition(Self.swap)
             case .video: VideoLCD(camera: camera).transition(Self.swap)
             }
         }
-        .frame(height: 36)
+        // PRO grows the strip into the full panel; DIGI and VIDEO keep one row.
+        .frame(height: Self.height(camera.mode))
         .padding(3)
         .background(Color(white: 0.025))
         .clipped()
@@ -32,9 +35,10 @@ struct LCDStrip: View {
         }
         .animation(.easeInOut(duration: 0.26), value: camera.mode)
         .contentShape(Rectangle())
+        .allowsHitTesting(true)
         // Slide along the strip to zoom, the way the system camera's zoom dial works:
         // left is closer, right is wider, and it keeps going as long as the finger does.
-        .gesture(DragGesture(minimumDistance: 6)
+        .gesture(camera.mode == .pro ? nil : DragGesture(minimumDistance: 6)
             .onChanged { v in
                 if slideFrom == nil { slideFrom = camera.zoom; withAnimation(.easeOut(duration: 0.12)) { showZoom = true } }
                 let f = (slideFrom ?? 1) * CGFloat(exp(Double(-v.translation.width) / 140))
@@ -44,11 +48,13 @@ struct LCDStrip: View {
                 slideFrom = nil
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { if slideFrom == nil { withAnimation(.easeIn(duration: 0.25)) { showZoom = false } } }
             })
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: camera.mode == .pro ? .contain : .combine)
         .accessibilityAdjustableAction { dir in
             camera.setZoom(camera.zoom * (dir == .increment ? 1.25 : 0.8), ramp: true)
         }
     }
+
+    static func height(_ m: CaptureMode) -> CGFloat { m == .pro ? 112 : 36 }
 
     static func zoomText(_ z: CGFloat) -> String {
         z < 10 ? String(format: "%.1f×", z) : String(format: "%.0f×", z)
@@ -132,37 +138,16 @@ private struct DigiLCD: View {
 
 private struct ProLCD: View {
     @ObservedObject var camera: CameraModel
-    private let ink = Color(hex: "#0A2430"), off = Color(red: 0.04, green: 0.14, blue: 0.19).opacity(0.08), shade = Color(red: 0, green: 0.24, blue: 0.31).opacity(0.22)
+    @ObservedObject var settings: AppSettings
+    @Binding var field: ProField
 
     var body: some View {
-        let mode = camera.shutterIndex == nil ? "P" : (camera.isoIndex == nil ? "S" : "M")
-        let d = camera.meterShutter
-        let shutter = d >= 1 ? "\(Int(d.rounded()))\"" : "\(Int((1 / max(d, 0.0001)).rounded()))"
-        let ev = camera.ev
-        let evText = (ev < 0 ? "-" : "") + String(format: "%.1f", abs(ev))
         LitPanel(center: Color(hex: "#D4F8FF"), mid: Color(hex: "#9FE6F2"), edge: Color(hex: "#6FC9DC"), glow: Color(red: 0.47, green: 0.84, blue: 1).opacity(0.5))
-            .overlay(alignment: .leading) {
-                HStack(alignment: .center, spacing: 10) {
-                    SevenSeg(text: mode, height: 20, on: ink, off: off, shade: shade)
-                        .padding(2).overlay(Rectangle().strokeBorder(ink.opacity(0.45), lineWidth: 1))
-                    SevenSeg(text: shutter, height: 22, on: ink, off: off, shade: shade)
-                    label("F", 8)
-                    SevenSeg(text: "1.8", height: 11, on: ink, off: off, shade: shade).offset(x: -8)
-                    label("ISO", 8).offset(x: -6)
-                    SevenSeg(text: "\(Int(camera.meterISO.rounded()))", height: 15, on: ink, off: off, shade: shade).offset(x: -12)
-                    SevenSeg(text: evText, height: 12, on: ink, off: off, shade: shade).offset(x: -12)
-                    Spacer(minLength: 0)
-                    Histo(bins: camera.histogram, ink: ink).frame(width: 60, height: 22)
-                }
-                .padding(.horizontal, 8)
-                .modifier(SlideWake())
+            .overlay {
+                ProPanel(camera: camera, settings: settings, field: $field)
+                    .modifier(SlideWake())
             }
             .modifier(PowerOn())
-    }
-
-    private func label(_ s: String, _ size: CGFloat) -> some View {
-        Text(s).font(.custom("IBMPlexSansCond-Bold", fixedSize: size)).foregroundStyle(ink)
-            .shadow(color: shade, radius: 0, x: 1.1, y: 1.1)
     }
 }
 

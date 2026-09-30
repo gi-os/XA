@@ -60,6 +60,7 @@ struct DevelopSettings {
     var megapixels = 2
     var noise: Double = 0.5
     var date = DateConfig()
+    var recipe = DigiRecipe()
 }
 
 /// The darkroom: the same chain for the viewfinder and for the saved photograph.
@@ -67,9 +68,10 @@ enum Darkroom {
     /// Returns the developed image and whether it has transparent pixels.
     /// `dateShift` pushes the date back down and out of the frame (0 = in place, 1 = gone),
     /// for the slide when switching from PRO to DIGI.
-    static func develop(_ src: CIImage, _ s: DevelopSettings, date: Date, preview: Bool, dateShift: CGFloat = 0) -> (CIImage, Bool) {
+    /// `demo` stands in for the photo's own EXIF, for the recipe editor's day, flash and night.
+    static func develop(_ src: CIImage, _ s: DevelopSettings, date: Date, preview: Bool, dateShift: CGFloat = 0, demo: DigicamFX.Conditions? = nil) -> (CIImage, Bool) {
         // Read before any filter: the photo's EXIF says whether the flash fired and how dark it was.
-        let conditions = DigicamFX.Conditions(properties: src.properties)
+        let conditions = demo ?? DigicamFX.Conditions(properties: src.properties)
         let src = Sanitize.apply(src)
         var img = preview ? src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
                           : Digicam.shrink(src, megapixels: s.megapixels)
@@ -81,7 +83,7 @@ enum Darkroom {
         }
         if !preview {
             img = Digicam.crunch(img, noise: CGFloat(s.noise) * 0.03)
-            img = DigicamFX.apply(img, conditions, pixel: s.stack.look.pixelWidth != nil)
+            img = DigicamFX.apply(img, conditions, recipe: s.recipe, pixel: s.stack.look.pixelWidth != nil, seed: Int(date.timeIntervalSince1970))
         }
         let mono = (sim?.mono ?? false) || s.stack.look.mono
         var alpha = false

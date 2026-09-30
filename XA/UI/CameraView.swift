@@ -13,6 +13,8 @@ struct CameraView: View {
     /// Pinch anchor: the zoom when the pinch started, so the gesture scales from there
     /// instead of compounding on the live value.
     @State private var pinchFrom: CGFloat?
+    /// PRO: the panel field the command wheel changes.
+    @State private var proField: ProField = .shutter
 
     var body: some View {
         VStack(spacing: 8) {
@@ -30,7 +32,7 @@ struct CameraView: View {
                         }
                         .onEnded { _ in pinchFrom = nil }
                 )
-            LCDStrip(camera: camera, settings: settings)
+            LCDStrip(camera: camera, settings: settings, proField: $proField)
             ZStack {
                 switch camera.mode {
                 case .digi:
@@ -38,14 +40,20 @@ struct CameraView: View {
                 case .video:
                     if filmOpen || camera.recording { VideoRows(camera: camera, open: $filmOpen, onFilm: onFilm).transition(Self.rows) }
                 case .pro:
-                    ProRows(camera: camera).transition(Self.rows)
+                    ProKeys(camera: camera, settings: settings, field: $proField, onCustomize: onCustomize).transition(Self.rows)
                 }
             }
             .animation(.snappy(duration: 0.32), value: camera.mode)
             VStack(spacing: 8) {
-                ModeRow(camera: camera, settings: settings, filmOpen: $filmOpen, modes: modes, onCustomize: onCustomize)
-                ShutterRow(camera: camera, settings: settings, onRoll: onRoll)
+                // PRO keeps settings and flash by the command wheel; the others have this row.
+                if camera.mode != .pro {
+                    ToolRow(camera: camera, settings: settings, onCustomize: onCustomize) { corner }
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+                ShutterRow(camera: camera, settings: settings, modes: modes, onRoll: onRoll)
+                    .padding(.top, 14)
             }
+            .animation(.snappy(duration: 0.3), value: camera.mode)
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 24).onEnded { v in
                 if v.translation.height < -60 && abs(v.translation.height) > abs(v.translation.width) { onRoll() }
@@ -56,6 +64,24 @@ struct CameraView: View {
         .padding(.bottom, 44)
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
+    }
+
+    /// The corner of the tool row: the loaded film folded into an angled box (swipe it for the
+    /// next one, tap to open the rows), or the resolution while the rows are open.
+    @ViewBuilder private var corner: some View {
+        if camera.mode == .video && !filmOpen && !camera.recording {
+            FannedTape(look: camera.videoLook) { withAnimation(.snappy) { filmOpen = true } }
+                .modifier(SwipeToStep { camera.stepTape($0) })
+                .transition(.scale(scale: 0.6).combined(with: .opacity))
+        } else if camera.mode == .digi && !filmOpen {
+            FannedFilm(stack: camera.stack) { withAnimation(.snappy) { filmOpen = true } }
+                .modifier(SwipeToStep { camera.stepSim($0) })
+                .transition(.scale(scale: 0.6).combined(with: .opacity))
+        } else if camera.mode == .digi {
+            MPMenu(camera: camera, settings: settings)
+        } else {
+            Color.clear.frame(width: 44, height: 44)
+        }
     }
 
     /// Mode rows: the old one drops away, the new one rises in after it.
@@ -98,6 +124,7 @@ struct CameraView: View {
                     .aspectRatio(3 / 4, contentMode: .fit)
                     .overlay { if settings.grid && camera.mode == .pro { GridLines() } }
                     .overlay { FocusBracket(camera: camera) }
+                    .overlay { if camera.reviewing { ReviewOverlay(camera: camera, settings: settings).transition(.opacity) } }
                     .overlay { if camera.flash { Color.white.opacity(0.7) } }
             }
         }
@@ -351,183 +378,19 @@ struct TakeBar: View {
     }
 }
 
-// MARK: PRO
-
-private struct ProRows: View {
-    @ObservedObject var camera: CameraModel
-    var body: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Histogram(bins: camera.histogram).frame(width: 64, height: 26)
-                Spacer()
-                HStack(spacing: 6) {
-                    ForEach(camera.lenses) { l in
-                        let on = abs(camera.zoom - l.factor) / l.factor < 0.08
-                        Button { camera.setZoom(l.factor) } label: {
-                            Text(on ? l.label + "×" : l.label).font(.system(size: 12, weight: .bold))
-                                .frame(width: on ? 40 : 34, height: on ? 40 : 34)
-                                .background(on ? Color.white : XA.fill, in: Circle())
-                                .foregroundStyle(on ? Color.black : Color.white)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                Spacer()
-                Color.clear.frame(width: 64, height: 26)
-            }
-            .frame(height: 40)
-            ProStrip(camera: camera)
-            Dial(camera: camera)
-        }
-    }
-}
-
-struct Histogram: View {
-    let bins: [Float]
-    var body: some View {
-        GeometryReader { g in
-            Path { p in
-                guard bins.count > 1 else { return }
-                let w = g.size.width / CGFloat(bins.count - 1)
-                p.move(to: CGPoint(x: 0, y: g.size.height))
-                for (i, b) in bins.enumerated() {
-                    p.addLine(to: CGPoint(x: CGFloat(i) * w, y: g.size.height * (1 - CGFloat(b))))
-                }
-                p.addLine(to: CGPoint(x: g.size.width, y: g.size.height))
-                p.closeSubpath()
-            }
-            .fill(Color.white.opacity(0.55))
-        }
-    }
-}
-
-private struct ProStrip: View {
-    @ObservedObject var camera: CameraModel
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(ProControl.allCases) { c in
-                let on = camera.proControl == c
-                Button { camera.proControl = c } label: {
-                    VStack(spacing: 2) {
-                        Text(c.title).font(.system(size: 10, weight: .bold)).tracking(0.8)
-                            .foregroundStyle(on ? XA.orange : XA.dim)
-                        Text(camera.label(c)).font(XA.mono(14)).lineLimit(1).minimumScaleFactor(0.7)
-                            .foregroundStyle(on ? XA.orange : .white)
-                    }
-                    .frame(maxWidth: .infinity).frame(height: 50)
-                    .background(on ? XA.orange.opacity(0.14) : Color.clear)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(4).background(XA.strip)
-    }
-}
-
-/// Tick dial for the selected PRO control. Drag sideways; each tick is one stop.
-private struct Dial: View {
-    @ObservedObject var camera: CameraModel
-    @State private var start: Int?
-    var body: some View {
-        let d = camera.dial(camera.proControl)
-        HStack(alignment: .bottom, spacing: 7) {
-            ForEach(-12...12, id: \.self) { i in
-                let idx = d.index + i
-                let valid = idx >= 0 && idx < d.count
-                Rectangle()
-                    .fill(i == 0 ? XA.orange : Color.white.opacity(valid ? (idx % 3 == 0 ? 0.7 : 0.3) : 0.08))
-                    .frame(width: i == 0 ? 3 : 2, height: i == 0 ? 20 : (idx % 3 == 0 ? 16 : 8))
-            }
-        }
-        .frame(maxWidth: .infinity).frame(height: 24)
-        .contentShape(Rectangle())
-        .gesture(DragGesture(minimumDistance: 2)
-            .onChanged { v in
-                if start == nil { start = d.index }
-                let steps = Int((-v.translation.width / 12).rounded())
-                camera.setDial(camera.proControl, (start ?? 0) + steps)
-            }
-            .onEnded { _ in start = nil })
-        .accessibilityLabel("\(camera.proControl.title) dial")
-        .accessibilityValue(camera.label(camera.proControl))
-        .accessibilityAdjustableAction { dir in
-            let d = camera.dial(camera.proControl)
-            camera.setDial(camera.proControl, d.index + (dir == .increment ? 1 : -1))
-        }
-    }
-}
-
 // MARK: shared rows
 
-private struct ModeRow: View {
+/// DIGI's resolution, in the tool row's corner while the film rows are open.
+private struct MPMenu: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
-    @Binding var filmOpen: Bool
-    var modes: [CaptureMode] = CaptureMode.allCases
-    var onCustomize: () -> Void
-    var body: some View {
-        HStack {
-            HStack(spacing: 4) {
-                RoundButton(size: 38, action: onCustomize) { Image(systemName: "slider.horizontal.3").font(.system(size: 16)) }
-                    .accessibilityLabel("Customize")
-                if camera.mode != .video {
-                    // Flash: off, auto, on. A shot the flash lit gets DIGI's party-flash look.
-                    RoundButton(size: 38, action: { settings.flash = settings.flash.next; camera.flashChanged() }) {
-                        Image(systemName: settings.flash.icon).font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(settings.flash == .on ? XA.orange : .white)
-                    }
-                    .accessibilityLabel(settings.flash.label)
-                    .transition(.opacity)
-                }
-            }
-            .frame(width: 80, alignment: .leading)
-            Spacer(minLength: 4)
-            HStack(spacing: 2) {
-                ForEach(modes) { m in
-                    let on = camera.mode == m
-                    Button { withAnimation(.snappy) { camera.mode = m } } label: {
-                        Text(m.title).font(XA.display(16)).tracking(0.5)
-                            .padding(.horizontal, 12).padding(.vertical, 7)
-                            .foregroundStyle(on ? (m == .digi ? Color(red: 0.16, green: 0.08, blue: 0) : .black) : Color.white.opacity(0.82))
-                            .background(on ? (m == .digi ? XA.orange : Color.white) : Color.clear, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(3).background(XA.fill, in: Capsule())
-            Spacer()
-            Group {
-                if camera.mode == .video && !filmOpen && !camera.recording {
-                    FannedTape(look: camera.videoLook) { withAnimation(.snappy) { filmOpen = true } }
-                        .modifier(SwipeToStep { camera.stepTape($0) })
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
-                } else if camera.mode == .video {
-                    Color.clear.frame(width: 44, height: 44)
-                } else if camera.mode == .digi && !filmOpen {
-                    FannedFilm(stack: camera.stack) { withAnimation(.snappy) { filmOpen = true } }
-                        .modifier(SwipeToStep { camera.stepSim($0) })
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
-                } else {
-                    mpMenu
-                }
-            }
-            .frame(width: 80, alignment: .trailing)
-        }
-    }
+    var body: some View { mpMenu }
 
     private var mpMenu: some View {
             Menu {
-                if camera.mode == .digi {
-                    ForEach(AppSettings.digiOptions, id: \.self) { mp in
-                        Button { settings.digiMegapixels = mp; camera.applyResolution() } label: {
-                            if mp == settings.digiMegapixels { Label("\(mp)MP", systemImage: "checkmark") } else { Text("\(mp)MP") }
-                        }
-                    }
-                } else {
-                    ForEach(camera.proOptions, id: \.self) { mp in
-                        Button { settings.proMegapixels = mp; camera.applyResolution() } label: {
-                            if mp == shownPro { Label("\(mp)MP", systemImage: "checkmark") } else { Text("\(mp)MP") }
-                        }
+                ForEach(AppSettings.digiOptions, id: \.self) { mp in
+                    Button { settings.digiMegapixels = mp; camera.applyResolution() } label: {
+                        if mp == settings.digiMegapixels { Label("\(mp)MP", systemImage: "checkmark") } else { Text("\(mp)MP") }
                     }
                 }
             } label: {
@@ -536,19 +399,27 @@ private struct ModeRow: View {
             }
             .accessibilityLabel("Resolution \(spec)")
     }
-    private var shownPro: Int { CaptureMode.megapixels(camera.photoSize) }
-    private var spec: String {
-        camera.mode == .digi ? "\(settings.digiMegapixels)MP" : "\(shownPro)MP"
-    }
+    private var spec: String { "\(settings.digiMegapixels)MP" }
 }
 
 private struct ShutterRow: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
+    var modes: [CaptureMode]
     var onRoll: () -> Void
     var body: some View {
-        HStack(spacing: 28) {
+        HStack(spacing: 22) {
             if settings.showRollButton { rollButton } else { Color.clear.frame(width: 50, height: 50) }
+            ModeCollar(camera: camera, modes: modes) { shutter }
+            if settings.showFlipButton {
+                RoundButton(size: 50, action: { camera.flip() }) { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 20, weight: .medium)) }
+                    .accessibilityLabel("Switch camera")
+            } else { Color.clear.frame(width: 50, height: 50) }
+        }
+        .frame(height: 76)
+    }
+
+    private var shutter: some View {
             ShutterKey(camera: camera) {
                 if camera.mode == .video {
                     ZStack {
@@ -569,12 +440,6 @@ private struct ShutterRow: View {
             .accessibilityLabel(camera.mode == .video ? (camera.recording ? "Stop recording" : "Record") : "Take picture")
             .accessibilityAddTraits(.isButton)
             .accessibilityAction { camera.fullPress() }
-            if settings.showFlipButton {
-                RoundButton(size: 50, action: { camera.flip() }) { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 20, weight: .medium)) }
-                    .accessibilityLabel("Switch camera")
-            } else { Color.clear.frame(width: 50, height: 50) }
-        }
-        .frame(height: 76)
     }
 
     private var rollButton: some View {
@@ -698,5 +563,39 @@ struct FannedTape: View {
         .buttonStyle(.plain)
         .animation(.snappy(duration: 0.25), value: look)
         .accessibilityLabel("Tape: \(look.title)")
+    }
+}
+
+/// DIGI's instant review: the shot held on the LCD for a moment, soft and scanned, with its
+/// file number, while an orange bar drains. Half-press (or shoot again) to skip it.
+private struct ReviewOverlay: View {
+    @ObservedObject var camera: CameraModel
+    @ObservedObject var settings: AppSettings
+    @State private var left: CGFloat = 1
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Canvas { ctx, size in
+                var y: CGFloat = 0
+                var p = Path()
+                while y < size.height { p.addRect(CGRect(x: 0, y: y, width: size.width, height: 1)); y += 3 }
+                ctx.fill(p, with: .color(.black.opacity(0.22)))
+            }
+            VStack(spacing: 4) {
+                Rectangle().fill(XA.orange).frame(height: 3)
+                    .scaleEffect(x: left, anchor: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack {
+                    Text("▶ " + camera.reviewFile).foregroundStyle(XA.orange)
+                    Spacer()
+                    Text("\(settings.digiMegapixels)MP · FINE · \((FilmCatalog.sim(camera.stack.simID) ?? Sim.neutral).title.uppercased())")
+                        .foregroundStyle(.white.opacity(0.85)).lineLimit(1)
+                }
+                .font(XA.mono(10))
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .background(Color.black.opacity(0.6))
+        }
+        .allowsHitTesting(false)
+        .onAppear { withAnimation(.linear(duration: CameraModel.reviewSeconds)) { left = 0 } }
     }
 }

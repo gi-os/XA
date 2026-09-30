@@ -80,9 +80,17 @@ struct RollTable: View {
                 LazyVStack(spacing: 18) {
                     ForEach(library.days, id: \.title) { day in
                         Tape(text: Self.tapeText(day.assets.first?.creationDate))
-                        Masonry(piles: piles(day.assets), columns: columns, library: library) { pile in
+                        Masonry(piles: piles(day.assets), columns: columns, library: library, onTap: { pile in
                             if pile.assets.count > 1 { withAnimation(.snappy) { openPile = pile } } else { onOpen(pile.top) }
-                        }
+                        }, onStep: { pile, by in
+                            // Swipe a pile sideways: the next shot in it comes to the top.
+                            let a = pile.assets
+                            guard a.count > 1, let i = a.firstIndex(where: { $0.localIdentifier == pile.top.localIdentifier }) else { return }
+                            let next = a[((i + by) % a.count + a.count) % a.count]
+                            RollPiles.setTop(next.localIdentifier, for: pile.id)
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            withAnimation(.snappy) { version += 1 }
+                        })
                         .id("\(day.title)-\(columns)-\(version)")
                     }
                 }
@@ -136,12 +144,9 @@ struct RollTable: View {
     }
 }
 
-/// A warm wooden-ish table, flat and dark enough not to fight the prints.
+/// OLED black: the prints float on nothing, and the screen's pixels are off between them.
 private struct Table: View {
-    var body: some View {
-        RadialGradient(colors: [Color(hex: "#3A2C22"), Color(hex: "#1D1510")], center: UnitPoint(x: 0.5, y: 0.25), startRadius: 0, endRadius: 700)
-            .ignoresSafeArea()
-    }
+    var body: some View { Color.black.ignoresSafeArea() }
 }
 
 /// The day on a strip of masking tape.
@@ -178,6 +183,7 @@ private struct Masonry: View {
     let columns: Int
     let library: Library
     var onTap: (Pile) -> Void
+    var onStep: (Pile, Int) -> Void = { _, _ in }
 
     var body: some View {
         GeometryReader { g in
@@ -188,7 +194,7 @@ private struct Masonry: View {
                 ForEach(0..<columns, id: \.self) { c in
                     VStack(spacing: gap + 8) {
                         ForEach(cols.items[c], id: \.id) { p in
-                            PileView(pile: p, width: cw, library: library).onTapGesture { onTap(p) }
+                            PileView(pile: p, width: cw, library: library, onStep: onStep).onTapGesture { onTap(p) }
                         }
                     }
                     .frame(width: cw)
@@ -222,6 +228,8 @@ private struct PileView: View {
     let pile: Pile
     let width: CGFloat
     let library: Library
+    var onStep: (Pile, Int) -> Void = { _, _ in }
+    @State private var drag: CGFloat = 0
     var body: some View {
         ZStack(alignment: .top) {
             if pile.assets.count > 1 {
@@ -231,6 +239,7 @@ private struct PileView: View {
                 }
             }
             PrintView(asset: pile.top, width: width, library: library, tilt: Self.tilt(pile.top.localIdentifier))
+                .offset(x: drag * 0.5).rotationEffect(.degrees(Double(drag) * 0.05))
             if pile.assets.count > 1 {
                 Clip().frame(width: 40 * scale, height: 34 * scale).offset(y: -20 * scale)
                 Text("×\(pile.assets.count)").font(.custom("Caveat-Bold", fixedSize: 15 * scale)).foregroundStyle(Color(hex: "#2A1A06"))
@@ -241,6 +250,13 @@ private struct PileView: View {
             }
         }
         .padding(.top, pile.assets.count > 1 ? 8 : 0)
+        .simultaneousGesture(pile.assets.count > 1 ? DragGesture(minimumDistance: 16)
+            .onChanged { v in if abs(v.translation.width) > abs(v.translation.height) * 1.4 { drag = v.translation.width } }
+            .onEnded { v in
+                let dx = v.translation.width
+                if abs(dx) > 40 && abs(dx) > abs(v.translation.height) * 1.4 { onStep(pile, dx < 0 ? 1 : -1) }
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { drag = 0 }
+            } : nil)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(pile.assets.count > 1 ? "Pile of \(pile.assets.count) shots" : "Photo")
         .accessibilityAddTraits(.isButton)
@@ -327,14 +343,14 @@ private struct PileSpread: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.04, green: 0.02, blue: 0.01).opacity(0.78).ignoresSafeArea()
+            Color.black.opacity(0.9).ignoresSafeArea()
                 .onTapGesture { onAction(.done) }
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("\(pile.assets.count) SHOTS · \(spanText)").font(XA.display(18))
                     Spacer()
                 }
-                Text("Tap the one that goes on top. Double-tap to look closer.").font(.system(size: 12)).foregroundStyle(XA.dim)
+                Text("Tap the one that goes on top, or swipe the pile on the roll. Double-tap to look closer.").font(.system(size: 12)).foregroundStyle(XA.dim)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 20) {
                         ForEach(pile.assets, id: \.localIdentifier) { a in

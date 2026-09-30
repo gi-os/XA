@@ -24,6 +24,10 @@ final class AppSettings: ObservableObject {
     @Published var crunch: Double { didSet { d.set(crunch, forKey: "crunch") } }
     @Published var noise: Double { didSet { d.set(noise, forKey: "noise") } }
     @Published var date: DateConfig { didSet { save(date, "dateConfig") } }
+    /// Which digicam faults DIGI photos get, and how much.
+    @Published var recipe: DigiRecipe { didSet { save(recipe, "digiRecipe") } }
+    /// DIGI shows each shot on the viewfinder for a moment, like a digicam's review.
+    @Published var instantReview: Bool { didSet { d.set(instantReview, forKey: "instantReview") } }
     @Published var proFormat: ProFormat { didSet { d.set(proFormat.rawValue, forKey: "proFormat") } }
     @Published var digiSlide: DigiSlide { didSet { d.set(digiSlide.rawValue, forKey: "digiSlide") } }
     @Published var proSlide: ProSlide { didSet { d.set(proSlide.rawValue, forKey: "proSlide") } }
@@ -43,6 +47,8 @@ final class AppSettings: ObservableObject {
         crunch = d.object(forKey: "crunch") as? Double ?? 0.6
         noise = d.object(forKey: "noise") as? Double ?? 0.5
         date = AppSettings.load("dateConfig") ?? DateConfig()
+        recipe = AppSettings.load("digiRecipe") ?? DigiRecipe()
+        instantReview = d.object(forKey: "instantReview") as? Bool ?? true
         proFormat = ProFormat(rawValue: d.string(forKey: "proFormat") ?? "") ?? .heif
         digiSlide = DigiSlide(rawValue: d.string(forKey: "digiSlide") ?? "") ?? .sim
         proSlide = ProSlide(rawValue: d.string(forKey: "proSlide") ?? "") ?? .exposure

@@ -14,7 +14,11 @@ struct CustomizeView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Resolution").font(.system(size: 15))
                             Segmented(items: AppSettings.digiOptions.map { ($0, "\($0)MP") }, selection: $settings.digiMegapixels)
-                            FlatSlider(label: "JPEG crunch", value: $settings.crunch, range: 0.3...0.95, format: { "\(Int(($0 * 100).rounded()))" })
+                            NavigationLink { RecipeEditor(settings: settings, camera: camera) } label: {
+                                row("Your recipe", "\(settings.recipe.onCount) on", accent: true)
+                            }
+                            Toggle("Instant review", isOn: $settings.instantReview).tint(XA.orange).font(.system(size: 15))
+                            FlatSlider(label: "Save quality", value: $settings.crunch, range: 0.3...0.95, format: { "\(Int(($0 * 100).rounded()))" })
                             FlatSlider(label: "Sensor noise", value: $settings.noise, format: { "\(Int(($0 * 100).rounded()))" })
                             NavigationLink { DateScreen(settings: settings, camera: camera) } label: {
                                 row("Date back", "\(settings.date.style.title.capitalized) · \(placement)", accent: true)
