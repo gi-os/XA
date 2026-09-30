@@ -50,8 +50,9 @@ struct CameraView: View {
                     ToolRow(camera: camera, settings: settings, onCustomize: onCustomize) { corner }
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-                ModeRibbon(camera: camera, modes: modes)
                 ShutterRow(camera: camera, settings: settings, onRoll: onRoll)
+                // Under the shutter, in the space the home bar leaves: the viewfinder keeps the room.
+                ModeRibbon(camera: camera, modes: modes)
             }
             .animation(.snappy(duration: 0.3), value: camera.mode)
             .contentShape(Rectangle())
@@ -63,8 +64,9 @@ struct CameraView: View {
             })
         }
         .padding(.horizontal, 11)
-        // The shutter sits where the system camera's does, so thumbs find it without looking.
-        .padding(.bottom, 44)
+        // The shutter sits where the system camera's does, so thumbs find it without looking;
+        // the mode ribbon fills the gap under it.
+        .padding(.bottom, 6)
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
     }
