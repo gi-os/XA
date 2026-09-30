@@ -740,12 +740,13 @@ final class CameraModel: NSObject, ObservableObject {
                 let (developed, alpha) = Darkroom.develop(src, shot.develop, date: shot.date, preview: false)
                 let recipe = Recipe.describe(shot.develop.stack, megapixels: shot.develop.megapixels)
                 thumbSource = developed
-                // The thumbnail first: it is the reference the full render is checked against.
+                // The thumbnail first: it is the reference the full render is checked against,
+                // cell by cell, so a render that came back with black tiles is redone on the CPU.
                 let e0 = developed.extent
                 let k0: CGFloat = 200 / max(e0.width, 1)
                 let small = developed.transformed(by: CGAffineTransform(scaleX: k0, y: k0))
-                let expect = Encoder.gpu.createCGImage(small, from: small.extent).map(Encoder.brightness)
-                guard let cg = Encoder.render(developed, expectBrightness: expect) else { return }
+                let reference = Encoder.gpu.createCGImage(small, from: small.extent.integral)
+                guard let cg = Encoder.render(developed, reference: reference) else { return }
                 let props = Recipe.properties(from: src.properties, recipe: recipe)
                 type = alpha ? .png : .jpeg
                 out = Encoder.encode(cg, type: type, quality: CGFloat(shot.crunch), properties: props)
