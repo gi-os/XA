@@ -88,21 +88,4 @@ final class DigicamFXTests: XCTestCase {
         XCTAssertEqual(DigicamFX.smear(img, amount: 0.6).extent, img.extent)
         for seed in 0..<4 { XCTAssertEqual(DigicamFX.leak(img, amount: 0.5, seed: seed).extent, img.extent) }
     }
-
-    func testCollarPathIsContinuous() {
-        let r: CGFloat = 42
-        let total = ModeCollar<EmptyView>.pathLength(r: r)
-        var last = ModeCollar<EmptyView>.point(at: 0, r: r).p
-        var s: CGFloat = 1
-        while s <= total {
-            let p = ModeCollar<EmptyView>.point(at: s, r: r).p
-            XCTAssertLessThan(hypot(p.x - last.x, p.y - last.y), 1.5, "no jump at \(s)")
-            last = p
-            s += 1
-        }
-        let top = ModeCollar<EmptyView>.point(at: total / 2, r: r)
-        XCTAssertEqual(top.p.x, 82, accuracy: 0.5)
-        XCTAssertEqual(top.p.y, -12, accuracy: 0.5)
-        XCTAssertEqual(top.angle, 0, accuracy: 0.001)
-    }
 }

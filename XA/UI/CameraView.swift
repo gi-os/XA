@@ -50,13 +50,16 @@ struct CameraView: View {
                     ToolRow(camera: camera, settings: settings, onCustomize: onCustomize) { corner }
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-                ShutterRow(camera: camera, settings: settings, modes: modes, onRoll: onRoll)
-                    .padding(.top, 14)
+                ModeRibbon(camera: camera, modes: modes)
+                ShutterRow(camera: camera, settings: settings, onRoll: onRoll)
             }
             .animation(.snappy(duration: 0.3), value: camera.mode)
             .contentShape(Rectangle())
+            // The deck: swipe sideways to change mode, like the iPhone camera; up opens the roll.
             .gesture(DragGesture(minimumDistance: 24).onEnded { v in
-                if v.translation.height < -60 && abs(v.translation.height) > abs(v.translation.width) { onRoll() }
+                let dx = v.translation.width, dy = v.translation.height
+                if dy < -60 && abs(dy) > abs(dx) { onRoll() }
+                else if abs(dx) > 50 && abs(dx) > abs(dy) * 1.3 { ModeRibbon.step(dx < 0 ? 1 : -1, modes, camera) }
             })
         }
         .padding(.horizontal, 11)
@@ -404,12 +407,11 @@ private struct MPMenu: View {
 private struct ShutterRow: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
-    var modes: [CaptureMode]
     var onRoll: () -> Void
     var body: some View {
-        HStack(spacing: 22) {
+        HStack(spacing: 28) {
             if settings.showRollButton { rollButton } else { Color.clear.frame(width: 50, height: 50) }
-            ModeCollar(camera: camera, modes: modes) { shutter }
+            shutter
             if settings.showFlipButton {
                 RoundButton(size: 50, action: { camera.flip() }) { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 20, weight: .medium)) }
                     .accessibilityLabel("Switch camera")
@@ -456,8 +458,8 @@ private struct ShutterRow: View {
     }
 }
 
-/// The on-screen shutter fires the instant a finger lands. Modes change on the collar round it,
-/// never on the button, so nothing has to wait to find out what the finger meant.
+/// The on-screen shutter fires the instant a finger lands. Modes change by swiping the deck
+/// around it, never on the button, so nothing has to wait to find out what the finger meant.
 private struct ShutterKey<Label: View>: View {
     @ObservedObject var camera: CameraModel
     @ViewBuilder var label: () -> Label
