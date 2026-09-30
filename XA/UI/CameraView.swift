@@ -9,12 +9,23 @@ struct CameraView: View {
     var onFilm: () -> Void
     /// The film rows are open; folded, the loaded film sits in the mode row as a little box.
     @State private var filmOpen = true
+    /// Pinch anchor: the zoom when the pinch started, so the gesture scales from there
+    /// instead of compounding on the live value.
+    @State private var pinchFrom: CGFloat?
 
     var body: some View {
         VStack(spacing: 8) {
             viewfinder
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 24).onEnded(swipe))
+                .simultaneousGesture(
+                    MagnifyGesture()
+                        .onChanged { v in
+                            if pinchFrom == nil { pinchFrom = camera.zoom }
+                            camera.setZoom((pinchFrom ?? 1) * v.magnification)
+                        }
+                        .onEnded { _ in pinchFrom = nil }
+                )
                 .overlay { FocusTapLayer(camera: camera, filmOpen: $filmOpen) }
             LCDStrip(camera: camera, settings: settings)
             ZStack {
