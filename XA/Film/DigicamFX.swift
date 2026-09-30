@@ -57,7 +57,7 @@ enum DigicamFX {
         // faces bright and a little hot, and the shadows sliding green. One cube does it all.
         let cube = CIFilter.colorCubeWithColorSpace()
         cube.inputImage = img
-        cube.cubeDimension = Int32(flashCubeSize)
+        cube.cubeDimension = Float(flashCubeSize)
         cube.cubeData = flashCube
         if let cs = CGColorSpace(name: CGColorSpace.sRGB) { cube.colorSpace = cs }
         let out = (cube.outputImage ?? img).cropped(to: e)
