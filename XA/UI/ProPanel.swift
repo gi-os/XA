@@ -202,7 +202,7 @@ private struct EVScale: View {
             tri.move(to: CGPoint(x: at - 3, y: 0)); tri.addLine(to: CGPoint(x: at + 3, y: 0)); tri.addLine(to: CGPoint(x: at, y: 4)); tri.closeSubpath()
             ctx.fill(tri, with: .color(ink))
             for (t, x) in [("-2", 0.0), ("0", w / 2), ("+2", w)] {
-                ctx.draw(Text(t).font(.custom("IBMPlexSansCond-Bold", fixedSize: 6)).foregroundStyle(ink), at: CGPoint(x: min(max(x, 4), w - 4), y: 15))
+                ctx.draw(Text(t).font(.custom("IBMPlexSansCond-Bold", fixedSize: 6)).foregroundColor(ink), at: CGPoint(x: min(max(x, 4), w - 4), y: 15))
             }
         }
     }
