@@ -366,8 +366,6 @@ private struct PresetSimBox: View {
     private var visage: some View {
         let f = "CormorantGaramond-Bold", fg = Color(hex: "#4A3A6A"), paper = Color(hex: "#F3E7C9")
         return BoxCanvas(bg: paper) {
-            LinearGradient(stops: [.init(color: .white, location: 0), .init(color: paper, location: 0.55), .init(color: Color(hex: blue ? "#D4DAE2" : "#DCD3E6"), location: 1)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
             LinearGradient(colors: [Color(hex: "#7F78D2"), Color(hex: "#D98BB5")], startPoint: .top, endPoint: .bottom).frame(width: 58, height: 106)
             T("135-36", f, 11, paper, 1).tl(8, 8)
             T("800", f, 30, paper).bl(6, 6)
@@ -813,6 +811,8 @@ struct StockBox: View {
         let grad = blue ? ["#9CC3EA", "#4F82C4", "#23457E"] : ["#C9B8EE", "#D63FA8", "#5B2E91"]
         let serif = "DMSerifDisplay-Regular"
         return BoxCanvas(bg: paper) {
+            LinearGradient(stops: [.init(color: .white, location: 0), .init(color: paper, location: 0.55), .init(color: Color(hex: blue ? "#D4DAE2" : "#DCD3E6"), location: 1)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
             LinearGradient(colors: grad.map { Color(hex: $0) }, startPoint: .top, endPoint: .bottom).frame(width: 50, height: 106)
             LinearGradient(colors: [Color(hex: grad[1]).opacity(0.35), .clear], startPoint: .leading, endPoint: .trailing).frame(width: 18, height: 106).tl(50, 0)
             T("135-36", "ChakraPetch-Bold", 7, paper, 0.5).tl(6, 7)
