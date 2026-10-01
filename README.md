@@ -63,3 +63,9 @@ which signs with fastlane match (`gi-os/ios-certs`) and uploads to TestFlight.
 
 Fonts are bundled open-licence faces from Google Fonts (SIL OFL 1.1, Apache 2.0 for Roboto
 Condensed and Yellowtail).
+
+## License
+
+XA is free software: the GNU General Public License version 3 (`LICENSE`), with an additional
+permission for the App Store and TestFlight (`EXCEPTION.md`). Credits, font licenses and the
+spektrafilm notice are in `NOTICE.md`.

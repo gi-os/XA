@@ -1,0 +1,19 @@
+{
+  "fitted_on": "Portra 400 / Portra Endura, 2lut sRGB\u2192sRGB, 1500 px frames",
+  "params": {
+    "scatter_weight": 0.2948,
+    "scatter_um": 13.0397,
+    "halation_r": 0.0724,
+    "halation_g": 0.0119,
+    "halation_um": 42.8834,
+    "coupler_k": 0.5599,
+    "coupler_um": 7.6422,
+    "scan_sharpen": 0.7741,
+    "scan_sharpen_px": 0.8728,
+    "coupler_tail_k": 0.0885,
+    "coupler_tail_um": 193.6408
+  },
+  "grain_amp": 0.012,
+  "grain_blur_px": 0.9,
+  "dye_blur_px": 0.6
+}
