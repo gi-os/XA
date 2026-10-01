@@ -72,6 +72,11 @@ struct RollTable: View {
     /// Pulled past the top and let go: the roll closes, the way a sheet does.
     var onPullClose: (() -> Void)?
     @State private var overscroll: CGFloat = 0
+    /// How far past the top this drag has pulled. Kept for the whole drag, because by the time
+    /// the finger lifts the scroll view may already be springing back.
+    @State private var pullPeak: CGFloat = 0
+    @State private var dragging = false
+    private static let pullToClose: CGFloat = 60
     @AppStorage("rollColumns") private var columns = 2
     @State private var pinchStart: Int?
     @State private var showCols = false
@@ -120,9 +125,21 @@ struct RollTable: View {
                 .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 60)
             }
             .background(Table())
-            .onScrollGeometryChange(for: CGFloat.self, of: { -($0.contentOffset.y + $0.contentInsets.top) }) { _, v in overscroll = max(0, v) }
+            .onScrollGeometryChange(for: CGFloat.self, of: { -($0.contentOffset.y + $0.contentInsets.top) }) { _, v in
+                overscroll = max(0, v)
+                if dragging {
+                    if overscroll > Self.pullToClose && pullPeak <= Self.pullToClose { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+                    pullPeak = max(pullPeak, overscroll)
+                }
+            }
             .onScrollPhaseChange { old, new in
-                if old == .interacting && new != .interacting && overscroll > 70 { onPullClose?() }
+                if new == .interacting { dragging = true; pullPeak = 0 }
+                if old == .interacting && new != .interacting {
+                    dragging = false
+                    // Pulled down past the top and let go: back to the camera.
+                    if max(pullPeak, overscroll) > Self.pullToClose { onPullClose?() }
+                    pullPeak = 0
+                }
             }
             .simultaneousGesture(MagnifyGesture()
                 .onChanged { v in
@@ -136,6 +153,16 @@ struct RollTable: View {
                     pinchStart = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { withAnimation { showCols = false } }
                 })
+            if overscroll > 8 {
+                VStack(spacing: 4) {
+                    Image(systemName: overscroll > Self.pullToClose ? "camera.fill" : "chevron.down")
+                        .font(.system(size: 15, weight: .bold))
+                    Text(overscroll > Self.pullToClose ? "Let go for the camera" : "Pull for the camera").font(XA.display(11))
+                }
+                .foregroundStyle(.white.opacity(min(1, overscroll / Self.pullToClose)))
+                .frame(maxHeight: .infinity, alignment: .top).padding(.top, 6)
+                .allowsHitTesting(false)
+            }
             if showCols { ColumnPill(columns: columns).frame(maxHeight: .infinity, alignment: .bottom).padding(.bottom, 28).transition(.opacity) }
         }
     }
