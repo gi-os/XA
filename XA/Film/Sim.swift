@@ -57,6 +57,10 @@ struct Sim: Codable, Equatable, Identifiable, Hashable {
     /// Saved stacks remember the look and shape too.
     var look: Int? = nil
     var shape: Int? = nil
+    /// A real film stock developed by FilmLab instead of the colour dials.
+    var stock: String? = nil
+    /// Display only: the push the loaded box shows. Never saved.
+    var shownPush: Int? = nil
 
     var title: String { "\(name) \(iso)".uppercased() }
     var isPreset: Bool { Sim.presets.contains { $0.id == id } }
@@ -72,7 +76,14 @@ struct Sim: Codable, Equatable, Identifiable, Hashable {
 
     /// Neutral, then the seven XA stocks. Names and boxes are XA's own; the looks are what the
     /// films they are modelled on are known for.
-    static let presets: [Sim] = [neutral, nocturne, visage, prima, amethyst, sunday, onyx]
+    static let presets: [Sim] = [neutral] + stocks + [nocturne, visage, prima, amethyst, sunday, onyx]
+
+    /// The film stocks, developed for real (FilmLab).
+    static let stocks: [Sim] = FilmStock.all.map { st in
+        var s = Sim(id: st.id, name: st.name, iso: "\(st.rated)\(st.suffix)", exposures: 36)
+        s.stock = st.id
+        return s
+    }
 
     /// Tungsten-balanced cinema stock: cool daylight, red halation round every highlight.
     static let nocturne: Sim = {
@@ -290,7 +301,10 @@ enum SimEngine {
     }
 
     /// The whole sim on an image: cube, then halation, grain and vignette.
-    static func apply(_ s: Sim, to img: CIImage, preview: Bool) -> CIImage {
+    static func apply(_ s: Sim, to img: CIImage, preview: Bool, push: Int = 0, seed: Int? = nil) -> CIImage {
+        if let st = FilmStock.stock(s.stock) {
+            return FilmLab.develop(img, stock: st, push: push, preview: preview, seed: seed ?? Int.random(in: 0..<100_000))
+        }
         let e = img.extent
         let clean = Sanitize.apply(img)
         let lit = (s.halation > 0 || s.bloom > 0) ? Sanitize.apply(glow(clean, halation: s.halation, tone: s.halationTone, bloom: s.bloom)) : clean

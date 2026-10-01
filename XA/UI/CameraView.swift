@@ -80,7 +80,7 @@ struct CameraView: View {
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
         } else if camera.mode == .digi && !filmOpen {
             FannedFilm(stack: camera.stack) { withAnimation(.snappy) { filmOpen = true } }
-                .modifier(SwipeToStep { camera.stepSim($0) })
+                .modifier(SwipeToStep(step: { camera.stack.push = 0; camera.stepSim($0) }, vertical: { camera.stepPush($0) }))
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
         } else if camera.mode == .digi {
             MPMenu(camera: camera, settings: settings)
@@ -210,7 +210,7 @@ struct FannedFilm: View {
     let stack: Stack
     var action: () -> Void
     var body: some View {
-        let sim = FilmCatalog.sim(stack.simID)
+        let sim = stack.shownSim
         let second: FilmItem? = stack.effectiveShape.map { FilmItem.shape($0) } ?? (stack.look != .none ? FilmItem.look(stack.look) : nil)
         Button(action: action) {
             ZStack(alignment: .topLeading) {
@@ -261,7 +261,11 @@ struct FilmStrip: View {
                     switch row {
                     case 0:
                         ForEach(FilmCatalog.sims) { s in
-                            tile(.sim(s), on: FilmCatalog.sim(camera.stack.simID)?.id == s.id) { camera.stack.simID = s.id }
+                            let on = FilmCatalog.sim(camera.stack.simID)?.id == s.id
+                            tile(.sim(on ? (camera.stack.shownSim ?? s) : s), on: on) {
+                                if !on { camera.stack.push = 0 }
+                                camera.stack.simID = s.id
+                            }
                         }
                     case 1:
                         ForEach(Look.allCases.filter { $0 != .none }) { l in
@@ -535,17 +539,24 @@ private struct Corners: Shape {
 /// whatever the box does. The box follows the finger a little, then springs back.
 struct SwipeToStep: ViewModifier {
     var step: (Int) -> Void
+    /// Up and down, when the box has a second axis (a film stock's push and pull): up is +1.
+    var vertical: ((Int) -> Void)? = nil
     @State private var drag: CGFloat = 0
+    @State private var lift: CGFloat = 0
     func body(content: Content) -> some View {
         content
-            .offset(x: drag * 0.35)
+            .offset(x: drag * 0.35, y: lift * 0.3)
             .rotationEffect(.degrees(Double(drag) * 0.04))
             .highPriorityGesture(DragGesture(minimumDistance: 12)
-                .onChanged { v in if abs(v.translation.width) > abs(v.translation.height) { drag = v.translation.width } }
+                .onChanged { v in
+                    if abs(v.translation.width) > abs(v.translation.height) { drag = v.translation.width; lift = 0 }
+                    else if vertical != nil { lift = v.translation.height; drag = 0 }
+                }
                 .onEnded { v in
-                    let dx = v.translation.width
-                    if abs(dx) > 28 && abs(dx) > abs(v.translation.height) { step(dx < 0 ? 1 : -1) }
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { drag = 0 }
+                    let dx = v.translation.width, dy = v.translation.height
+                    if abs(dx) > 28 && abs(dx) > abs(dy) { step(dx < 0 ? 1 : -1) }
+                    else if let vertical, abs(dy) > 24 && abs(dy) > abs(dx) { vertical(dy < 0 ? 1 : -1) }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { drag = 0; lift = 0 }
                 })
             .accessibilityAction(named: "Next") { step(1) }
             .accessibilityAction(named: "Previous") { step(-1) }

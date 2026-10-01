@@ -68,6 +68,10 @@ struct CustomizeView: View {
                     group("OPENS IN") {
                         Segmented(items: [(OpenIn.last, "Last mode"), (.digi, "DIGI"), (.pro, "PRO")], selection: $settings.openIn)
                     }
+                    group("FILM") {
+                        Text("The film stocks (Bowery, Coney, Chelsea, Prospect, Canal, Orchard) are developed through tables baked with spektrafilm, Andrea Volpato's spectral simulation of film from published datasheets, with grain, halation and coupler effects fitted to it. Film modeling powered by spektrafilm (github.com/andreavolpato/spektrafilm); tables CC BY-SA 4.0. Swipe a stock's box up to push it a stop, down to pull.")
+                            .font(.system(size: 12)).foregroundStyle(XA.dim)
+                    }
                     group("CAMERA BUTTON") {
                         Text("Make XA the camera: Settings › Camera › Camera Control › Launch Camera › XA. Add the XA control to Control Center or the Lock Screen to open it while locked.")
                             .font(.system(size: 13)).foregroundStyle(XA.dim)

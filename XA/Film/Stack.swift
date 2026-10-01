@@ -7,6 +7,24 @@ struct Stack: Codable, Equatable, Hashable {
     var simID: String?
     var look: Look = .none
     var shape: FrameShape = .none
+    /// Stops pushed (+) or pulled (−) from the stock's box speed. Optional so old stacks load.
+    var pushStops: Int? = nil
+    var push: Int {
+        get { pushStops ?? 0 }
+        set { pushStops = newValue == 0 ? nil : min(max(newValue, FilmStock.pushRange.lowerBound), FilmStock.pushRange.upperBound) }
+    }
+    /// The loaded sim, with the push it shows on its box.
+    var shownSim: Sim? {
+        guard var s = FilmCatalog.sim(simID) else { return nil }
+        if s.stock != nil { s.shownPush = push }
+        return s
+    }
+    /// The film's name as the LCD writes it: a pushed stock gives the speed it is shot at.
+    var filmTitle: String {
+        guard let s = FilmCatalog.sim(simID) else { return Sim.neutral.title }
+        if let st = FilmStock.stock(s.stock), push != 0 { return "\(st.name) \(st.ei(push))\(st.suffix) \(push > 0 ? "+" : "")\(push)".uppercased() }
+        return s.title
+    }
 
     /// An instant sim prints its own frame, so it takes over from the shape.
     var effectiveShape: FrameShape? {
@@ -76,7 +94,9 @@ enum Darkroom {
         var img = preview ? src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
                           : Digicam.shrink(src, megapixels: s.megapixels)
         let sim = FilmCatalog.sim(s.stack.simID)
-        if let sim, !sim.isNeutral { img = SimEngine.apply(sim, to: img, preview: preview) } else { img = Digicam.tone(img) }
+        if let sim, !sim.isNeutral {
+            img = SimEngine.apply(sim, to: img, preview: preview, push: s.stack.push, seed: preview ? nil : Int(date.timeIntervalSince1970 * 1000) % 100_000)
+        } else { img = Digicam.tone(img) }
         if s.stack.look != .none {
             let w: CGFloat? = s.stack.look.pixelWidth != nil && !preview ? img.extent.width : nil
             img = Looks.apply(s.stack.look, to: img, outputWidth: w)

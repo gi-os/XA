@@ -634,6 +634,14 @@ final class CameraModel: NSObject, ObservableObject {
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
+    /// Push or pull the loaded stock a stop: swipe up on its box to push, down to pull.
+    func stepPush(_ by: Int) {
+        guard FilmStock.stock(FilmCatalog.sim(stack.simID)?.stock) != nil else { return }
+        let before = stack.push
+        stack.push = before + by
+        if stack.push != before { UISelectionFeedbackGenerator().selectionChanged() }
+    }
+
     func stepLook(_ by: Int) {
         let all = Look.allCases
         let i = all.firstIndex(of: stack.look) ?? 0
@@ -888,7 +896,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             lock.lock(); let t = _lockedTurn ?? _turn; lock.unlock()
             let upright = Self.rotated(src, clockwise: t)
             var base = upright
-            if let sim = FilmCatalog.sim(dev.stack.simID), !sim.isNeutral { base = SimEngine.apply(sim, to: base, preview: true) }
+            if let sim = FilmCatalog.sim(dev.stack.simID), !sim.isNeutral { base = SimEngine.apply(sim, to: base, preview: true, push: dev.stack.push) }
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             let frame = fx.apply(vlook, to: base, time: pts.seconds, date: Date())
             lock.lock()

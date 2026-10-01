@@ -7,7 +7,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.12.3"
+    MARKETING_VERSION: "0.13.0"
     CURRENT_PROJECT_VERSION: "1"
     TARGETED_DEVICE_FAMILY: "1"
     DEVELOPMENT_TEAM: ""
@@ -92,6 +92,8 @@ targets:
       - path: XA/UI/LCD.swift
       - path: XA/UI/Collar.swift
       - path: XA/UI/ProPanel.swift
+      - path: XA/Resources/Stocks
+        buildPhase: resources
       - path: XA/Resources/Fonts
         buildPhase: resources
     info:

@@ -1,0 +1,121 @@
+{
+ "bowery400": {
+  "film": "kodak_portra_400",
+  "print": "kodak_portra_endura",
+  "size": 33,
+  "dmin": [
+   -0.2,
+   -0.2,
+   -0.2
+  ],
+  "dmax": [
+   1.586,
+   1.6045,
+   2.0476
+  ],
+  "gain": 2.88,
+  "spektrafilm": "0.3.4"
+ },
+ "bowery800": {
+  "film": "kodak_portra_800",
+  "print": "kodak_portra_endura",
+  "size": 33,
+  "dmin": [
+   -0.2,
+   -0.2,
+   -0.2
+  ],
+  "dmax": [
+   1.6109,
+   1.5996,
+   1.8071
+  ],
+  "gain": 2.88,
+  "spektrafilm": "0.3.4"
+ },
+ "coney200": {
+  "film": "kodak_gold_200",
+  "print": "kodak_portra_endura",
+  "size": 33,
+  "dmin": [
+   -0.2,
+   -0.2,
+   -0.2
+  ],
+  "dmax": [
+   1.5269,
+   1.4636,
+   1.643
+  ],
+  "gain": 2.88,
+  "spektrafilm": "0.3.4"
+ },
+ "chelsea100": {
+  "film": "kodak_ektar_100",
+  "print": "kodak_portra_endura",
+  "size": 33,
+  "dmin": [
+   -0.2,
+   -0.2,
+   -0.2
+  ],
+  "dmax": [
+   1.5661,
+   1.5607,
+   2.0968
+  ],
+  "gain": 2.88,
+  "spektrafilm": "0.3.4"
+ },
+ "prospect200": {
+  "film": "fujifilm_c200",
+  "print": "fujifilm_crystal_archive_typeii",
+  "size": 33,
+  "dmin": [
+   -0.2,
+   -0.2,
+   -0.2
+  ],
+  "dmax": [
+   1.6652,
+   1.709,
+   2.0626
+  ],
+  "gain": 2.88,
+  "spektrafilm": "0.3.4"
+ },
+ "canal500t": {
+  "film": "kodak_vision3_500t",
+  "print": "kodak_2383",
+  "size": 33,
+  "dmin": [
+   -0.2,
+   -0.2,
+   -0.2
+  ],
+  "dmax": [
+   1.4143,
+   1.3871,
+   1.7307
+  ],
+  "gain": 2.88,
+  "spektrafilm": "0.3.4"
+ },
+ "orchard400": {
+  "film": "fujifilm_xtra_400",
+  "print": "fujifilm_crystal_archive_typeii",
+  "size": 33,
+  "dmin": [
+   -0.2,
+   -0.2,
+   -0.2
+  ],
+  "dmax": [
+   1.8633,
+   1.8713,
+   2.398
+  ],
+  "gain": 2.88,
+  "spektrafilm": "0.3.4"
+ }
+}

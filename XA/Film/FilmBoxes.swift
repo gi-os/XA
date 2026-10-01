@@ -121,7 +121,8 @@ struct FilmBox: View {
         case .shape(let s): ShapeBox(shape: s)
         case .video(let v): TapeBox(look: v)
         case .sim(let s):
-            if s.isPreset { PresetSimBox(sim: s) } else { CustomBox(design: s.box, name: s.name, iso: s.iso, exposures: s.exposures) }
+            if let st = FilmStock.stock(s.stock) { StockBox(stock: st, push: s.shownPush ?? 0) }
+            else if s.isPreset { PresetSimBox(sim: s) } else { CustomBox(design: s.box, name: s.name, iso: s.iso, exposures: s.exposures) }
         }
     }
 }
@@ -365,6 +366,8 @@ private struct PresetSimBox: View {
     private var visage: some View {
         let f = "CormorantGaramond-Bold", fg = Color(hex: "#4A3A6A"), paper = Color(hex: "#F3E7C9")
         return BoxCanvas(bg: paper) {
+            LinearGradient(stops: [.init(color: .white, location: 0), .init(color: paper, location: 0.55), .init(color: Color(hex: blue ? "#D4DAE2" : "#DCD3E6"), location: 1)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
             LinearGradient(colors: [Color(hex: "#7F78D2"), Color(hex: "#D98BB5")], startPoint: .top, endPoint: .bottom).frame(width: 58, height: 106)
             T("135-36", f, 11, paper, 1).tl(8, 8)
             T("800", f, 30, paper).bl(6, 6)
@@ -747,5 +750,165 @@ private struct InstantShapeBox: View {
             T(title, font, title.count > 8 ? 15 : 18, fg).tl(stripe ? 32 : 10, 10)
             T(sub, font, 9, fg, 1).bl(stripe ? 32 : 10, 8)
         }
+    }
+}
+
+// MARK: film stocks
+
+private extension View {
+    /// A slant for faces that have no italic.
+    func slant(_ k: CGFloat = 0.2) -> some View { transformEffect(CGAffineTransform(a: 1, b: 0, c: -k, d: 1, tx: 0, ty: 0)) }
+}
+
+/// A real film stock's box. The big number is the speed you shoot at: push or pull it and the
+/// number changes, a lab's tape goes on, and the DX checker along the foot re-codes the speed.
+struct StockBox: View {
+    let stock: FilmStock
+    var push: Int = 0
+
+    private var ei: String { "\(stock.ei(push))" }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            design
+            // Depth: light from the top left, a sheen on the card, the edges falling off.
+            LinearGradient(stops: [.init(color: .white.opacity(0.16), location: 0), .init(color: .clear, location: 0.38),
+                                   .init(color: .clear, location: 0.62), .init(color: .black.opacity(0.28), location: 1)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            LinearGradient(colors: [.white.opacity(0.22), .clear], startPoint: .top, endPoint: .bottom).frame(height: 40)
+            Rectangle().strokeBorder(Color.black.opacity(0.22), lineWidth: 3).blur(radius: 3)
+            DXStrip(cells: FilmStock.dx(stock.ei(push))).frame(width: 160, height: 5).offset(y: 101)
+            if push != 0 {
+                Text(push > 0 ? "PUSH +\(push)" : "PULL \(push)")
+                    .font(.custom("Caveat-Bold", fixedSize: 12)).foregroundStyle(.white)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(Color(hex: push > 0 ? "#D63A2F" : "#2F6FD6"))
+                    .rotationEffect(.degrees(7))
+                    .shadow(color: .black.opacity(0.4), radius: 1, y: 1)
+                    .frame(width: 160, alignment: .trailing).padding(.trailing, 6).offset(x: -6, y: 40)
+            }
+        }
+        .frame(width: 160, height: 106, alignment: .topLeading)
+        .clipped()
+    }
+
+    private func rated(_ c: Color, _ size: CGFloat = 6) -> some View {
+        T(push == 0 ? "" : "RATED \(stock.rated)", "ChakraPetch-Bold", size, c, 0.5)
+    }
+
+    @ViewBuilder private var design: some View {
+        switch stock.id {
+        case "bowery400", "bowery800": bowery
+        case "coney200": coney
+        case "chelsea100": chelsea
+        case "prospect200": prospect
+        case "orchard400": orchard
+        default: canal
+        }
+    }
+
+    private var bowery: some View {
+        let blue = stock.id == "bowery400"
+        let paper = Color(hex: blue ? "#ECEFF2" : "#F1EDF5"), ink = Color(hex: blue ? "#1C2A3C" : "#2A1A3E"), block = Color(hex: blue ? "#2F5D9A" : "#6B3FA0")
+        let grad = blue ? ["#9CC3EA", "#4F82C4", "#23457E"] : ["#C9B8EE", "#D63FA8", "#5B2E91"]
+        let serif = "DMSerifDisplay-Regular"
+        return BoxCanvas(bg: paper) {
+            LinearGradient(colors: grad.map { Color(hex: $0) }, startPoint: .top, endPoint: .bottom).frame(width: 50, height: 106)
+            LinearGradient(colors: [Color(hex: grad[1]).opacity(0.35), .clear], startPoint: .leading, endPoint: .trailing).frame(width: 18, height: 106).tl(50, 0)
+            T("135-36", "ChakraPetch-Bold", 7, paper, 0.5).tl(6, 7)
+            T(ei, serif, 26, paper).tl(5, 56)
+            rated(paper, 5).tl(6, 88)
+            T("BOWERY", serif, 20, block, 2).tl(60, 10)
+            Rectangle().fill(ink).frame(width: 88, height: 1).tl(60, 38)
+            T("professional", serif, 10, ink).slant().tl(60, 43)
+            T("XACOLOR PRO", "ChakraPetch-Bold", 7.5, block, 1.2).tl(60, 82)
+            HStack(spacing: 1) { ForEach(["#F3CDB1", "#DDA27E", "#B07250", "#6E4330"], id: \.self) { Rectangle().fill(Color(hex: $0)).frame(width: 9, height: 5) } }.tl(115, 84)
+        }
+    }
+
+    private var coney: some View {
+        let red = Color(hex: "#7A1E12"), a = "Archivo-ExtraBold"
+        return BoxCanvas(bg: Color(hex: "#F6E4B8")) {
+            LinearGradient(colors: [Color(hex: "#FBEFCB"), Color(hex: "#F0D49A")], startPoint: .topLeading, endPoint: .bottomTrailing)
+            Rays(color: Color(hex: "#F0A63E"), count: 14).frame(width: 300, height: 300).offset(x: -150, y: -44)
+            Rectangle().fill(Color(hex: "#C8361F")).frame(width: 210, height: 14).rotationEffect(.degrees(-12)).offset(x: -20, y: 64)
+            T("XACOLOR", a, 11, red, 1.5).tl(10, 7)
+            T("CONEY", "BebasNeue-Regular", 24, red, 1).tl(100, 8)
+            T(ei, a, 34, red).tl(10, 22)
+            ZStack { Circle().fill(red); VStack(spacing: 0) { T("24", a, 11, Color(hex: "#F6E4B8")); T("EXP", a, 5, Color(hex: "#F6E4B8")) } }
+                .frame(width: 30, height: 30).tl(120, 40)
+            rated(red).tl(10, 86)
+        }
+    }
+
+    private var chelsea: some View {
+        let o = "Oxanium-ExtraBold"
+        return BoxCanvas(bg: Color(hex: "#0E0E10")) {
+            LinearGradient(colors: [Color(hex: "#26262B"), Color(hex: "#050506")], startPoint: .topLeading, endPoint: .bottomTrailing)
+            ForEach(Array(["#E5322D", "#F28C28", "#F5C518"].enumerated()), id: \.offset) { i, c in
+                Rectangle().fill(Color(hex: c)).frame(width: 260, height: 9)
+                    .rotationEffect(.degrees(-18), anchor: .topLeading).offset(x: -40, y: CGFloat(96 + i * 10))
+            }
+            T("XACOLOR", o, 9, .white.opacity(0.75), 3).tl(10, 8)
+            T(ei, o, 36, .white).tl(10, 18)
+            T("CHELSEA", o, 12, Color(hex: "#F5C518"), 1).tl(104, 10)
+            rated(.white.opacity(0.7)).tl(10, 60)
+        }
+    }
+
+    private var prospect: some View {
+        let r = "RussoOne-Regular", g = Color(hex: "#2C5E35"), sand = Color(hex: "#EDE6C8")
+        return BoxCanvas(bg: sand) {
+            LinearGradient(colors: [Color(hex: "#F4EED6"), Color(hex: "#DCD2AE")], startPoint: .top, endPoint: .bottom)
+            Circle().fill(Color(hex: "#E9A23B")).frame(width: 22, height: 22).tl(120, 12)
+            Ellipse().fill(Color(hex: "#3F7D47")).frame(width: 150, height: 90).tl(-30, 62)
+            Ellipse().fill(g).frame(width: 140, height: 80).tl(70, 70)
+            T("XACOLOR", r, 9, g, 2).tl(10, 8)
+            T(ei, r, 30, g).tl(9, 17)
+            T("PROSPECT", r, 12, g, 1).tl(80, 40)
+            rated(g).tl(10, 52)
+            T("36", r, 11, sand, 1).tl(10, 86)
+        }
+    }
+
+    private var orchard: some View {
+        let a = "Archivo-ExtraBold", teal = Color(hex: "#0F5C63"), mint = Color(hex: "#BFE8E3"), sun = Color(hex: "#F2C230")
+        return BoxCanvas(bg: teal) {
+            LinearGradient(colors: [Color(hex: "#187A82"), Color(hex: "#0A4045")], startPoint: .topLeading, endPoint: .bottomTrailing)
+            Rectangle().fill(Color(hex: "#D93A7A")).frame(width: 26, height: 160).rotationEffect(.degrees(28)).offset(x: 92, y: -20)
+            Rectangle().fill(sun).frame(width: 10, height: 160).rotationEffect(.degrees(28)).offset(x: 112, y: -20)
+            T("XACOLOR", a, 9, mint, 2).tl(10, 8)
+            T("ORCHARD", a, 24, .white, 0.5).slant().tl(9, 18)
+            T("all day", a, 9, teal).slant().padding(.horizontal, 6).padding(.vertical, 1).background(sun).tl(10, 50)
+            T(ei, a, 26, .white).slant().tl(10, 64)
+            rated(mint).tl(70, 76)
+            T("36", a, 14, .white).slant().tl(128, 82)
+        }
+    }
+
+    private var canal: some View {
+        let o = "Oxanium-ExtraBold", cream = Color(hex: "#F1E6CC"), gold = Color(hex: "#E9C891")
+        return BoxCanvas(bg: Color(hex: "#2B3A55")) {
+            LinearGradient(colors: [Color(hex: "#3A4D6E"), Color(hex: "#18223A")], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [Color(hex: "#E3A04A"), Color(hex: "#B36F22")], startPoint: .top, endPoint: .bottom).frame(width: 160, height: 24)
+            T("XACINE", o, 10, Color(hex: "#1B1408"), 3).tl(8, 7)
+            T("Tungsten", "DMSerifDisplay-Regular", 10, gold).slant().tl(12, 27)
+            Rectangle().fill(Color(hex: "#0B0D12")).frame(width: 140, height: 30)
+                .overlay(Rectangle().stroke(Color(hex: "#E9DFC8"), lineWidth: 1))
+                .shadow(color: Color(hex: "#E9DFC8").opacity(0.55), radius: 3.5).tl(10, 40)
+            HStack(spacing: 0) { T("CANAL \(ei)", o, 19, cream, 0.5); T("T", o, 19, Color(hex: "#E2553C")) }.tl(15, 45)
+            T("135", o, 6, gold).tl(10, 77)
+            T("36", o, 15, cream).tl(22, 73)
+            T("3200K", o, 9, gold, 1).tl(48, 79)
+            rated(gold, 5).tl(118, 76)
+        }
+    }
+}
+
+/// The DX code: silver contacts and black cells along the cassette's foot.
+private struct DXStrip: View {
+    let cells: [Bool]
+    var body: some View {
+        HStack(spacing: 0) { ForEach(cells.indices, id: \.self) { Rectangle().fill(Color(hex: cells[$0] ? "#C9CDD2" : "#111111")) } }
     }
 }

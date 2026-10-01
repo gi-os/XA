@@ -108,8 +108,7 @@ private struct DigiLCD: View {
     private let ink = Color(hex: "#1B2216")
 
     var body: some View {
-        let sim = FilmCatalog.sim(camera.stack.simID) ?? Sim.neutral
-        let film = ([sim.title] + [camera.stack.look == .none ? nil : camera.stack.look.title, camera.stack.effectiveShape?.title].compactMap { $0 }).joined(separator: " + ")
+        let film = ([camera.stack.filmTitle] + [camera.stack.look == .none ? nil : camera.stack.look.title, camera.stack.effectiveShape?.title].compactMap { $0 }).joined(separator: " + ")
         GreenPanel()
             .overlay {
                 HStack {
