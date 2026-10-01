@@ -114,6 +114,7 @@ private struct DigiLCD: View {
                 HStack {
                     dot(film, 14)
                     Spacer(minLength: 8)
+                    if settings.digiZero { dot("ZERO", 14) }
                     if settings.date.placement != .off { dot(Self.dateText(), 14) }
                 }
                 .padding(.horizontal, 10)

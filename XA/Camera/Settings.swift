@@ -28,6 +28,9 @@ final class AppSettings: ObservableObject {
     @Published var recipe: DigiRecipe { didSet { save(recipe, "digiRecipe") } }
     /// DIGI shows each shot on the viewfinder for a moment, like a digicam's review.
     @Published var instantReview: Bool { didSet { d.set(instantReview, forKey: "instantReview") } }
+    /// DIGI ZERO: shoot RAW and develop it with none of the iPhone's own processing, so the film
+    /// is the only look on the picture.
+    @Published var digiZero: Bool { didSet { d.set(digiZero, forKey: "digiZero") } }
     @Published var proFormat: ProFormat { didSet { d.set(proFormat.rawValue, forKey: "proFormat") } }
     @Published var digiSlide: DigiSlide { didSet { d.set(digiSlide.rawValue, forKey: "digiSlide") } }
     @Published var proSlide: ProSlide { didSet { d.set(proSlide.rawValue, forKey: "proSlide") } }
@@ -49,6 +52,7 @@ final class AppSettings: ObservableObject {
         date = AppSettings.load("dateConfig") ?? DateConfig()
         recipe = AppSettings.load("digiRecipe") ?? DigiRecipe()
         instantReview = d.object(forKey: "instantReview") as? Bool ?? true
+        digiZero = d.object(forKey: "digiZero") as? Bool ?? false
         proFormat = ProFormat(rawValue: d.string(forKey: "proFormat") ?? "") ?? .heif
         digiSlide = DigiSlide(rawValue: d.string(forKey: "digiSlide") ?? "") ?? .sim
         proSlide = ProSlide(rawValue: d.string(forKey: "proSlide") ?? "") ?? .exposure

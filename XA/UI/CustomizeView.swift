@@ -18,6 +18,10 @@ struct CustomizeView: View {
                                 row("Your recipe", "\(settings.recipe.onCount) on", accent: true)
                             }
                             Toggle("Instant review", isOn: $settings.instantReview).tint(XA.orange).font(.system(size: 15))
+                            Toggle("ZERO · no iPhone processing", isOn: $settings.digiZero).tint(XA.orange).font(.system(size: 15))
+                                .onChange(of: settings.digiZero) { _, _ in camera.zeroChanged() }
+                            Text("Shoots RAW and develops it flat, with no Smart HDR, tone mapping or sharpening from the iPhone, so the film is the only look. Slower to save.")
+                                .font(.system(size: 12)).foregroundStyle(XA.faint)
                             FlatSlider(label: "Save quality", value: $settings.crunch, range: 0.3...0.95, format: { "\(Int(($0 * 100).rounded()))" })
                             FlatSlider(label: "Sensor noise", value: $settings.noise, format: { "\(Int(($0 * 100).rounded()))" })
                             NavigationLink { DateScreen(settings: settings, camera: camera) } label: {

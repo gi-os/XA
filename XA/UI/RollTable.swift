@@ -50,6 +50,10 @@ enum RollPiles {
 /// A pile on the table, or a single print.
 struct Pile: Identifiable {
     let assets: [PHAsset]
+    /// A print laid out of a fanned pile: the pile's id, its place in the fan and the fan's size.
+    var fanOf: String? = nil
+    var fanIndex = 0
+    var fanCount = 0
     var id: String { assets[0].localIdentifier }
     var top: PHAsset {
         if let t = RollPiles.top(for: id), let a = assets.first(where: { $0.localIdentifier == t }) { return a }
@@ -71,8 +75,9 @@ struct RollTable: View {
     @AppStorage("rollColumns") private var columns = 2
     @State private var pinchStart: Int?
     @State private var showCols = false
-    @State private var openPile: Pile?
     @State private var version = 0
+    /// Piles laid out flat on the table: tap a pile and its prints fan into the columns.
+    @State private var fanned: Set<String> = []
 
     var body: some View {
         ZStack {
@@ -81,7 +86,25 @@ struct RollTable: View {
                     ForEach(library.days, id: \.title) { day in
                         Tape(text: Self.tapeText(day.assets.first?.creationDate))
                         Masonry(piles: piles(day.assets), columns: columns, library: library, onTap: { pile in
-                            if pile.assets.count > 1 { withAnimation(.snappy) { openPile = pile } } else { onOpen(pile.top) }
+                            if pile.fanOf == nil && pile.assets.count > 1 {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { _ = fanned.insert(pile.id) }
+                            } else { onOpen(pile.top) }
+                        }, onAction: { pile, action in
+                            switch action {
+                            case .restack:
+                                if let k = pile.fanOf { withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { _ = fanned.remove(k) } }
+                            case .onTop:
+                                if let k = pile.fanOf {
+                                    RollPiles.setTop(pile.top.localIdentifier, for: k)
+                                    withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { _ = fanned.remove(k); version += 1 }
+                                }
+                            case .unclip:
+                                RollPiles.unclip(pile.fanOf ?? pile.id); fanned.remove(pile.fanOf ?? pile.id)
+                                withAnimation(.snappy) { version += 1 }
+                            case .deleteRest:
+                                library.delete(pile.others); withAnimation(.snappy) { version += 1 }
+                            }
                         }, onStep: { pile, by in
                             // Swipe a pile sideways: the next shot in it comes to the top.
                             let a = pile.assets
@@ -114,27 +137,23 @@ struct RollTable: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { withAnimation { showCols = false } }
                 })
             if showCols { ColumnPill(columns: columns).frame(maxHeight: .infinity, alignment: .bottom).padding(.bottom, 28).transition(.opacity) }
-            if let p = openPile {
-                PileSpread(pile: p, library: library, onOpen: onOpen) { action in
-                    switch action {
-                    case .done: break
-                    case .unclip: RollPiles.unclip(p.id)
-                    case .deleteRest: library.delete(p.others)
-                    }
-                    version += 1
-                    withAnimation(.snappy) { openPile = nil }
-                } onTop: { a in
-                    RollPiles.setTop(a.localIdentifier, for: p.id); version += 1
-                    openPile = Pile(assets: p.assets)
-                }
-                .transition(.opacity)
-            }
         }
     }
 
     private func piles(_ assets: [PHAsset]) -> [Pile] {
         let items = assets.map { RollPiles.Item(id: $0.localIdentifier, date: $0.creationDate ?? .distantPast, width: $0.pixelWidth, height: $0.pixelHeight, isVideo: $0.mediaType == .video) }
-        return RollPiles.group(items, unclipped: RollPiles.unclipped).map { g in Pile(assets: g.map { assets[$0] }) }
+        var out: [Pile] = []
+        for g in RollPiles.group(items, unclipped: RollPiles.unclipped) {
+            let pile = Pile(assets: g.map { assets[$0] })
+            if pile.assets.count > 1 && fanned.contains(pile.id) {
+                // Fanned: the one on top first, then the rest in the order they were taken.
+                let order = [pile.top] + pile.others
+                out += order.enumerated().map { i, a in Pile(assets: [a], fanOf: pile.id, fanIndex: i, fanCount: order.count) }
+            } else {
+                out.append(pile)
+            }
+        }
+        return out
     }
 
     static func tapeText(_ d: Date?) -> String {
@@ -185,6 +204,7 @@ private struct Masonry: View {
     let columns: Int
     let library: Library
     var onTap: (Pile) -> Void
+    var onAction: (Pile, PileAction) -> Void = { _, _ in }
     var onStep: (Pile, Int) -> Void = { _, _ in }
 
     var body: some View {
@@ -196,7 +216,10 @@ private struct Masonry: View {
                 ForEach(0..<columns, id: \.self) { c in
                     VStack(spacing: gap + 8) {
                         ForEach(cols.items[c], id: \.id) { p in
-                            PileView(pile: p, width: cw, library: library, onStep: onStep).onTapGesture { onTap(p) }
+                            PileView(pile: p, width: cw, library: library, onStep: onStep, onRestack: { onAction(p, .restack) })
+                                .onTapGesture { onTap(p) }
+                                .contextMenu { menu(p) }
+                                .transition(.scale(scale: 0.85).combined(with: .opacity))
                         }
                     }
                     .frame(width: cw)
@@ -204,6 +227,16 @@ private struct Masonry: View {
             }
         }
         .frame(height: layout(width: approxWidth, gap: 12).height)
+    }
+
+    @ViewBuilder private func menu(_ p: Pile) -> some View {
+        if p.fanOf != nil {
+            Button { onAction(p, .onTop) } label: { Label("Put this one on top", systemImage: "square.stack") }
+            Button { onAction(p, .restack) } label: { Label("Stack them again", systemImage: "rectangle.stack") }
+        } else if p.assets.count > 1 {
+            Button { onAction(p, .unclip) } label: { Label("Unclip for good", systemImage: "paperclip") }
+            Button(role: .destructive) { onAction(p, .deleteRest) } label: { Label("Delete all but the top one", systemImage: "trash") }
+        }
     }
 
     /// The table is the phone's width minus its margins.
@@ -219,11 +252,13 @@ private struct Masonry: View {
         for p in piles {
             let c = h.firstIndex(of: h.min() ?? 0) ?? 0
             items[c].append(p)
-            h[c] += PrintView.height(for: p.top, width: cw) + gap + 8 + (p.assets.count > 1 ? 8 : 0)
+            h[c] += PrintView.height(for: p.top, width: cw) + gap + 8 + (p.assets.count > 1 || p.fanOf != nil ? 8 : 0)
         }
         return (items, (h.max() ?? 0) + 12)
     }
 }
+
+enum PileAction { case restack, onTop, unclip, deleteRest }
 
 /// A pile: the chosen print on top, up to two more peeking out, a clip and a count.
 private struct PileView: View {
@@ -231,6 +266,7 @@ private struct PileView: View {
     let width: CGFloat
     let library: Library
     var onStep: (Pile, Int) -> Void = { _, _ in }
+    var onRestack: () -> Void = {}
     @State private var drag: CGFloat = 0
     var body: some View {
         ZStack(alignment: .top) {
@@ -250,8 +286,27 @@ private struct PileView: View {
                     .shadow(color: .black.opacity(0.5), radius: 1.5, y: 1.5)
                     .frame(maxWidth: .infinity, alignment: .trailing).offset(x: 4, y: -4)
             }
+            if pile.fanOf != nil {
+                // A fanned pile's prints keep a strip of the same yellow tape, numbered, so they
+                // still read as one group; the first carries the button that stacks them again.
+                HStack(spacing: 4) {
+                    Text("\(pile.fanIndex + 1)/\(pile.fanCount)").font(.custom("Caveat-Bold", fixedSize: 14 * scale))
+                    if pile.fanIndex == 0 {
+                        Button(action: onRestack) {
+                            Image(systemName: "rectangle.stack").font(.system(size: 11 * scale, weight: .bold))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Stack them again")
+                    }
+                }
+                .foregroundStyle(Color(hex: "#2A1A06"))
+                .padding(.horizontal, 6 * scale).padding(.vertical, 1)
+                .background(Color(hex: "#F2D35B")).rotationEffect(.degrees(-4))
+                .shadow(color: .black.opacity(0.5), radius: 1.5, y: 1.5)
+                .frame(maxWidth: .infinity, alignment: .leading).offset(x: -4, y: -6)
+            }
         }
-        .padding(.top, pile.assets.count > 1 ? 8 : 0)
+        .padding(.top, pile.assets.count > 1 || pile.fanOf != nil ? 8 : 0)
         .simultaneousGesture(pile.assets.count > 1 ? DragGesture(minimumDistance: 16)
             .onChanged { v in if abs(v.translation.width) > abs(v.translation.height) * 1.4 { drag = v.translation.width } }
             .onEnded { v in
@@ -330,70 +385,5 @@ struct PrintView: View {
         .rotationEffect(.degrees(tilt))
         .shadow(color: .black.opacity(border || Self.isInstant(asset) ? 0.55 : 0), radius: 6, y: 5)
         .onAppear { library.thumbnail(asset, side: max(320, width * 2)) { img = $0 } }
-    }
-}
-
-// MARK: an opened pile
-
-private struct PileSpread: View {
-    enum Action { case done, unclip, deleteRest }
-    let pile: Pile
-    let library: Library
-    var onOpen: (PHAsset) -> Void
-    var onAction: (Action) -> Void
-    var onTop: (PHAsset) -> Void
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.9).ignoresSafeArea()
-                .onTapGesture { onAction(.done) }
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("\(pile.assets.count) SHOTS · \(spanText)").font(XA.display(18))
-                    Spacer()
-                }
-                Text("Tap the one that goes on top, or swipe the pile on the roll. Double-tap to look closer.").font(.system(size: 12)).foregroundStyle(XA.dim)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 20) {
-                        ForEach(pile.assets, id: \.localIdentifier) { a in
-                            let on = a.localIdentifier == pile.top.localIdentifier
-                            VStack(spacing: 12) {
-                                PrintView(asset: a, width: 170, library: library, tilt: PileView.tilt(a.localIdentifier))
-                                    .overlay(Rectangle().strokeBorder(on ? XA.orange : .clear, lineWidth: 3).padding(-6))
-                                Text("ON TOP").font(XA.display(11)).foregroundStyle(Color(red: 0.16, green: 0.08, blue: 0))
-                                    .padding(.horizontal, 8).padding(.vertical, 3).background(XA.orange)
-                                    .opacity(on ? 1 : 0)
-                            }
-                            .contentShape(Rectangle())
-                            .onTapGesture(count: 2) { onOpen(a) }
-                            .onTapGesture { withAnimation(.snappy) { onTop(a) }; UISelectionFeedbackGenerator().selectionChanged() }
-                        }
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 14)
-                }
-                HStack(spacing: 8) {
-                    button("DONE", primary: true) { onAction(.done) }
-                    button("UNCLIP ALL") { onAction(.unclip) }
-                    button("DELETE REST") { onAction(.deleteRest) }
-                }
-            }
-            .padding(.horizontal, 16)
-        }
-    }
-
-    private var spanText: String {
-        let ds = pile.assets.compactMap(\.creationDate)
-        guard let a = ds.min(), let b = ds.max() else { return "" }
-        let s = Int(b.timeIntervalSince(a).rounded())
-        return s < 1 ? "SAME SECOND" : "\(s) S APART"
-    }
-
-    private func button(_ t: String, primary: Bool = false, _ act: @escaping () -> Void) -> some View {
-        Button(action: act) {
-            Text(t).font(XA.display(12)).padding(.horizontal, 12).padding(.vertical, 9)
-                .foregroundStyle(primary ? Color(red: 0.16, green: 0.08, blue: 0) : .white)
-                .background(primary ? XA.orange : XA.fill)
-        }
-        .buttonStyle(.plain)
     }
 }

@@ -238,6 +238,7 @@ final class CameraModel: NSObject, ObservableObject {
         videoOutput.setSampleBufferDelegate(self, queue: frameQueue)
         if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
         photoOutput.maxPhotoQualityPrioritization = .quality
+        if photoOutput.isAppleProRAWSupported { photoOutput.isAppleProRAWEnabled = settings.digiZero }
         applyCapturePolicy(flash: settings.flash != .off)
         let m = mode
         setupPhotoOutput(dev, m)
@@ -720,7 +721,10 @@ final class CameraModel: NSObject, ObservableObject {
         skipReview()
         let m = mode
         let settingsP: AVCapturePhotoSettings
-        if m == .pro && settings.proFormat == .heif && photoOutput.availablePhotoCodecTypes.contains(.hevc) {
+        let zero = m == .digi && settings.digiZero && zeroFormat != nil
+        if zero, let raw = zeroFormat {
+            settingsP = AVCapturePhotoSettings(rawPixelFormatType: raw)
+        } else if m == .pro && settings.proFormat == .heif && photoOutput.availablePhotoCodecTypes.contains(.hevc) {
             settingsP = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
         } else {
             settingsP = AVCapturePhotoSettings()
@@ -738,7 +742,7 @@ final class CameraModel: NSObject, ObservableObject {
         }
         syncFrameSettings()
         let (_, dev) = frameState()
-        pending[settingsP.uniqueID] = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date())
+        pending[settingsP.uniqueID] = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date(), zero: zero)
         if settings.sounds && settingsP.isShutterSoundSuppressionEnabled { quietShots.insert(settingsP.uniqueID) }
         photoOutput.capturePhoto(with: settingsP, delegate: self)
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
@@ -755,6 +759,23 @@ final class CameraModel: NSObject, ObservableObject {
         if photoOutput.isZeroShutterLagSupported { photoOutput.isZeroShutterLagEnabled = fast }
     }
 
+    /// ZERO switched: Apple ProRAW is turned on in the output only while it is wanted.
+    func zeroChanged() {
+        let on = settings.digiZero
+        sessionQueue.async {
+            guard self.photoOutput.isAppleProRAWSupported, self.photoOutput.isAppleProRAWEnabled != on else { return }
+            self.session.beginConfiguration()
+            self.photoOutput.isAppleProRAWEnabled = on
+            self.session.commitConfiguration()
+        }
+    }
+
+    /// The RAW format ZERO shoots: Apple ProRAW where there is one, else the sensor's Bayer RAW.
+    private var zeroFormat: OSType? {
+        let all = photoOutput.availableRawPhotoPixelFormatTypes
+        return all.first(where: { AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }) ?? all.first
+    }
+
     /// Called when the flash setting changes.
     func flashChanged() {
         let on = settings.flash != .off
@@ -765,7 +786,7 @@ final class CameraModel: NSObject, ObservableObject {
         }
     }
 
-    private struct Shot { let mode: CaptureMode; let develop: DevelopSettings; let crunch: Double; let date: Date }
+    private struct Shot { let mode: CaptureMode; let develop: DevelopSettings; let crunch: Double; let date: Date; var zero = false }
     private var pending: [Int64: Shot] = [:]
     /// Shots whose system click was dropped, so XA plays its own when the picture is really taken.
     private var quietShots: Set<Int64> = []
@@ -776,7 +797,17 @@ final class CameraModel: NSObject, ObservableObject {
             // DIGI expands the photo's HDR gain map, so a lamp is brighter than white paper and
             // only real light sources bloom. PRO keeps the file untouched anyway.
             let opts: [CIImageOption: Any] = shot.mode == .pro ? [.applyOrientationProperty: true] : [.applyOrientationProperty: true, .expandToHDR: true]
-            guard let src = CIImage(data: data, options: opts) ?? CIImage(data: data, options: [.applyOrientationProperty: true]) else { return }
+            guard var src = CIImage(data: data, options: opts) ?? CIImage(data: data, options: [.applyOrientationProperty: true]) else { return }
+            // ZERO: the RAW developed flat, no boost, no local tone mapping, no HDR: only the
+            // film shapes the picture. The metadata still comes from the file.
+            let fileProps = src.properties
+            var demo: DigicamFX.Conditions? = nil
+            if shot.zero, let raw = CIRAWFilter(imageData: data, identifierHint: nil) {
+                raw.boostAmount = 0
+                raw.localToneMapAmount = 0
+                raw.extendedDynamicRangeAmount = 0
+                if let o = raw.outputImage { src = o; demo = DigicamFX.Conditions(properties: fileProps) }
+            }
             var out: Data?
             var type: UTType = .jpeg
             var thumbSource = src
@@ -785,7 +816,7 @@ final class CameraModel: NSObject, ObservableObject {
                 out = data
                 type = self.settings.proFormat == .heif ? .heic : .jpeg
             } else {
-                let (developed, alpha) = Darkroom.develop(src, shot.develop, date: shot.date, preview: false)
+                let (developed, alpha) = Darkroom.develop(src, shot.develop, date: shot.date, preview: false, demo: demo)
                 let recipe = Recipe.describe(shot.develop.stack, megapixels: shot.develop.megapixels)
                 thumbSource = developed
                 // The thumbnail first: it is the reference the full render is checked against,
@@ -795,7 +826,7 @@ final class CameraModel: NSObject, ObservableObject {
                 let small = developed.transformed(by: CGAffineTransform(scaleX: k0, y: k0))
                 let reference = Encoder.gpu.createCGImage(small, from: small.extent.integral)
                 guard let cg = Encoder.render(developed, reference: reference) else { return }
-                let props = Recipe.properties(from: src.properties, recipe: recipe)
+                let props = Recipe.properties(from: fileProps, recipe: recipe)
                 type = alpha ? .png : .jpeg
                 out = Encoder.encode(cg, type: type, quality: CGFloat(shot.crunch), properties: props)
             }
