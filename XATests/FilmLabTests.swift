@@ -26,7 +26,7 @@ final class FilmLabTests: XCTestCase {
         XCTAssertEqual(st.push, 2)
         st.push = 0
         XCTAssertNil(st.pushStops)
-        let old = try JSONDecoder().decode(Stack.self, from: Data(#"{"simID":"nocturne","look":0,"shape":"none"}"#.utf8))
+        let old = try JSONDecoder().decode(Stack.self, from: Data(#"{"simID":"nocturne","look":0,"shape":0}"#.utf8))
         XCTAssertEqual(old.push, 0)
     }
 

@@ -45,11 +45,12 @@ final class FilmTests: XCTestCase {
 
     // MARK: sims
 
-    func testNeutralAndSevenStocksWithUniqueIDs() {
-        XCTAssertEqual(Sim.presets.count, 7)
+    func testNeutralSevenFilmStocksAndSixSimsWithUniqueIDs() {
+        XCTAssertEqual(Sim.presets.count, 14)
         XCTAssertEqual(Sim.presets.first?.id, Sim.neutral.id)
-        XCTAssertEqual(Set(Sim.presets.map(\.id)).count, 7)
-        XCTAssertEqual(Set(Sim.presets.map(\.name)).count, 7)
+        XCTAssertEqual(Set(Sim.presets.map(\.id)).count, 14)
+        // Bowery comes in 400 and 800: the title, not the name, tells them apart.
+        XCTAssertEqual(Set(Sim.presets.map(\.title)).count, 14)
     }
 
     func testNoSimIsNeutral() {
