@@ -133,6 +133,10 @@ enum FilmLab {
     }
     """)
 
+    private static let addLightKernel = CIColorKernel(source: """
+    kernel vec4 xaAddLight(__sample a, __sample b) { return vec4(a.rgb + b.rgb, 1.0); }
+    """)
+
     private static let grainKernel = CIColorKernel(source: """
     kernel vec4 xaGrain(__sample c, __sample n1, __sample n2, float rms, float chroma, float top, float norm, vec3 dmin, vec3 dmax) {
         vec3 D = c.rgb * (dmax - dmin) + dmin;
@@ -162,11 +166,11 @@ enum FilmLab {
             guard r > 0.3 else { return i }
             return i.clampedToExtent().applyingGaussianBlur(sigma: Double(r)).cropped(to: full)
         }
-        func scale(_ i: CIImage, _ r: CGFloat, _ g: CGFloat, _ b: CGFloat, alpha: CGFloat = 1) -> CIImage {
+        func scale(_ i: CIImage, _ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> CIImage {
             let m = CIFilter.colorMatrix()
             m.inputImage = i
             m.rVector = CIVector(x: r, y: 0, z: 0, w: 0); m.gVector = CIVector(x: 0, y: g, z: 0, w: 0)
-            m.bVector = CIVector(x: 0, y: 0, z: b, w: 0); m.aVector = CIVector(x: 0, y: 0, z: 0, w: alpha)
+            m.bVector = CIVector(x: 0, y: 0, z: b, w: 0); m.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
             return (m.outputImage ?? i).cropped(to: full)
         }
         // Exposure: a push is shot at a faster speed, so the negative gets less light.
@@ -180,10 +184,10 @@ enum FilmLab {
         img = (mix.outputImage ?? img).cropped(to: full)
         trace?("scattered", img)
         let h = CGFloat(stock.halation)
-        // The halo is light only: it carries no alpha, or adding it would double the alpha and
-        // Core Image would halve every colour un-premultiplying it (a stop of lost exposure).
-        let halo = scale(blur(img, Fit.halationUM), Fit.halationR * h, Fit.halationG * h, 0, alpha: 0)
-        img = halo.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: img]).cropped(to: full)
+        // The halo is light only. (Compositing it with CIAdditionCompositing doubled the alpha, and
+        // Core Image then halved every colour un-premultiplying it: a stop of lost exposure.)
+        let halo = scale(blur(img, Fit.halationUM), Fit.halationR * h, Fit.halationG * h, 0)
+        if let k = addLightKernel, let lit = k.apply(extent: full, arguments: [img, halo]) { img = lit }
         trace?("halation", img)
         // Into the tables' code space: sRGB-encoded, 0…1.
         img = img.applyingFilter("CILinearToSRGBToneCurve")
