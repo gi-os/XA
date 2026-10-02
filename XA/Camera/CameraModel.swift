@@ -1269,7 +1269,8 @@ extension CameraModel {
 
     /// BOOTH's face warp in the viewfinder: the faces are looked for off the frame queue, a few times a second.
     fileprivate func findEyes(_ frame: CIImage) {
-        let k: CGFloat = 480 / max(frame.extent.width, 1)
+        // Big enough that the faces at the back of a group are still found.
+        let k: CGFloat = min(1, 720 / max(frame.extent.width, 1))
         let small = frame.transformed(by: CGAffineTransform(scaleX: k, y: k))
         eyeQueue.async {
             let found = Booth.scaled(Booth.eyes(in: small), 1 / k)

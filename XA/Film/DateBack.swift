@@ -1,5 +1,6 @@
 import UIKit
 import CoreImage
+import CoreImage.CIFilterBuiltins
 
 /// An 8-bit colour, so the palette can be checked off-device the way Roll's was.
 struct RGBA8: Codable, Equatable, Hashable {
@@ -179,7 +180,7 @@ enum DateBack {
 
         func font() -> UIFont {
             switch style {
-            case .camcorder: return XA.uiFont("RobotoCondensed-Bold", height * 1.35)
+            case .camcorder: return XA.uiFont("SairaExtraCondensed-SemiBold", height * 1.45)
             case .lcd: return XA.uiFont("Silkscreen-Regular", height * 0.95)
             case .stamp: return XA.uiFont("BebasNeue-Regular", height * 1.3)
             case .marker: return XA.uiFont("Caveat-Bold", height * 1.35)
@@ -499,9 +500,32 @@ enum DateBack {
         var cfg = config
         if instant != .none && cfg.placement == .off { cfg.placement = .corner }
         guard let cg = overlay(size: size, date: date, config: cfg, shape: shape, mono: mono, instant: instant) else { return nil }
-        let img = CIImage(cgImage: cg)
+        var img = CIImage(cgImage: cg)
+        if cfg.style == .camcorder { img = videoResolution(img) }
         cacheLock.lock(); cacheKey = key; cached = img; cacheLock.unlock()
         return img
+    }
+
+    /// A camcorder's character generator drew at the tape's own resolution, about 360 lines:
+    /// the date goes down to that and back up soft, with a little horizontal smear.
+    static func videoResolution(_ img: CIImage) -> CIImage {
+        let e = img.extent
+        let short = min(e.width, e.height)
+        guard short > 400 else { return img }
+        let k: CGFloat = 360 / short
+        let down = CIFilter.lanczosScaleTransform()
+        down.inputImage = img
+        down.scale = Float(k)
+        down.aspectRatio = 0.82
+        guard let small = down.outputImage else { return img }
+        let smear = CIFilter.boxBlur()
+        smear.inputImage = small.clampedToExtent()
+        smear.radius = 1.1
+        let soft = (smear.outputImage ?? small).cropped(to: small.extent)
+        let sx = e.width / small.extent.width, sy = e.height / small.extent.height
+        return soft.samplingLinear()
+            .transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+            .cropped(to: e)
     }
 
     // MARK: stamp and tape

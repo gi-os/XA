@@ -7,7 +7,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.14.6"
+    MARKETING_VERSION: "0.14.7"
     CURRENT_PROJECT_VERSION: "1"
     TARGETED_DEVICE_FAMILY: "1"
     DEVELOPMENT_TEAM: ""
@@ -62,6 +62,7 @@ targets:
           - RacingSansOne-400.ttf
           - Righteous-400.ttf
           - RobotoCondensed-700.ttf
+          - SairaExtraCondensed-600.ttf
           - RussoOne-400.ttf
           - ShareTechMono-400.ttf
           - Silkscreen-400.ttf
@@ -131,6 +132,7 @@ targets:
           - RacingSansOne-400.ttf
           - Righteous-400.ttf
           - RobotoCondensed-700.ttf
+          - SairaExtraCondensed-600.ttf
           - RussoOne-400.ttf
           - ShareTechMono-400.ttf
           - Silkscreen-400.ttf

@@ -181,7 +181,10 @@ enum Booth {
             let jaw = CGPoint(x: mid.x + dx * 2.1, y: mid.y + dy * 2.1)
             found.append(Face(eyes: [l, r], span: span, nose: nose, jaw: jaw, width: box.width * e.width))
         }
-        return found.isEmpty ? nil : found
+        // The six biggest faces; anyone tiny in the background is left alone.
+        let big = found.map(\.width).max() ?? 0
+        let kept = Array(found.filter { $0.width > big * 0.35 }.sorted { $0.width > $1.width }.prefix(6))
+        return kept.isEmpty ? nil : kept
     }
 
     /// The machine's face warp: bigger eyes, a narrower jaw, a smaller nose.
@@ -191,12 +194,18 @@ enum Booth {
         let k = skin.warp
         var out = img
         func apply(_ f: CIFilter & CIFilterProtocol) { out = (f.outputImage ?? out).cropped(to: e) }
-        for face in faces {
+        // A crowd in the booth: every face gets the treatment, but each warp stays inside its own
+        // face, so one friend's chin pinch never drags the next friend's cheek.
+        let mids = faces.map { CGPoint(x: ($0.eyes[0].x + $0.eyes[1].x) / 2, y: ($0.eyes[0].y + $0.eyes[1].y) / 2) }
+        for (n, face) in faces.enumerated() {
+            let room: CGFloat = mids.enumerated().filter { $0.offset != n }.map { hypot($0.element.x - mids[n].x, $0.element.y - mids[n].y) }.min() ?? .greatestFiniteMagnitude
+            let jawR = min(face.width * 0.62, room * 0.5)
+            let eyeR = min(face.span * 0.5, room * 0.22)
             if k.jaw > 0 {
                 let p = CIFilter.pinchDistortion()
                 p.inputImage = out.clampedToExtent()
                 p.center = face.jaw
-                p.radius = Float(face.width * 0.62)
+                p.radius = Float(jawR)
                 p.scale = k.jaw
                 apply(p)
             }
@@ -212,7 +221,7 @@ enum Booth {
                 let b = CIFilter.bumpDistortion()
                 b.inputImage = out.clampedToExtent()
                 b.center = eye
-                b.radius = Float(face.span * 0.5)
+                b.radius = Float(eyeR)
                 b.scale = k.eyes
                 apply(b)
             }
