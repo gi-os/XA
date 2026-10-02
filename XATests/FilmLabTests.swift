@@ -143,9 +143,13 @@ final class FilmLabTests: XCTestCase {
         let scene = lamp.composited(over: dark)
         func red(_ h: Double) -> Float {
             var rec = FilmRecipe(); rec.lens = 0; rec.flash = 0; rec.leak = 0; rec.halation = h; rec.grain = 0; rec.glare = 0
-            let out = FilmLab.develop(scene, stock: FilmStock.all[0], push: 0, preview: false, seed: 1, shot: FilmShot(recipe: rec))
+            // The light that reaches the film, right after the halo is added.
+            var lit: CIImage?
+            FilmLab.trace = { name, img in if name == "halation" { lit = img } }
+            _ = FilmLab.develop(scene, stock: FilmStock.all[0], push: 0, preview: false, seed: 1, shot: FilmShot(recipe: rec))
+            FilmLab.trace = nil
             var px = [Float](repeating: 0, count: 4)
-            CIContext().render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 824, y: 600, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+            if let lit { CIContext().render(lit, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 824, y: 600, width: 1, height: 1), format: .RGBAf, colorSpace: nil) }
             XCTAssertTrue(px.allSatisfy { $0.isFinite })
             return px[0]
         }
