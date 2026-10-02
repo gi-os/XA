@@ -10,18 +10,21 @@ struct LCDStrip: View {
     @Binding var proField: ProField
     @State private var slideFrom: CGFloat?
     @State private var showZoom = false
+    /// Each new picture sits on top of the one it replaces, so the glass is never empty.
+    @State private var swaps = 0
 
     var body: some View {
         ZStack {
             switch camera.mode {
-            case .digi: VcrLCD(camera: camera, settings: settings).transition(Self.swap)
-            case .film: FilmLCD(camera: camera, settings: settings).transition(Self.swap)
-            case .pro: ProLCD(camera: camera, settings: settings, field: $proField).transition(Self.proSwap)
-            case .video: VideoLCD(camera: camera).transition(Self.swap)
-            case .booth: BoothLCD(camera: camera, settings: settings).transition(Self.swap)
+            case .digi: VcrLCD(camera: camera, settings: settings).transition(Self.swap).zIndex(Double(swaps))
+            case .film: FilmLCD(camera: camera, settings: settings).transition(Self.swap).zIndex(Double(swaps))
+            case .pro: ProLCD(camera: camera, settings: settings, field: $proField).transition(Self.proSwap).zIndex(Double(swaps))
+            case .video: VideoLCD(camera: camera).transition(Self.swap).zIndex(Double(swaps))
+            case .booth: BoothLCD(camera: camera, settings: settings).transition(Self.swap).zIndex(Double(swaps))
             }
         }
         // PRO grows the strip into the full panel; DIGI and VIDEO keep one row.
+        .onChange(of: camera.mode) { _, _ in swaps += 1 }
         .frame(height: Self.height(camera.mode))
         .padding(3)
         .background(Color(white: 0.025))
@@ -65,11 +68,12 @@ struct LCDStrip: View {
     }
 
     /// The old picture goes dark, the new one comes up in the same glass.
-    static let swap: AnyTransition = .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.14).delay(0.16)),
-                                                 removal: .opacity.animation(.easeIn(duration: 0.14)))
+    /// The new picture fades up over the old one, which stays lit underneath until it is covered.
+    static let swap: AnyTransition = .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.24)),
+                                                 removal: .opacity.animation(.linear(duration: 0.01).delay(0.3)))
     /// PRO's panel stays lit while the screen shrinks around it, then goes out.
-    static let proSwap: AnyTransition = .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.14).delay(0.08)),
-                                                    removal: .opacity.animation(.easeIn(duration: 0.14).delay(0.2)))
+    static let proSwap: AnyTransition = .asymmetric(insertion: .identity,
+                                                    removal: .opacity.animation(.linear(duration: 0.01).delay(0.42)))
 }
 
 // MARK: panels
