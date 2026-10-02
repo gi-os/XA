@@ -1087,7 +1087,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             let t = turn
             let upright = Self.rotated(src, clockwise: t)
             var dev = dev
-            if dev.booth == .doll {
+            if dev.booth != nil {
                 lock.lock(); dev.eyes = _boothEyes; let busy = eyesBusy; if !busy { eyesBusy = true }; lock.unlock()
                 if !busy { findEyes(upright) }
             }
@@ -1223,7 +1223,7 @@ extension CameraModel {
         }
     }
 
-    /// DOLL in the viewfinder: the eyes are looked for off the frame queue, a few times a second.
+    /// BOOTH's face warp in the viewfinder: the faces are looked for off the frame queue, a few times a second.
     fileprivate func findEyes(_ frame: CIImage) {
         let k: CGFloat = 480 / max(frame.extent.width, 1)
         let small = frame.transformed(by: CGAffineTransform(scaleX: k, y: k))

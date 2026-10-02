@@ -17,7 +17,7 @@ final class BoothTests: XCTestCase {
     func testEverySkinKeepsTheFrameAndBrightens() {
         let src = grey(300, 400)
         for skin in BoothSkin.allCases {
-            let out = Booth.skin(src, skin, eyes: Booth.Eyes(points: [CGPoint(x: 120, y: 260), CGPoint(x: 180, y: 260)], span: 60))
+            let out = Booth.skin(src, skin, eyes: [Booth.Face(eyes: [CGPoint(x: 120, y: 260), CGPoint(x: 180, y: 260)], span: 60, nose: CGPoint(x: 150, y: 225), jaw: CGPoint(x: 150, y: 170), width: 180)])
             XCTAssertEqual(out.extent, src.extent, "\(skin)")
             var px = [Float](repeating: 0, count: 4)
             CIContext().render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 150, y: 200, width: 1, height: 1), format: .RGBAf, colorSpace: nil)

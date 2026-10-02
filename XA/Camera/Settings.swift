@@ -67,7 +67,7 @@ final class AppSettings: ObservableObject {
         showFlipButton = d.object(forKey: "showFlipButton") as? Bool ?? true
         flash = FlashSetting(rawValue: d.string(forKey: "flash") ?? "") ?? .off
         sounds = d.object(forKey: "sounds") as? Bool ?? true
-        boothSkin = BoothSkin(rawValue: d.string(forKey: "boothSkin") ?? "") ?? .glow
+        boothSkin = BoothSkin(rawValue: d.string(forKey: "boothSkin") ?? "") ?? .doll
         boothLayout = BoothLayout(rawValue: d.string(forKey: "boothLayout") ?? "") ?? .sheet
     }
 

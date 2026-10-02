@@ -4,13 +4,24 @@ import UIKit
 import Vision
 
 /// BOOTH's skin settings, the way a purikura machine offers them before you shoot.
+/// The point of BOOTH is the goofy machine look: porcelain skin blown out by the ring light,
+/// huge eyes, a tiny chin. GLOW is the gentle one; DOLL is the machine's default; ALIEN is the
+/// setting you pick at 2am.
 enum BoothSkin: String, CaseIterable, Codable {
-    case natural, glow, doll
+    case glow, doll, alien
     var title: String {
         switch self {
-        case .natural: return "NATURAL"
         case .glow: return "GLOW"
         case .doll: return "DOLL"
+        case .alien: return "ALIEN"
+        }
+    }
+    /// How far the face is pushed: eyes bigger, jaw narrower, nose smaller.
+    var warp: (eyes: Float, jaw: Float, nose: Float) {
+        switch self {
+        case .glow: return (0.22, 0.12, 0)
+        case .doll: return (0.5, 0.3, 0.25)
+        case .alien: return (0.85, 0.5, 0.45)
         }
     }
 }
@@ -52,18 +63,29 @@ enum BoothInk {
 enum Booth {
     static let shots = 4
 
-    /// Eye centers in the image's own coordinates (Core Image, origin bottom left).
-    struct Eyes { var points: [CGPoint]; var span: CGFloat }
+    /// A face as the warp needs it, in the image's own coordinates (Core Image, origin bottom left).
+    struct Face {
+        var eyes: [CGPoint]
+        /// Distance between the eyes: the face's scale.
+        var span: CGFloat
+        var nose: CGPoint
+        /// Middle of the lower face, between mouth and chin.
+        var jaw: CGPoint
+        var width: CGFloat
+    }
+    typealias Eyes = [Face]
 
     static func skin(_ src: CIImage, _ skin: BoothSkin, eyes: Eyes?) -> CIImage {
-        let img = src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
+        let e0 = src.extent
+        let img = warp(src.transformed(by: CGAffineTransform(translationX: -e0.minX, y: -e0.minY)), skin, faces: eyes)
         let e = img.extent
         let w = min(e.width, e.height)
-        let smooth: CGFloat = skin == .natural ? 0.35 : (skin == .glow ? 0.55 : 0.6)
-        let lift: Float = skin == .natural ? 0.12 : (skin == .glow ? 0.32 : 0.38)
-        let sat: Float = skin == .natural ? 1.0 : (skin == .glow ? 1.06 : 1.08)
-        let pinkness: CGFloat = skin == .natural ? 0.01 : (skin == .glow ? 0.03 : 0.035)
-        let bloom: Float = skin == .natural ? 0 : (skin == .glow ? 0.45 : 0.5)
+        // Purikura skin: smooth, pale, blown out, a little pink.
+        let smooth: CGFloat = skin == .glow ? 0.55 : 0.75
+        let lift: Float = skin == .glow ? 0.35 : (skin == .doll ? 0.55 : 0.7)
+        let sat: Float = skin == .glow ? 1.04 : 1.1
+        let pinkness: CGFloat = skin == .glow ? 0.025 : 0.04
+        let bloom: Float = skin == .glow ? 0.45 : 0.7
         // Soft skin: a blurred copy laid over the picture where it is smooth, so edges (eyes,
         // hair, the outline of a face) keep their detail and cheeks go soft.
         let blur = CIFilter.gaussianBlur()
@@ -77,6 +99,7 @@ enum Booth {
         mono.inputImage = edges.outputImage ?? img
         mono.saturation = 0
         let mb = CIFilter.gaussianBlur()
+        // (the face is warped before anything else, so the soft skin follows it)
         mb.inputImage = (mono.outputImage ?? img).clampedToExtent()
         mb.radius = Float(w * 0.004)
         // Mask: white where it is smooth (gets the soft copy), black on edges.
@@ -119,16 +142,15 @@ enum Booth {
             b.intensity = bloom
             out = (b.outputImage ?? out).cropped(to: e)
         }
-        if skin == .doll, let eyes {
-            for p in eyes.points {
-                let bump = CIFilter.bumpDistortion()
-                bump.inputImage = out.clampedToExtent()
-                bump.center = p
-                bump.radius = Float(eyes.span * 0.42)
-                bump.scale = 0.38
-                out = (bump.outputImage ?? out).cropped(to: e)
-            }
-        }
+        // The ring light's flat white: the highlights clip, faces go porcelain.
+        let curve = CIFilter.toneCurve()
+        curve.inputImage = out
+        curve.point0 = CGPoint(x: 0, y: 0.03)
+        curve.point1 = CGPoint(x: 0.25, y: 0.3)
+        curve.point2 = CGPoint(x: 0.5, y: 0.6)
+        curve.point3 = CGPoint(x: 0.75, y: skin == .glow ? 0.86 : 0.92)
+        curve.point4 = CGPoint(x: 1, y: 1)
+        out = (curve.outputImage ?? out).cropped(to: e)
         return out
     }
 
@@ -140,8 +162,7 @@ enum Booth {
         let req = VNDetectFaceLandmarksRequest()
         let handler = VNImageRequestHandler(ciImage: img, options: [:])
         guard (try? handler.perform([req])) != nil, let faces = req.results, !faces.isEmpty else { return nil }
-        var pts: [CGPoint] = []
-        var span: CGFloat = 0
+        var found: [Face] = []
         for f in faces {
             let box = f.boundingBox
             func center(_ r: VNFaceLandmarkRegion2D?) -> CGPoint? {
@@ -152,16 +173,57 @@ enum Booth {
                 return CGPoint(x: (box.minX + x * box.width) * e.width, y: (box.minY + y * box.height) * e.height)
             }
             guard let l = center(f.landmarks?.leftEye), let r = center(f.landmarks?.rightEye) else { continue }
-            pts += [l, r]
-            span = max(span, hypot(l.x - r.x, l.y - r.y))
+            let span = hypot(l.x - r.x, l.y - r.y)
+            let mid = CGPoint(x: (l.x + r.x) / 2, y: (l.y + r.y) / 2)
+            let nose = center(f.landmarks?.nose) ?? CGPoint(x: mid.x, y: mid.y - span * 0.6)
+            // Down the face from between the eyes, past the nose: the jaw.
+            let dx = nose.x - mid.x, dy = nose.y - mid.y
+            let jaw = CGPoint(x: mid.x + dx * 2.1, y: mid.y + dy * 2.1)
+            found.append(Face(eyes: [l, r], span: span, nose: nose, jaw: jaw, width: box.width * e.width))
         }
-        return pts.isEmpty ? nil : Eyes(points: pts, span: span)
+        return found.isEmpty ? nil : found
+    }
+
+    /// The machine's face warp: bigger eyes, a narrower jaw, a smaller nose.
+    static func warp(_ img: CIImage, _ skin: BoothSkin, faces: Eyes?) -> CIImage {
+        guard let faces, !faces.isEmpty else { return img }
+        let e = img.extent
+        let k = skin.warp
+        var out = img
+        func apply(_ f: CIFilter & CIFilterProtocol) { out = (f.outputImage ?? out).cropped(to: e) }
+        for face in faces {
+            if k.jaw > 0 {
+                let p = CIFilter.pinchDistortion()
+                p.inputImage = out.clampedToExtent()
+                p.center = face.jaw
+                p.radius = Float(face.width * 0.62)
+                p.scale = k.jaw
+                apply(p)
+            }
+            if k.nose > 0 {
+                let p = CIFilter.pinchDistortion()
+                p.inputImage = out.clampedToExtent()
+                p.center = face.nose
+                p.radius = Float(face.span * 0.45)
+                p.scale = k.nose
+                apply(p)
+            }
+            for eye in face.eyes {
+                let b = CIFilter.bumpDistortion()
+                b.inputImage = out.clampedToExtent()
+                b.center = eye
+                b.radius = Float(face.span * 0.5)
+                b.scale = k.eyes
+                apply(b)
+            }
+        }
+        return out
     }
 
     /// The same eyes on a copy of the picture `k` times the size.
-    static func scaled(_ eyes: Eyes?, _ k: CGFloat) -> Eyes? {
-        guard let eyes else { return nil }
-        return Eyes(points: eyes.points.map { CGPoint(x: $0.x * k, y: $0.y * k) }, span: eyes.span * k)
+    static func scaled(_ faces: Eyes?, _ k: CGFloat) -> Eyes? {
+        func m(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x * k, y: p.y * k) }
+        return faces?.map { Face(eyes: $0.eyes.map(m), span: $0.span * k, nose: m($0.nose), jaw: m($0.jaw), width: $0.width * k) }
     }
 
     // MARK: the sheet
