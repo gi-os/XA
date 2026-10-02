@@ -147,15 +147,22 @@ final class FilmTests: XCTestCase {
 
     func testSwipingThroughFilmsWraps() {
         let cam = CameraModel(settings: AppSettings())
+        cam.mode = .digi
         cam.stack = Stack(simID: Sim.neutral.id, look: .none, shape: .none)
+        let sims = FilmCatalog.sims(for: .digi)
         cam.stepLook(-1)
         XCTAssertEqual(cam.stack.look, Look.allCases.last)
         cam.stepLook(1)
         XCTAssertEqual(cam.stack.look, Look.none)
         cam.stepSim(1)
-        XCTAssertEqual(cam.stack.simID, FilmCatalog.sims[1].id)
+        XCTAssertEqual(cam.stack.simID, sims[1].id)
         cam.stepSim(-2)
-        XCTAssertEqual(cam.stack.simID, FilmCatalog.sims.last?.id)
+        XCTAssertEqual(cam.stack.simID, sims.last?.id)
+        // FILM keeps its own stock, and only steps through the stocks.
+        cam.mode = .film
+        XCTAssertNotNil(FilmCatalog.sim(cam.stack.simID)?.stock)
+        cam.stepSim(1)
+        XCTAssertNotNil(FilmCatalog.sim(cam.stack.simID)?.stock)
     }
 
     func testAShapeLeavesTransparentPixels() {
