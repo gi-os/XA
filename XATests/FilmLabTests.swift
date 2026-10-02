@@ -44,6 +44,7 @@ final class FilmLabTests: XCTestCase {
                 XCTAssertEqual(out.extent, grey.extent, st.id)
                 var px = [Float](repeating: 0, count: 4)
                 ctx.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 48, y: 36, width: 1, height: 1), format: .RGBAf, colorSpace: lin)
+                print("DEVELOP", st.id, push, px)
                 // An 18% grey card prints as 18% grey at any push: the lab prints a pushed roll back.
                 XCTAssertEqual(px[1], 0.18, accuracy: 0.045, "\(st.id) push \(push) mid grey")
                 for c in 0..<3 {
@@ -53,6 +54,22 @@ final class FilmLabTests: XCTestCase {
                 }
             }
         }
+    }
+
+    /// The film table on its own: a flat 0.5 must come out as the table's own entry.
+    func testCubeAppliesTheTable() {
+        let lin = CGColorSpace(name: CGColorSpace.linearSRGB)!
+        let ctx = CIContext(options: [.workingColorSpace: lin])
+        let t = FilmLab.tables("bowery400")!
+        let r = CGRect(x: 0, y: 0, width: 8, height: 8)
+        let flat = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1, colorSpace: lin)!).cropped(to: r)
+        let out = FilmLab.cube(flat, t.film, t.size, r)
+        var px = [Float](repeating: 0, count: 4)
+        ctx.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 4, y: 4, width: 1, height: 1), format: .RGBAf, colorSpace: lin)
+        let i = (16 * 33 * 33 + 16 * 33 + 16) * 4
+        let want = t.film.withUnsafeBytes { Array($0.bindMemory(to: Float.self)[i..<(i + 3)]) }
+        print("CUBE got", px, "want", want)
+        XCTAssertEqual(px[1], want[1], accuracy: 0.02)
     }
 
     func testEveryStockHasAFaceAtEverySpeed() {

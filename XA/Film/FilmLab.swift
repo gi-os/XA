@@ -217,7 +217,7 @@ enum FilmLab {
         return Sanitize.apply(img, floor: 0).transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY))
     }
 
-    private static func cube(_ i: CIImage, _ data: Data, _ n: Int, _ full: CGRect) -> CIImage {
+    static func cube(_ i: CIImage, _ data: Data, _ n: Int, _ full: CGRect) -> CIImage {
         let f = CIFilter.colorCube()
         f.inputImage = i
         f.cubeDimension = Float(n)
