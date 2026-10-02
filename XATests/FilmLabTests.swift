@@ -11,6 +11,7 @@ final class FilmLabTests: XCTestCase {
         XCTAssertEqual(s.ei(-1), 200)
         XCTAssertEqual(FilmStock.stock("canal500t")!.ei(1), 1000)
         XCTAssertEqual(FilmStock.stock("chelsea100")!.ei(-2), 25)
+        XCTAssertEqual(FilmStock.stock("ludlow1600")!.ei(2), 6400)
     }
 
     func testDXChangesWithSpeed() {

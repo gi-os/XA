@@ -117,5 +117,22 @@
   ],
   "gain": 2.88,
   "spektrafilm": "0.3.4"
+ },
+ "ludlow1600": {
+  "film": "xa_natura_1600",
+  "print": "fujifilm_crystal_archive_typeii",
+  "size": 33,
+  "dmin": [
+   -0.2,
+   -0.2,
+   -0.2
+  ],
+  "dmax": [
+   1.9815,
+   2.77,
+   3.1234
+  ],
+  "gain": 2.88,
+  "spektrafilm": "0.3.4"
  }
 }

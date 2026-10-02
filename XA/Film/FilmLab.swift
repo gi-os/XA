@@ -45,6 +45,8 @@ struct FilmStock: Equatable, Hashable, Identifiable {
         FilmStock(id: "prospect200", name: "Prospect", rated: 200, suffix: "", grain: 0.010, halation: 1),
         FilmStock(id: "canal500t", name: "Canal", rated: 500, suffix: "T", grain: 0.012, halation: 1.5),
         FilmStock(id: "orchard400", name: "Orchard", rated: 400, suffix: "", grain: 0.011, halation: 1),
+        // Natura 1600 (Superia 1600 in Japan's box), read from Fujifilm's datasheet: tools/filmsim/natura.
+        FilmStock(id: "ludlow1600", name: "Ludlow", rated: 1600, suffix: "", grain: 0.017, halation: 1.1),
     ]
     static func stock(_ id: String?) -> FilmStock? { all.first { $0.id == id } }
 }

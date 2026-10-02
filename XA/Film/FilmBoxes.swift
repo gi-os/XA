@@ -801,6 +801,7 @@ struct StockBox: View {
         case "chelsea100": chelsea
         case "prospect200": prospect
         case "orchard400": orchard
+        case "ludlow1600": ludlow
         default: canal
         }
     }
@@ -883,6 +884,27 @@ struct StockBox: View {
             T(ei, a, 26, .white).slant().tl(10, 64)
             rated(mint).tl(70, 76)
             T("36", a, 14, .white).slant().tl(128, 82)
+        }
+    }
+
+    /// Ludlow 1600: a night stock. Midnight blue, a neon number, a crescent moon.
+    private var ludlow: some View {
+        let o = "Oxanium-ExtraBold", neon = Color(hex: "#FF4FA3"), moon = Color(hex: "#F6E7B0")
+        return BoxCanvas(bg: Color(hex: "#141A3A")) {
+            LinearGradient(colors: [Color(hex: "#232C5E"), Color(hex: "#090C1E")], startPoint: .top, endPoint: .bottom)
+            ForEach(Array([(18, 30), (52, 14), (88, 24), (120, 60), (40, 70), (140, 18)].enumerated()), id: \.offset) { _, p in
+                Circle().fill(Color.white.opacity(0.7)).frame(width: 1.6, height: 1.6).tl(CGFloat(p.0), CGFloat(p.1))
+            }
+            ZStack {
+                Circle().fill(moon)
+                Circle().fill(Color(hex: "#1B2350")).offset(x: 7, y: -4)
+            }
+            .frame(width: 26, height: 26).clipShape(Circle()).tl(122, 10)
+            T("XACOLOR", o, 9, Color(hex: "#9AA6E8"), 3).tl(10, 8)
+            T("LUDLOW", o, 16, .white, 2).tl(10, 20)
+            T(ei, o, 36, neon).shadow(color: neon.opacity(0.85), radius: 4).tl(9, 44)
+            rated(Color(hex: "#9AA6E8")).tl(10, 86)
+            T("36", o, 12, moon).tl(136, 84)
         }
     }
 

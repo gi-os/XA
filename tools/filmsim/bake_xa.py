@@ -15,6 +15,8 @@ STOCKS = {  # XA id: (bundle key, film, print)
     'prospect200': ('c200', 'fujifilm_c200', 'fujifilm_crystal_archive_typeii'),
     'canal500t': ('vision3500t', 'kodak_vision3_500t', 'kodak_2383'),
     'orchard400': ('xtra400', 'fujifilm_xtra_400', 'fujifilm_crystal_archive_typeii'),
+    # Natura 1600 / Superia 1600, profile read from Fujifilm's datasheet (tools/filmsim/natura)
+    'ludlow1600': ('xanatura', 'xa_natura_1600', 'fujifilm_crystal_archive_typeii'),
 }
 out = sys.argv[1]
 meta = {}
