@@ -136,6 +136,7 @@ private struct FilmLCD: View {
             HStack {
                 dot(">" + camera.stack.filmTitle, 14)
                 Spacer(minLength: 8)
+                if settings.filmRecipe.format != .mm35 { dot(settings.filmRecipe.format.title, 14) }
                 if settings.filmDate.placement != .off { dot(Self.dateText(), 14) }
                 if settings.digiZero { dot("RAW", 14) }
             }
