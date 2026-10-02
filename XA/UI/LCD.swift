@@ -16,7 +16,7 @@ struct LCDStrip: View {
             switch camera.mode {
             case .digi: VcrLCD(camera: camera, settings: settings).transition(Self.swap)
             case .film: FilmLCD(camera: camera, settings: settings).transition(Self.swap)
-            case .pro: ProLCD(camera: camera, settings: settings, field: $proField).transition(Self.swap)
+            case .pro: ProLCD(camera: camera, settings: settings, field: $proField).transition(Self.proSwap)
             case .video: VideoLCD(camera: camera).transition(Self.swap)
             case .booth: BoothLCD(camera: camera, settings: settings).transition(Self.swap)
             }
@@ -35,7 +35,9 @@ struct LCDStrip: View {
                     .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.26), value: camera.mode)
+        // One screen in every mode: the bezel stays put and only what it shows changes. For
+        // PRO it physically grows to the full panel, and shrinks back when you leave.
+        .animation(.spring(response: 0.42, dampingFraction: 0.86), value: camera.mode)
         .contentShape(Rectangle())
         .allowsHitTesting(true)
         // Slide along the strip to zoom, the way the system camera's zoom dial works:
@@ -62,8 +64,12 @@ struct LCDStrip: View {
         z < 10 ? String(format: "%.1f×", z) : String(format: "%.0f×", z)
     }
 
-    static let swap: AnyTransition = .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.12).delay(0.22)),
-                                                 removal: .move(edge: .leading).combined(with: .opacity))
+    /// The old picture goes dark, the new one comes up in the same glass.
+    static let swap: AnyTransition = .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.14).delay(0.16)),
+                                                 removal: .opacity.animation(.easeIn(duration: 0.14)))
+    /// PRO's panel stays lit while the screen shrinks around it, then goes out.
+    static let proSwap: AnyTransition = .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.14).delay(0.08)),
+                                                    removal: .opacity.animation(.easeIn(duration: 0.14).delay(0.2)))
 }
 
 // MARK: panels
@@ -115,12 +121,13 @@ private struct FilmLCD: View {
                 HStack {
                     dot(">" + camera.stack.filmTitle, 14)
                     Spacer(minLength: 8)
+                    if settings.date.placement != .off { dot(Self.dateText(), 14) }
                     if settings.digiZero { dot("RAW", 14) }
                 }
                 .padding(.horizontal, 10)
+                // A reflective LCD left unused for years: the text swims in slowly.
+                .modifier(ColdWake())
             }
-            // Powering on: the segments light from left to right.
-            .modifier(Wake(axis: .horizontal))
     }
 
     private func dot(_ s: String, _ size: CGFloat) -> some View {
@@ -158,9 +165,9 @@ private struct VcrLCD: View {
                     chip("\(settings.digiMegapixels)MP")
                 }
                 .padding(.horizontal, 7)
+                // The menu draws in line by line from the top, like a CRT; the blue is already there.
+                .modifier(Wake(axis: .vertical))
             }
-            // Powering on: the picture comes in line by line from the top, like a CRT.
-            .modifier(Wake(axis: .vertical))
     }
 
     private func chip(_ s: String) -> some View {
@@ -198,9 +205,8 @@ private struct BoothLCD: View {
                 }
                 .padding(.horizontal, 10)
                 .animation(.spring(response: 0.25, dampingFraction: 0.6), value: camera.boothCount)
+                .modifier(Wake(axis: .horizontal))
             }
-            // Powering on: the panel lights from the left, like the green one.
-            .modifier(Wake(axis: .horizontal))
     }
 
     private func bubble(_ s: String, _ size: CGFloat, _ c: Color) -> some View {
@@ -210,7 +216,7 @@ private struct BoothLCD: View {
 }
 
 /// A display powering on: a mask sweeps across it, top to bottom or left to right.
-private struct Wake: ViewModifier {
+struct Wake: ViewModifier {
     enum Axis { case vertical, horizontal }
     let axis: Axis
     @State private var on = false
@@ -236,10 +242,13 @@ private struct ProLCD: View {
 
     var body: some View {
         LitPanel(center: Color(hex: "#D4F8FF"), mid: Color(hex: "#9FE6F2"), edge: Color(hex: "#6FC9DC"), glow: Color(red: 0.47, green: 0.84, blue: 1).opacity(0.5))
-            .overlay {
+            // The readings keep their full size while the glass grows (or shrinks) around them.
+            .overlay(alignment: .top) {
                 ProPanel(camera: camera, settings: settings, field: $field)
+                    .frame(height: LCDStrip.height(.pro), alignment: .top)
                     .modifier(SlideWake())
             }
+            .clipped()
             .modifier(PowerOn())
     }
 }

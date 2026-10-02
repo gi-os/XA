@@ -25,8 +25,9 @@ struct CameraView: View {
             viewfinder
                 .overlay { FocusTapLayer(camera: camera, filmOpen: $filmOpen) }
                 .onReceive(NotificationCenter.default.publisher(for: .xaBackToCamera)) { _ in filmOpen = false }
-                // DIGI prints its settings on the picture as plain text, like the camera did.
-                .overlay(alignment: .bottom) {
+                // DIGI prints its settings across the top of the picture as plain text, like the
+                // camera did, clear of the date back in the bottom corner.
+                .overlay(alignment: .top) {
                     if camera.mode == .digi { DigiOSD(camera: camera).allowsHitTesting(false).transition(.opacity) }
                 }
                 .contentShape(Rectangle())
@@ -670,9 +671,13 @@ private struct DigiOSD: View {
             Spacer()
             Text("ISO \(Int(camera.meterISO.rounded()))")
         }
-        .font(.custom("Silkscreen-Regular", fixedSize: 12))
+        .font(.custom("Silkscreen-Regular", fixedSize: 18))
+        .tracking(1)
         .foregroundStyle(Color(hex: "#F4F4F0"))
-        .padding(.horizontal, 12).padding(.bottom, 10)
+        .shadow(color: .black.opacity(0.55), radius: 0, x: 1.5, y: 1.5)
+        .padding(.horizontal, 14).padding(.top, 12)
+        // Drawn in from the top, line by line, like the menu on the screen below.
+        .modifier(Wake(axis: .vertical))
     }
     static func shutter(_ s: Double) -> String {
         guard s > 0 else { return "" }

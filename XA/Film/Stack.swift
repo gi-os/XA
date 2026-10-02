@@ -114,8 +114,8 @@ enum Darkroom {
         if let sim, !sim.isNeutral {
             img = SimEngine.apply(sim, to: img, preview: preview, push: s.stack.push, seed: preview ? nil : Int(date.timeIntervalSince1970 * 1000) % 100_000)
         } else if !s.film { img = Digicam.tone(img) }
-        // FILM stops here: the stock is the whole look, at full size.
-        if s.film { return (img, false) }
+        // FILM stops here: the stock is the whole look, at full size, with the date back if it is on.
+        if s.film { return (stamp(img, s, date: date, dateShift: dateShift, mono: sim?.mono ?? false), false) }
         if s.stack.look != .none {
             let w: CGFloat? = s.stack.look.pixelWidth != nil && !preview ? img.extent.width : nil
             img = Looks.apply(s.stack.look, to: img, outputWidth: w)
@@ -142,13 +142,17 @@ enum Darkroom {
             alpha = !preview
             shapeForDate = shape
         }
-        if let overlay = DateBack.overlayImage(size: img.extent.size, date: date, config: s.date, shape: shapeForDate, mono: mono, instant: instant) {
-            let e = img.extent
-            let drop: CGFloat = -dateShift * e.height * 0.35
-            let placed = overlay.transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY + drop)).cropped(to: e)
-            img = placed.composited(over: img)
-        }
+        img = stamp(img, s, date: date, dateShift: dateShift, mono: mono, shape: shapeForDate, instant: instant)
         return (img, alpha)
+    }
+
+    /// The date back's orange numbers, burned into the corner.
+    private static func stamp(_ img: CIImage, _ s: DevelopSettings, date: Date, dateShift: CGFloat, mono: Bool, shape: FrameShape = .none, instant: InstantKind = .none) -> CIImage {
+        guard let overlay = DateBack.overlayImage(size: img.extent.size, date: date, config: s.date, shape: shape, mono: mono, instant: instant) else { return img }
+        let e = img.extent
+        let drop: CGFloat = -dateShift * e.height * 0.35
+        let placed = overlay.transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY + drop)).cropped(to: e)
+        return placed.composited(over: img)
     }
 }
 
