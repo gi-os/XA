@@ -43,6 +43,7 @@ targets:
         UIAppFonts:
           - Anton-400.ttf
           - Archivo-800.ttf
+          - PermanentMarker-400.ttf
           - BebasNeue-400.ttf
           - Bungee-400.ttf
           - Caveat-700.ttf
@@ -94,6 +95,8 @@ targets:
       - path: XA/UI/ProPanel.swift
       - path: XA/Resources/Stocks
         buildPhase: resources
+      - path: XA/Resources/Boxes
+        buildPhase: resources
       - path: XA/Resources/Fonts
         buildPhase: resources
     info:
@@ -109,6 +112,7 @@ targets:
         UIAppFonts:
           - Anton-400.ttf
           - Archivo-800.ttf
+          - PermanentMarker-400.ttf
           - BebasNeue-400.ttf
           - Bungee-400.ttf
           - Caveat-700.ttf

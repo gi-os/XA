@@ -52,6 +52,14 @@ final class FilmLabTests: XCTestCase {
         }
     }
 
+    func testEveryStockHasAFaceAtEverySpeed() {
+        for st in FilmStock.all {
+            for push in FilmStock.pushRange {
+                XCTAssertNotNil(FilmLab.bundle.url(forResource: "box_\(st.id)_\(st.ei(push))", withExtension: "jpg"), "\(st.id) EI \(st.ei(push))")
+            }
+        }
+    }
+
     func testStocksAreFilmBoxes() {
         let ids = Sim.presets.compactMap { $0.stock }
         XCTAssertEqual(Set(ids), Set(FilmStock.all.map { $0.id }))
