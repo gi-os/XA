@@ -8,6 +8,7 @@ extension CaptureMode {
         case .film: return Color(hex: "#F2B33D")
         case .pro: return Color(hex: "#5BD3F0")
         case .video: return Color(hex: "#FF3B30")
+        case .booth: return Color(hex: "#FF4FA0")
         }
     }
 }

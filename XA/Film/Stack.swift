@@ -86,6 +86,9 @@ struct DevelopSettings {
     var recipe = DigiRecipe()
     /// FILM: full size, the stock only, none of the digicam's processing.
     var film = false
+    /// BOOTH: the skin setting, and (in the viewfinder) where the eyes were last seen.
+    var booth: BoothSkin? = nil
+    var eyes: Booth.Eyes? = nil
 }
 
 /// The darkroom: the same chain for the viewfinder and for the saved photograph.
@@ -98,6 +101,10 @@ enum Darkroom {
         // Read before any filter: the photo's EXIF says whether the flash fired and how dark it was.
         let conditions = demo ?? DigicamFX.Conditions(properties: src.properties)
         let src = Sanitize.apply(src)
+        // BOOTH: full size, the skin filter and nothing else.
+        if let skin = s.booth {
+            return (Booth.skin(src, skin, eyes: preview ? s.eyes : (s.eyes ?? Booth.eyes(in: src))), false)
+        }
         var img = preview || s.film ? src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
                                     : Digicam.shrink(src, megapixels: s.megapixels)
         let sim = FilmCatalog.sim(s.stack.simID)

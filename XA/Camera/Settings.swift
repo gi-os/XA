@@ -43,6 +43,9 @@ final class AppSettings: ObservableObject {
     @Published var sounds: Bool { didSet { d.set(sounds, forKey: "sounds") } }
     @Published var showRollButton: Bool { didSet { d.set(showRollButton, forKey: "showRollButton") } }
     @Published var showFlipButton: Bool { didSet { d.set(showFlipButton, forKey: "showFlipButton") } }
+    /// BOOTH: the skin setting and the sticker sheet's layout.
+    @Published var boothSkin: BoothSkin { didSet { d.set(boothSkin.rawValue, forKey: "boothSkin") } }
+    @Published var boothLayout: BoothLayout { didSet { d.set(boothLayout.rawValue, forKey: "boothLayout") } }
 
     init() {
         digiMegapixels = d.object(forKey: "digiMP") as? Int ?? 2
@@ -64,6 +67,8 @@ final class AppSettings: ObservableObject {
         showFlipButton = d.object(forKey: "showFlipButton") as? Bool ?? true
         flash = FlashSetting(rawValue: d.string(forKey: "flash") ?? "") ?? .off
         sounds = d.object(forKey: "sounds") as? Bool ?? true
+        boothSkin = BoothSkin(rawValue: d.string(forKey: "boothSkin") ?? "") ?? .glow
+        boothLayout = BoothLayout(rawValue: d.string(forKey: "boothLayout") ?? "") ?? .sheet
     }
 
     private func save<T: Encodable>(_ v: T, _ key: String) {

@@ -6,8 +6,9 @@ import CoreImage.CIFilterBuiltins
 /// DIGI is a 2003 point-and-shoot: a small file, cheap processing, sims, looks, shapes, a date back.
 /// FILM is DIGI's twin for the film stocks: full size, no digicam crunch, only the stocks.
 /// PRO is the iPhone at its best: full resolution, full processing, saved untouched.
+/// BOOTH is a purikura machine: the front camera, four shots on a countdown, a sticker sheet.
 enum CaptureMode: String, CaseIterable, Identifiable, Codable {
-    case digi, film, pro, video
+    case digi, film, pro, video, booth
 
     var id: String { rawValue }
     var title: String {
@@ -16,6 +17,7 @@ enum CaptureMode: String, CaseIterable, Identifiable, Codable {
         case .film: return "FILM"
         case .pro: return "PRO"
         case .video: return "VIDEO"
+        case .booth: return "BOOTH"
         }
     }
 

@@ -45,6 +45,9 @@ final class CameraModel: NSObject, ObservableObject {
     @Published private(set) var front = false
     @Published private(set) var developing = 0
     @Published private(set) var flash = false
+    /// BOOTH: which of the four shots is coming (1…4) while a session runs, and the countdown to it.
+    @Published private(set) var boothShot: Int?
+    @Published private(set) var boothCount: Int?
     @Published private(set) var hasCameraControl = false
     @Published private(set) var lastShot: UIImage?
     /// DIGI's instant review: the shot held on the viewfinder for a moment, with its file number.
@@ -125,6 +128,13 @@ final class CameraModel: NSObject, ObservableObject {
     // Per-shot photo sizes: the output is set to the largest once, so switching modes never
     // reconfigures the session.
     private var digiDims = CMVideoDimensions(width: 4032, height: 3024)
+    // BOOTH: the running session, the shots developed so far for each sheet, and the eyes
+    // DOLL last found in the viewfinder.
+    private var boothSession = 0
+    private var boothFrames: [Int: [Int: UIImage]] = [:]
+    private var _boothEyes: Booth.Eyes?
+    private var eyesBusy = false
+    private let eyeQueue = DispatchQueue(label: "xa.eyes", qos: .userInitiated)
     private var proDims = CMVideoDimensions(width: 4032, height: 3024)
 
     init(settings: AppSettings) {
@@ -165,6 +175,7 @@ final class CameraModel: NSObject, ObservableObject {
         d.noise = settings.noise
         d.date = settings.date
         d.recipe = settings.recipe
+        if mode == .booth { d.booth = settings.boothSkin }
         lock.lock(); _develop = d; _frameMode = mode; lock.unlock()
     }
 
@@ -195,6 +206,9 @@ final class CameraModel: NSObject, ObservableObject {
             lock.lock(); _switchPending = true; _switchStart = CACurrentMediaTime(); _toDigi = mode.developed; lock.unlock()
             if old == .video && recording { stopRecording() }
             if (old == .film) != (mode == .film) { stack = Self.loadStack(for: mode) }
+            // BOOTH turns the camera round to face you, and back when you leave.
+            if old == .booth { cancelBooth(); setFront(false) }
+            if mode == .booth { setFront(true) }
         }
         syncFrameSettings()
         guard old != mode, input != nil else { return }
@@ -229,7 +243,10 @@ final class CameraModel: NSObject, ObservableObject {
         }
     }
 
-    func stop() { sessionQueue.async { if self.session.isRunning { self.session.stopRunning() } } }
+    func stop() {
+        cancelBooth()
+        sessionQueue.async { if self.session.isRunning { self.session.stopRunning() } }
+    }
     func resume() { sessionQueue.async { if !self.session.isRunning && self.input != nil { self.session.startRunning() } } }
 
     private static func backCamera() -> AVCaptureDevice? {
@@ -263,6 +280,7 @@ final class CameraModel: NSObject, ObservableObject {
         applyRotation()
         session.startRunning()
         applyProOnQueue(m)
+        if m == .booth { switchCamera(toFront: true) }
         DispatchQueue.main.async { self.preparePhotos() }
     }
 
@@ -341,6 +359,8 @@ final class CameraModel: NSObject, ObservableObject {
             let first: AVCaptureControl = settings.digiSlide == .sim || m == .film ? simPicker : lookPicker
             let second: AVCaptureControl = settings.digiSlide == .sim || m == .film ? lookPicker : simPicker
             for c in [first, second] where session.canAddControl(c) && (m == .digi || c === simPicker) { session.addControl(c) }
+        } else if m == .booth {
+            if session.canAddControl(zoom) { session.addControl(zoom) }
         } else if m == .video {
             let looks = AVCaptureIndexPicker("Look", symbolName: "film", localizedIndexTitles: VideoLook.allCases.map { $0.title.capitalized })
             looks.selectedIndex = videoLook.rawValue
@@ -399,9 +419,18 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     func flip() {
-        sessionQueue.async {
+        sessionQueue.async { self.switchCamera(toFront: !self.frontFlag) }
+    }
+
+    /// Front or back, whichever it isn't already.
+    func setFront(_ want: Bool) {
+        sessionQueue.async { if self.frontFlag != want { self.switchCamera(toFront: want) } }
+    }
+
+    /// On the session queue.
+    private func switchCamera(toFront: Bool) {
+        do {
             guard let old = self.input else { return }
-            let toFront = !self.frontFlag
             let dev: AVCaptureDevice? = toFront ? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) : Self.backCamera()
             guard let dev, let inp = try? AVCaptureDeviceInput(device: dev) else { return }
             self.session.beginConfiguration()
@@ -770,6 +799,12 @@ final class CameraModel: NSObject, ObservableObject {
     func shoot() {
         guard authorized == true, input != nil else { return }
         if mode == .video { toggleRecording(); return }
+        if mode == .booth { boothPress(); return }
+        fire(booth: nil)
+    }
+
+    private func fire(booth: (session: Int, index: Int)?) {
+        guard authorized == true, input != nil else { return }
         let pressed = CACurrentMediaTime()
         skipReview()
         let m = mode
@@ -777,14 +812,14 @@ final class CameraModel: NSObject, ObservableObject {
         syncFrameSettings()
         let (_, dev) = frameState()
         let id = settingsP.uniqueID
-        pending[id] = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date(), zero: zero, pressed: pressed)
+        pending[id] = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date(), zero: zero, pressed: pressed, booth: booth)
         let instant = settings.flash == .off && !zero && photoOutput.isZeroShutterLagEnabled
         if instant {
             answered.insert(id)
             if settings.sounds { CameraSounds.shared.play(.shutter) }
             if m.usesFilm && settings.instantReview { startReview() }
             flash = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { self.flash = false }
+            DispatchQueue.main.asyncAfter(deadline: .now() + (m == .booth ? 0.22 : 0.08)) { self.flash = false }
         } else if settings.sounds && settingsP.isShutterSoundSuppressionEnabled {
             quietShots.insert(id)
         }
@@ -796,6 +831,11 @@ final class CameraModel: NSObject, ObservableObject {
             if let c = self.photoOutput.connection(with: .video), let rc {
                 let a = rc.videoRotationAngleForHorizonLevelCapture
                 if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
+            }
+            // BOOTH saves you as you saw yourself: mirrored, like the booth's screen.
+            if let c = self.photoOutput.connection(with: .video), c.isVideoMirroringSupported {
+                if m == .booth { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = self.frontFlag }
+                else if !c.automaticallyAdjustsVideoMirroring { c.automaticallyAdjustsVideoMirroring = true }
             }
             self.photoOutput.capturePhoto(with: settingsP, delegate: self)
         }
@@ -846,7 +886,7 @@ final class CameraModel: NSObject, ObservableObject {
         preparePhotos()
     }
 
-    private struct Shot { let mode: CaptureMode; let develop: DevelopSettings; let crunch: Double; let date: Date; var zero = false; var pressed: Double = 0 }
+    private struct Shot { let mode: CaptureMode; let develop: DevelopSettings; let crunch: Double; let date: Date; var zero = false; var pressed: Double = 0; var booth: (session: Int, index: Int)? = nil }
     private var pending: [Int64: Shot] = [:]
     /// Shots whose system click was dropped, so XA plays its own when the picture is really taken.
     private var quietShots: Set<Int64> = []
@@ -877,7 +917,7 @@ final class CameraModel: NSObject, ObservableObject {
                 type = self.settings.proFormat == .heif ? .heic : .jpeg
             } else {
                 let (developed, alpha) = Darkroom.develop(src, shot.develop, date: shot.date, preview: false, demo: demo)
-                let recipe = Recipe.describe(shot.develop.stack, megapixels: shot.develop.megapixels, film: shot.develop.film)
+                let recipe = shot.develop.booth.map { "XA BOOTH · \($0.title)" } ?? Recipe.describe(shot.develop.stack, megapixels: shot.develop.megapixels, film: shot.develop.film)
                 thumbSource = developed
                 // The thumbnail first: it is the reference the full render is checked against,
                 // cell by cell, so a render that came back with black tiles is redone on the CPU.
@@ -888,8 +928,13 @@ final class CameraModel: NSObject, ObservableObject {
                 guard let cg = Encoder.render(developed, reference: reference) else { return }
                 let props = Recipe.properties(from: fileProps, recipe: recipe)
                 // FILM keeps everything: HEIC at a high quality. DIGI saves the crunch you chose.
-                type = shot.develop.film ? .heic : (alpha ? .png : .jpeg)
-                out = Encoder.encode(cg, type: type, quality: shot.develop.film ? 0.92 : CGFloat(shot.crunch), properties: props)
+                let full = shot.develop.film || shot.develop.booth != nil
+                type = full ? .heic : (alpha ? .png : .jpeg)
+                out = Encoder.encode(cg, type: type, quality: full ? 0.92 : CGFloat(shot.crunch), properties: props)
+                if let b = shot.booth {
+                    let small = Self.downsized(cg, longEdge: 1400)
+                    DispatchQueue.main.async { self.boothCollect(b.session, b.index, small, date: shot.date) }
+                }
                 if out == nil && type == .heic {
                     type = .jpeg
                     out = Encoder.encode(cg, type: .jpeg, quality: 0.95, properties: props)
@@ -913,6 +958,14 @@ final class CameraModel: NSObject, ObservableObject {
                     self.writeFallback(out, type)
                 }
             }
+        }
+    }
+
+    private func save(_ out: Data, _ type: UTType) {
+        if let lib = library {
+            lib.save(data: out, type: type) { ok in if !ok { self.writeFallback(out, type) } }
+        } else {
+            writeFallback(out, type)
         }
     }
 
@@ -1033,6 +1086,11 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             }
             let t = turn
             let upright = Self.rotated(src, clockwise: t)
+            var dev = dev
+            if dev.booth == .doll {
+                lock.lock(); dev.eyes = _boothEyes; let busy = eyesBusy; if !busy { eyesBusy = true }; lock.unlock()
+                if !busy { findEyes(upright) }
+            }
             var developed = Darkroom.develop(upright, dev, date: Date(), preview: true, dateShift: 1 - amount).0
             if amount < 1 {
                 // Switching modes: the film fades in or out and the date slides with it.
@@ -1097,4 +1155,92 @@ extension CameraModel: AVCaptureSessionControlsDelegate {
     func sessionControlsWillEnterFullscreenAppearance(_ session: AVCaptureSession) {}
     func sessionControlsWillExitFullscreenAppearance(_ session: AVCaptureSession) {}
     func sessionControlsDidBecomeInactive(_ session: AVCaptureSession) {}
+}
+
+
+// MARK: BOOTH
+
+extension CameraModel {
+    /// One press runs the booth: a countdown, a shot, four times. A press while it runs stops it.
+    func boothPress() {
+        if boothShot != nil { cancelBooth(); return }
+        boothSession += 1
+        boothFrames[boothSession] = [:]
+        boothStep(boothSession, 0)
+    }
+
+    func cancelBooth() {
+        guard boothShot != nil else { return }
+        boothFrames[boothSession] = nil
+        boothSession += 1
+        boothShot = nil
+        boothCount = nil
+    }
+
+    private func boothStep(_ session: Int, _ index: Int) {
+        guard session == boothSession, mode == .booth else { return }
+        boothShot = index + 1
+        count(session, from: index == 0 ? 3 : 2) {
+            self.boothCount = nil
+            self.fire(booth: (session, index))
+            if index + 1 < Booth.shots {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { self.boothStep(session, index + 1) }
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { if session == self.boothSession { self.boothShot = nil } }
+            }
+        }
+    }
+
+    private func count(_ session: Int, from n: Int, then: @escaping () -> Void) {
+        guard session == boothSession else { return }
+        if n == 0 { then(); return }
+        boothCount = n
+        if settings.sounds { CameraSounds.shared.play(.beep) }
+        UISelectionFeedbackGenerator().selectionChanged()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) { self.count(session, from: n - 1, then: then) }
+    }
+
+    /// A developed shot arrives; with all four in, the sheet is laid out and saved.
+    fileprivate func boothCollect(_ session: Int, _ index: Int, _ img: UIImage?, date: Date) {
+        guard let img, boothFrames[session] != nil else { return }
+        boothFrames[session]?[index] = img
+        guard let got = boothFrames[session], got.count == Booth.shots else { return }
+        boothFrames[session] = nil
+        let shots = (0..<Booth.shots).compactMap { got[$0] }
+        let layout = settings.boothLayout
+        let n = UserDefaults.standard.integer(forKey: "boothNumber") + 1
+        UserDefaults.standard.set(n, forKey: "boothNumber")
+        developing += 1
+        developQueue.async {
+            defer { DispatchQueue.main.async { self.developing = max(0, self.developing - 1) } }
+            guard let sheet = Booth.sheet(shots, layout: layout, date: date, number: n), let cg = sheet.cgImage,
+                  let out = Encoder.encode(cg, type: .jpeg, quality: 0.93, properties: [:]) else { return }
+            let thumb = Self.downsized(cg, longEdge: 200)
+            DispatchQueue.main.async {
+                if let thumb { self.lastShot = thumb }
+                self.save(out, .jpeg)
+            }
+        }
+    }
+
+    /// DOLL in the viewfinder: the eyes are looked for off the frame queue, a few times a second.
+    fileprivate func findEyes(_ frame: CIImage) {
+        let k: CGFloat = 480 / max(frame.extent.width, 1)
+        let small = frame.transformed(by: CGAffineTransform(scaleX: k, y: k))
+        eyeQueue.async {
+            let found = Booth.scaled(Booth.eyes(in: small), 1 / k)
+            self.lock.lock(); self._boothEyes = found; self.eyesBusy = false; self.lock.unlock()
+        }
+    }
+
+    static func downsized(_ cg: CGImage, longEdge: CGFloat) -> UIImage? {
+        let w = CGFloat(cg.width), h = CGFloat(cg.height)
+        let k = min(1, longEdge / max(w, h))
+        let size = CGSize(width: (w * k).rounded(), height: (h * k).rounded())
+        let fmt = UIGraphicsImageRendererFormat()
+        fmt.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: fmt).image { _ in
+            UIImage(cgImage: cg).draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
 }

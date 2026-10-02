@@ -18,6 +18,7 @@ struct LCDStrip: View {
             case .film: FilmLCD(camera: camera, settings: settings).transition(Self.swap)
             case .pro: ProLCD(camera: camera, settings: settings, field: $proField).transition(Self.swap)
             case .video: VideoLCD(camera: camera).transition(Self.swap)
+            case .booth: BoothLCD(camera: camera, settings: settings).transition(Self.swap)
             }
         }
         // PRO grows the strip into the full panel; DIGI and VIDEO keep one row.
@@ -167,6 +168,44 @@ private struct VcrLCD: View {
             .lineLimit(1).minimumScaleFactor(0.5)
             .padding(.horizontal, 5).padding(.vertical, 2)
             .background(Color(hex: "#ECEBE6"))
+    }
+}
+
+// MARK: BOOTH
+
+/// A purikura machine's screen: candy gradient, bubbly type. The skin setting and the sheet
+/// while it waits; the shot, a "SMILE!" and the countdown while it runs.
+private struct BoothLCD: View {
+    @ObservedObject var camera: CameraModel
+    @ObservedObject var settings: AppSettings
+    static let hot = Color(hex: "#FF4FA0")
+
+    var body: some View {
+        let running = camera.boothShot != nil
+        LinearGradient(colors: [Color(hex: "#FFD1E6"), Color(hex: "#FFE9F3"), Color(hex: "#D9F6EA")], startPoint: .leading, endPoint: .trailing)
+            .overlay {
+                HStack(spacing: 8) {
+                    bubble(camera.boothShot.map { "SHOT \($0) / \(Booth.shots)" } ?? "♥ " + settings.boothSkin.title, 14, Self.hot)
+                    Spacer(minLength: 4)
+                    bubble(running ? "SMILE!" : "\(Booth.shots) SHOTS · " + settings.boothLayout.title, 12, Color(hex: "#7A5AD9"))
+                    if let n = camera.boothCount {
+                        Text("\(n)").font(.custom(BoothInk.font, fixedSize: 26)).foregroundStyle(.white)
+                            .shadow(color: Self.hot, radius: 0, x: 1.5, y: 0).shadow(color: Self.hot, radius: 0, x: -1.5, y: 0)
+                            .shadow(color: Self.hot, radius: 0, x: 0, y: 1.5).shadow(color: Self.hot, radius: 0, x: 0, y: -1.5)
+                            .contentTransition(.numericText(countsDown: true))
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .padding(.horizontal, 10)
+                .animation(.spring(response: 0.25, dampingFraction: 0.6), value: camera.boothCount)
+            }
+            // Powering on: the panel lights from the left, like the green one.
+            .modifier(Wake(axis: .horizontal))
+    }
+
+    private func bubble(_ s: String, _ size: CGFloat, _ c: Color) -> some View {
+        Text(s).font(.custom(BoothInk.font, fixedSize: size)).foregroundStyle(c)
+            .lineLimit(1).minimumScaleFactor(0.6)
     }
 }
 

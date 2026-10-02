@@ -5,7 +5,7 @@ import AVFoundation
 /// through the ambient category, so the silent switch mutes them and music keeps playing.
 final class CameraSounds {
     static let shared = CameraSounds()
-    enum Cue { case focus, shutter }
+    enum Cue { case focus, shutter, beep }
 
     private var players: [Cue: AVAudioPlayer] = [:]
     private let queue = DispatchQueue(label: "xa.sounds")
@@ -14,7 +14,7 @@ final class CameraSounds {
         queue.async {
             let session = AVAudioSession.sharedInstance()
             if session.category != .playAndRecord { try? session.setCategory(.ambient, options: [.mixWithOthers]) }
-            for (cue, samples) in [(Cue.focus, Synth.hunt()), (Cue.shutter, Synth.fastMetal())] {
+            for (cue, samples) in [(Cue.focus, Synth.hunt()), (Cue.shutter, Synth.fastMetal()), (Cue.beep, Synth.beep())] {
                 if let p = try? AVAudioPlayer(data: Synth.wav(samples)) { p.prepareToPlay(); self.players[cue] = p }
             }
         }
@@ -52,6 +52,13 @@ enum Synth {
         noise(&b, at: 0.016, dur: 0.012, filter: .high, freq: 4200, q: 1, gain: 1.2)
         tone(&b, at: 0.016, from: 2000, to: 1400, dur: 0.03, wave: .triangle, gain: 0.05)
         return normalized(b, peak: 0.7)
+    }
+
+    /// BOOTH's countdown: a short bright beep.
+    static func beep() -> [Float] {
+        var b = silence(0.09)
+        tone(&b, at: 0, from: 1568, to: 1568, dur: 0.07, wave: .square, gain: 0.06)
+        return normalized(b, peak: 0.3)
     }
 
     static func silence(_ seconds: Double) -> [Float] { [Float](repeating: 0, count: Int(seconds * rate)) }

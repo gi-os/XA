@@ -48,6 +48,8 @@ struct CameraView: View {
                     if filmOpen || camera.recording { VideoRows(camera: camera, open: $filmOpen, onFilm: onFilm).transition(Self.rows) }
                 case .pro:
                     ProKeys(camera: camera, settings: settings, field: $proField, onCustomize: onCustomize).transition(Self.rows)
+                case .booth:
+                    EmptyView()
                 }
             }
             .animation(.snappy(duration: 0.32), value: camera.mode)
@@ -92,6 +94,11 @@ struct CameraView: View {
                 .modifier(SwipeToStep(step: { camera.stack.push = 0; camera.stepSim($0) },
                                       vertical: camera.mode == .film ? { camera.stepPush($0) } : nil))
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
+        } else if camera.mode == .booth {
+            // The sticker sheet's layout as a little card: tap or swipe it for the next one.
+            SheetCard(layout: settings.boothLayout) { stepLayout(1) }
+                .modifier(SwipeToStep { stepLayout($0) })
+                .transition(.scale(scale: 0.6).combined(with: .opacity))
         } else if camera.mode == .digi {
             MPMenu(camera: camera, settings: settings)
         } else {
@@ -114,6 +121,11 @@ struct CameraView: View {
             if !horizontal && dy < 0 { onRoll() }
             return
         }
+        if camera.mode == .booth {
+            // Sideways: the next skin setting.
+            if horizontal { stepSkin(dx < 0 ? 1 : -1) }
+            return
+        }
         withAnimation(.snappy) {
             if horizontal { camera.stepSim(dx < 0 ? 1 : -1) }
             else if camera.mode == .video {
@@ -124,6 +136,19 @@ struct CameraView: View {
             } else if camera.mode == .film { camera.stepPush(dy < 0 ? 1 : -1) }
             else { camera.stepLook(dy < 0 ? 1 : -1) }
         }
+    }
+
+    private func stepSkin(_ by: Int) {
+        let all = BoothSkin.allCases, n = all.count
+        let i = all.firstIndex(of: settings.boothSkin) ?? 0
+        settings.boothSkin = all[((i + by) % n + n) % n]
+        camera.syncFrameSettings()
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    private func stepLayout(_ by: Int) {
+        withAnimation(.snappy) { settings.boothLayout = settings.boothLayout.step(by) }
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 
     @ViewBuilder private var viewfinder: some View {
@@ -648,4 +673,47 @@ private struct DigiOSD: View {
         guard s > 0 else { return "" }
         return s >= 0.5 ? String(format: "%.1f\"", s) : "1/\(Int((1 / s).rounded()))"
     }
+}
+
+/// BOOTH's corner: the sticker sheet's layout drawn as a little white card.
+struct SheetCard: View {
+    let layout: BoothLayout
+    var action: () -> Void
+    private let pink = Color(uiColor: BoothInk.pink), lilac = Color(uiColor: BoothInk.lilac), mint = Color(uiColor: BoothInk.mint)
+
+    var body: some View {
+        Button(action: action) {
+            tiles
+                .padding(3)
+                .frame(width: 62, height: 44)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 3))
+                .shadow(color: .black.opacity(0.6), radius: 5, y: 4)
+                .rotationEffect(.degrees(-4))
+                .id(layout)
+                .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .opacity))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Sticker sheet \(layout.letter)")
+    }
+
+    @ViewBuilder private var tiles: some View {
+        switch layout {
+        case .sheet:
+            GeometryReader { g in
+                HStack(spacing: 2) {
+                    tile(pink).frame(width: (g.size.width - 2) * 2 / 3)
+                    VStack(spacing: 2) { tile(lilac); tile(mint) }
+                }
+            }
+        case .grid:
+            VStack(spacing: 2) {
+                HStack(spacing: 2) { tile(pink); tile(lilac) }
+                HStack(spacing: 2) { tile(mint); tile(pink) }
+            }
+        case .strip:
+            HStack(spacing: 2) { tile(pink); tile(lilac); tile(mint); tile(pink) }
+        }
+    }
+
+    private func tile(_ c: Color) -> some View { RoundedRectangle(cornerRadius: 2).fill(c) }
 }
