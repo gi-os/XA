@@ -362,8 +362,6 @@ enum DateBack {
         switch style {
         case .dots: return max(1.5, short / 175 * scale) * 7
         case .quartz: return max(0.7, long / 720 * scale) * 13
-        // The camcorder and digicam overlays were big, chunky on-screen text.
-        case .camcorder, .lcd: return long / 34 * scale * 1.1
         default: return long / 34 * scale * 0.72
         }
     }
@@ -508,21 +506,21 @@ enum DateBack {
         return img
     }
 
-    /// A camcorder's character generator drew at the tape's own resolution, about 360 lines:
-    /// the date goes down to that and back up soft, with a little horizontal smear.
+    /// A camcorder's character generator drew at about broadcast resolution: the date goes down
+    /// to roughly 720 lines and back up, just soft enough to lose the crisp vector edge.
     static func videoResolution(_ img: CIImage) -> CIImage {
         let e = img.extent
         let short = min(e.width, e.height)
-        guard short > 400 else { return img }
-        let k: CGFloat = 360 / short
+        guard short > 800 else { return img }
+        let k: CGFloat = 720 / short
         let down = CIFilter.lanczosScaleTransform()
         down.inputImage = img
         down.scale = Float(k)
-        down.aspectRatio = 0.82
+        down.aspectRatio = 0.9
         guard let small = down.outputImage else { return img }
         let smear = CIFilter.boxBlur()
         smear.inputImage = small.clampedToExtent()
-        smear.radius = 1.1
+        smear.radius = 0.6
         let soft = (smear.outputImage ?? small).cropped(to: small.extent)
         let sx = e.width / small.extent.width, sy = e.height / small.extent.height
         return soft.samplingLinear()
