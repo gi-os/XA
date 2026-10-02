@@ -41,7 +41,7 @@ final class FilmLabTests: XCTestCase {
             var q = [Float](repeating: 0, count: 4)
             ctx.render(img.cropped(to: CGRect(x: 48, y: 36, width: 1, height: 1)), toBitmap: &q, rowBytes: 16,
                        bounds: CGRect(x: 48, y: 36, width: 1, height: 1), format: .RGBAf, colorSpace: lin)
-            print("DEVELOP stage", name, q)
+            XCTAssertEqual(q[3], 1, accuracy: 0.001, "\(name): alpha stays 1")
         }
         defer { FilmLab.trace = nil }
         for st in FilmStock.all {
@@ -51,7 +51,6 @@ final class FilmLabTests: XCTestCase {
                 XCTAssertEqual(out.extent, grey.extent, st.id)
                 var px = [Float](repeating: 0, count: 4)
                 ctx.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 48, y: 36, width: 1, height: 1), format: .RGBAf, colorSpace: lin)
-                print("DEVELOP", st.id, push, px)
                 // An 18% grey card prints as 18% grey at any push: the lab prints a pushed roll back.
                 XCTAssertEqual(px[1], 0.18, accuracy: 0.045, "\(st.id) push \(push) mid grey")
                 for c in 0..<3 {
@@ -75,7 +74,6 @@ final class FilmLabTests: XCTestCase {
         ctx.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 4, y: 4, width: 1, height: 1), format: .RGBAf, colorSpace: lin)
         let i = (16 * 33 * 33 + 16 * 33 + 16) * 4
         let want = t.film.withUnsafeBytes { Array($0.bindMemory(to: Float.self)[i..<(i + 3)]) }
-        print("CUBE got", px, "want", want)
         XCTAssertEqual(px[1], want[1], accuracy: 0.02)
     }
 

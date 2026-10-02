@@ -162,11 +162,11 @@ enum FilmLab {
             guard r > 0.3 else { return i }
             return i.clampedToExtent().applyingGaussianBlur(sigma: Double(r)).cropped(to: full)
         }
-        func scale(_ i: CIImage, _ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> CIImage {
+        func scale(_ i: CIImage, _ r: CGFloat, _ g: CGFloat, _ b: CGFloat, alpha: CGFloat = 1) -> CIImage {
             let m = CIFilter.colorMatrix()
             m.inputImage = i
             m.rVector = CIVector(x: r, y: 0, z: 0, w: 0); m.gVector = CIVector(x: 0, y: g, z: 0, w: 0)
-            m.bVector = CIVector(x: 0, y: 0, z: b, w: 0); m.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+            m.bVector = CIVector(x: 0, y: 0, z: b, w: 0); m.aVector = CIVector(x: 0, y: 0, z: 0, w: alpha)
             return (m.outputImage ?? i).cropped(to: full)
         }
         // Exposure: a push is shot at a faster speed, so the negative gets less light.
@@ -180,7 +180,9 @@ enum FilmLab {
         img = (mix.outputImage ?? img).cropped(to: full)
         trace?("scattered", img)
         let h = CGFloat(stock.halation)
-        let halo = scale(blur(img, Fit.halationUM), Fit.halationR * h, Fit.halationG * h, 0)
+        // The halo is light only: it carries no alpha, or adding it would double the alpha and
+        // Core Image would halve every colour un-premultiplying it (a stop of lost exposure).
+        let halo = scale(blur(img, Fit.halationUM), Fit.halationR * h, Fit.halationG * h, 0, alpha: 0)
         img = halo.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: img]).cropped(to: full)
         trace?("halation", img)
         // Into the tables' code space: sRGB-encoded, 0…1.
