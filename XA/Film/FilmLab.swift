@@ -171,14 +171,18 @@ enum FilmLab {
         }
         // Exposure: a push is shot at a faster speed, so the negative gets less light.
         let gain = CGFloat(pow(2, t.ev - Double(push)))
+        trace?("input", img)
         img = scale(img, gain, gain, gain)
+        trace?("exposed", img)
         // Light spreading in the emulsion, then the red halo from the film base.
         let mix = CIFilter.dissolveTransition()
         mix.inputImage = img; mix.targetImage = blur(img, Fit.scatterUM); mix.time = Fit.scatterWeight
         img = (mix.outputImage ?? img).cropped(to: full)
+        trace?("scattered", img)
         let h = CGFloat(stock.halation)
         let halo = scale(blur(img, Fit.halationUM), Fit.halationR * h, Fit.halationG * h, 0)
         img = halo.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: img]).cropped(to: full)
+        trace?("halation", img)
         // Into the tables' code space: sRGB-encoded, 0…1.
         img = img.applyingFilter("CILinearToSRGBToneCurve")
         img = img.applyingFilter("CIColorClamp", parameters: ["inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 1),
