@@ -20,7 +20,7 @@ struct ModeRibbon: View {
     var modes: [CaptureMode]
     /// How far a finger has dragged the deck sideways right now: the ribbon follows it, and the
     /// name under the dot is where you land when you let go.
-    var drag: CGFloat = 0
+    @Binding var drag: CGFloat
     static let pitch: CGFloat = 74
     private var pitch: CGFloat { Self.pitch }
 
@@ -30,21 +30,28 @@ struct ModeRibbon: View {
         ZStack {
             ForEach(Array(modes.enumerated()), id: \.element) { k, m in
                 let on = target == m
-                Button { ModeRibbon.set(m, camera) } label: {
-                    Text(m.title).font(XA.display(13)).tracking(0.6)
-                        .foregroundStyle(on ? m.lamp : Color.white.opacity(camera.recording ? 0.25 : 0.55))
-                        .frame(width: 70, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(camera.recording)
-                .offset(x: (CGFloat(k) - i) * pitch)
+                Text(m.title).font(XA.display(13)).tracking(0.6)
+                    .foregroundStyle(on ? m.lamp : Color.white.opacity(camera.recording ? 0.25 : 0.55))
+                    .frame(width: 70, height: 22)
+                    .contentShape(Rectangle())
+                    .onTapGesture { ModeRibbon.set(m, camera) }
+                    .accessibilityAddTraits(.isButton)
+                    .offset(x: (CGFloat(k) - i) * pitch)
             }
             Circle().fill(target.lamp).frame(width: 5, height: 5).offset(y: 14)
         }
         .onChange(of: target) { _, _ in UISelectionFeedbackGenerator().selectionChanged() }
-        .frame(maxWidth: .infinity).frame(height: 30)
+        .frame(maxWidth: .infinity).frame(height: 44)
         .clipped()
+        .contentShape(Rectangle())
+        // Slide along the names, as in the iPhone camera: the ribbon follows the finger and you
+        // land on the name under the dot.
+        .highPriorityGesture(DragGesture(minimumDistance: 3)
+            .onChanged { v in if !camera.recording { drag = v.translation.width } }
+            .onEnded { v in
+                if !camera.recording { ModeRibbon.land(drag: v.translation.width, modes, camera) }
+                withAnimation(.snappy(duration: 0.28)) { drag = 0 }
+            })
         .animation(.snappy(duration: 0.28), value: camera.mode)
         .accessibilityElement(children: .contain)
     }

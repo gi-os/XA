@@ -69,7 +69,7 @@ extension Booth {
     /// Who is a person and who is the wall, from the iPhone's person segmentation.
     static func personMask(_ img: CIImage, preview: Bool) -> CIImage? {
         let req = VNGeneratePersonSegmentationRequest()
-        req.qualityLevel = preview ? .fast : .accurate
+        req.qualityLevel = preview ? .balanced : .accurate
         req.outputPixelFormat = kCVPixelFormatType_OneComponent8
         let handler = VNImageRequestHandler(ciImage: img, options: [:])
         guard (try? handler.perform([req])) != nil, let pb = req.results?.first?.pixelBuffer else { return nil }
@@ -77,11 +77,24 @@ extension Booth {
         let e = img.extent
         let sx = e.width / max(m.extent.width, 1), sy = e.height / max(m.extent.height, 1)
         let scaled = m.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
-        // A soft cut, like the machine's.
+        let short = min(e.width, e.height)
+        // Generous: anything the model half thinks is you (hair, shoulders, a hand) counts as you,
+        // and the cut is grown a little past your edge, so the backdrop never bites into you.
+        let boost = CIFilter.colorMatrix()
+        boost.inputImage = scaled
+        boost.rVector = CIVector(x: 2.2, y: 0, z: 0, w: 0)
+        boost.gVector = CIVector(x: 0, y: 2.2, z: 0, w: 0)
+        boost.bVector = CIVector(x: 0, y: 0, z: 2.2, w: 0)
+        let grow = CIFilter.morphologyMaximum()
+        grow.inputImage = (boost.outputImage ?? scaled).clampedToExtent()
+        grow.radius = Float(short * 0.012)
+        // A soft edge, like the machine's.
         let blur = CIFilter.gaussianBlur()
-        blur.inputImage = scaled.clampedToExtent()
-        blur.radius = Float(min(e.width, e.height) * 0.003)
-        return (blur.outputImage ?? scaled).cropped(to: e)
+        blur.inputImage = (grow.outputImage ?? scaled).clampedToExtent()
+        blur.radius = Float(short * 0.006)
+        let clamp = CIFilter.colorClamp()
+        clamp.inputImage = (blur.outputImage ?? scaled).cropped(to: e)
+        return clamp.outputImage?.cropped(to: e)
     }
 }
 

@@ -398,10 +398,12 @@ final class CameraModel: NSObject, ObservableObject {
         // The viewfinder stays upright for the portrait UI; the photograph turns with the phone.
         let portrait: CGFloat = 90
         if let c = videoOutput.connection(with: .video) {
+            // The connection never mirrors: with the selfie camera, mirror and turn together came
+            // out upside down. XA turns and mirrors the frames itself (see `upright`).
+            if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = false }
             let a = c.isVideoRotationAngleSupported(portrait) ? portrait : rc.videoRotationAngleForHorizonLevelCapture
             if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
             previewAngle = a
-            if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = frontFlag }
         }
         angleObservation = rc.observe(\.videoRotationAngleForHorizonLevelCapture, options: [.initial, .new]) { [weak self] rc, _ in
             guard let self else { return }
@@ -416,6 +418,19 @@ final class CameraModel: NSObject, ObservableObject {
     private var turn: CGFloat { lock.lock(); defer { lock.unlock() }; return frontFlag ? 0 : _turn }
 
     /// Turn a frame clockwise by a multiple of 90°, keeping it at the origin.
+    /// A viewfinder frame or a selfie made portrait and, for the selfie camera, mirrored the way
+    /// a mirror shows you. If the connection didn't turn the frame (it came in landscape), XA turns
+    /// it a quarter clockwise itself.
+    static func upright(_ img: CIImage, mirror: Bool) -> CIImage {
+        var out = img
+        if out.extent.width > out.extent.height { out = rotated(out, clockwise: 90) }
+        if mirror {
+            let w = out.extent.width
+            out = out.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: w + out.extent.minX * 2, ty: 0))
+        }
+        return out
+    }
+
     static func rotated(_ img: CIImage, clockwise deg: CGFloat) -> CIImage {
         guard deg != 0 else { return img }
         let r = img.transformed(by: CGAffineTransform(rotationAngle: -deg * .pi / 180))
@@ -817,7 +832,7 @@ final class CameraModel: NSObject, ObservableObject {
         var (_, dev) = frameState()
         if let booth { dev.deco = settings.boothDeco.step(booth.index) }
         let id = settingsP.uniqueID
-        pending[id] = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date(), zero: zero, pressed: pressed, booth: booth)
+        pending[id] = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date(), zero: zero, pressed: pressed, booth: booth, front: front)
         let instant = settings.flash == .off && !zero && photoOutput.isZeroShutterLagEnabled
         if instant {
             answered.insert(id)
@@ -838,9 +853,9 @@ final class CameraModel: NSObject, ObservableObject {
                     // The selfie camera is shot exactly as the viewfinder shows it: upright and
                     // mirrored, the same turn and the same mirror as the frames. Its horizon
                     // angle came out upside down once mirrored.
+                    if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = false }
                     let a = self.previewAngle
                     if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
-                    if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = true }
                 } else {
                     if let rc {
                         let a = rc.videoRotationAngleForHorizonLevelCapture
@@ -898,7 +913,7 @@ final class CameraModel: NSObject, ObservableObject {
         preparePhotos()
     }
 
-    private struct Shot { let mode: CaptureMode; let develop: DevelopSettings; let crunch: Double; let date: Date; var zero = false; var pressed: Double = 0; var booth: (session: Int, index: Int)? = nil }
+    private struct Shot { let mode: CaptureMode; let develop: DevelopSettings; let crunch: Double; let date: Date; var zero = false; var pressed: Double = 0; var booth: (session: Int, index: Int)? = nil; var front = false }
     private var pending: [Int64: Shot] = [:]
     /// Shots whose system click was dropped, so XA plays its own when the picture is really taken.
     private var quietShots: Set<Int64> = []
@@ -920,6 +935,8 @@ final class CameraModel: NSObject, ObservableObject {
                 raw.extendedDynamicRangeAmount = 0
                 if let o = raw.outputImage { src = o; demo = DigicamFX.Conditions(properties: fileProps) }
             }
+            // The selfie camera: upright and mirrored, as the viewfinder showed it.
+            if shot.front && shot.mode != .pro { src = Self.upright(src, mirror: true) }
             var out: Data?
             var type: UTType = .jpeg
             var thumbSource = src
@@ -1040,7 +1057,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         // Cleaned at the door: a sensor pixel below the legal video range decodes to NaN, and every
         // blur and resize downstream would spread it into a black square.
-        let raw = Sanitize.apply(CIImage(cvPixelBuffer: pb), floor: 0)
+        let raw = Self.upright(Sanitize.apply(CIImage(cvPixelBuffer: pb), floor: 0), mirror: frontFlag)
         let e = raw.extent
         let k: CGFloat = min(1, 1080 / max(e.width, 1))
         let src = raw.transformed(by: CGAffineTransform(scaleX: k, y: k))

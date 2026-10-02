@@ -40,7 +40,8 @@ struct LCDStrip: View {
         }
         // One screen in every mode: the bezel stays put and only what it shows changes. For
         // PRO it physically grows to the full panel, and shrinks back when you leave.
-        .animation(.spring(response: 0.42, dampingFraction: 0.86), value: camera.mode)
+        // Growing into PRO takes its time; going back is quick, so nothing hangs half-cut.
+        .animation(camera.mode == .pro ? .spring(response: 0.42, dampingFraction: 0.86) : .easeOut(duration: 0.2), value: camera.mode)
         .contentShape(Rectangle())
         .allowsHitTesting(true)
         // Slide along the strip to zoom, the way the system camera's zoom dial works:
@@ -73,7 +74,7 @@ struct LCDStrip: View {
                                                  removal: .opacity.animation(.linear(duration: 0.01).delay(0.3)))
     /// PRO's panel stays lit while the screen shrinks around it, then goes out.
     static let proSwap: AnyTransition = .asymmetric(insertion: .identity,
-                                                    removal: .opacity.animation(.linear(duration: 0.01).delay(0.42)))
+                                                    removal: .opacity.animation(.easeIn(duration: 0.12)))
 }
 
 // MARK: panels

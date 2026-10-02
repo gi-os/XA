@@ -59,7 +59,7 @@ struct CameraView: View {
                 }
                 ShutterRow(camera: camera, settings: settings, onRoll: onRoll)
                 // Under the shutter, in the space the home bar leaves: the viewfinder keeps the room.
-                ModeRibbon(camera: camera, modes: modes, drag: ribbonDrag)
+                ModeRibbon(camera: camera, modes: modes, drag: $ribbonDrag)
             }
             .animation(.snappy(duration: 0.3), value: camera.mode)
             .contentShape(Rectangle())
@@ -112,8 +112,9 @@ struct CameraView: View {
     }
 
     /// PRO's keys open out of the screen as it grows, in the same motion, and fold back into it.
-    static let expand: AnyTransition = .modifier(active: Unfold(k: 0), identity: Unfold(k: 1))
-        .animation(.spring(response: 0.42, dampingFraction: 0.86))
+    static let expand: AnyTransition = .asymmetric(
+        insertion: .modifier(active: Unfold(k: 0), identity: Unfold(k: 1)).animation(.spring(response: 0.42, dampingFraction: 0.86)),
+        removal: .modifier(active: Unfold(k: 0), identity: Unfold(k: 1)).animation(.easeOut(duration: 0.2)))
 
     /// Mode rows: the old one drops away, the new one rises in after it.
     static let rows: AnyTransition = .asymmetric(
