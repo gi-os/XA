@@ -76,6 +76,12 @@ struct CustomizeView: View {
                         NavigationLink { DateScreen(settings: settings, camera: camera, film: true) } label: {
                             row("Date back", "\(settings.filmDate.style.title.capitalized) · \(Self.placement(settings.filmDate))", accent: true)
                         }
+                        Text("FILM").font(XA.display(11)).foregroundStyle(XA.faint).padding(.top, 4)
+                        FlatSlider(label: "Halation", value: $settings.filmRecipe.halation, range: 0...2, format: { "\(Int(($0 * 100).rounded()))" })
+                        FlatSlider(label: "Grain", value: $settings.filmRecipe.grain, range: 0...2, format: { "\(Int(($0 * 100).rounded()))" })
+                        FlatSlider(label: "Glare", value: $settings.filmRecipe.glare, range: 0...2, format: { "\(Int(($0 * 100).rounded()))" })
+                        Text("100 is the film as measured. Halation bounces three times off the film base and gets the highlights the phone clipped back; grain comes in three layers, blue the coarsest, with coarse fast grains in the shadows; glare is stray light in the camera and on the print.")
+                            .font(.system(size: 12)).foregroundStyle(XA.faint)
                         Text("CAMERA").font(XA.display(11)).foregroundStyle(XA.faint).padding(.top, 4)
                         FlatSlider(label: "Cheap lens", value: $settings.filmRecipe.lens, format: { "\(Int(($0 * 100).rounded()))" })
                         FlatSlider(label: "Flash falloff", value: $settings.filmRecipe.flash, format: { "\(Int(($0 * 100).rounded()))" })

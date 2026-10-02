@@ -70,6 +70,31 @@ struct FilmRecipe: Codable, Equatable {
     var tint: Double = 0
     /// Preflashing the paper: softer, lower-contrast highlights.
     var preflash: Double = 0
+    /// The film's own physics, 1 = as measured: light bouncing back off the base, the grain, and
+    /// stray light in the camera and on the print.
+    var halation: Double = 1
+    var grain: Double = 1
+    var glare: Double = 1
+
+    init() {}
+
+    // Settings saved before a field existed still load, with that field at its default.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = FilmRecipe()
+        lens = try c.decodeIfPresent(Double.self, forKey: .lens) ?? d.lens
+        flash = try c.decodeIfPresent(Double.self, forKey: .flash) ?? d.flash
+        leak = try c.decodeIfPresent(Double.self, forKey: .leak) ?? d.leak
+        mist = try c.decodeIfPresent(Double.self, forKey: .mist) ?? d.mist
+        format = try c.decodeIfPresent(FilmFormat.self, forKey: .format) ?? d.format
+        scan = try c.decodeIfPresent(FilmScan.self, forKey: .scan) ?? d.scan
+        warmth = try c.decodeIfPresent(Double.self, forKey: .warmth) ?? d.warmth
+        tint = try c.decodeIfPresent(Double.self, forKey: .tint) ?? d.tint
+        preflash = try c.decodeIfPresent(Double.self, forKey: .preflash) ?? d.preflash
+        halation = try c.decodeIfPresent(Double.self, forKey: .halation) ?? d.halation
+        grain = try c.decodeIfPresent(Double.self, forKey: .grain) ?? d.grain
+        glare = try c.decodeIfPresent(Double.self, forKey: .glare) ?? d.glare
+    }
 }
 
 /// One roll's settings as FilmLab needs them for one frame.

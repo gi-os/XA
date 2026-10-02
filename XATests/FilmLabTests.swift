@@ -134,4 +134,24 @@ final class FilmLabTests: XCTestCase {
         CIContext().render(w, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 300, y: 200, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
         XCTAssertGreaterThan(px[0], px[2])
     }
+
+    func testHalationGrainAndGlareScaleWithTheRecipe() {
+        // A bright lamp in the dark: more halation, more red around it.
+        let r = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let dark = CIImage(color: CIColor(red: 0.01, green: 0.01, blue: 0.01)).cropped(to: r)
+        let lamp = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: CGRect(x: 190, y: 140, width: 20, height: 20))
+        let scene = lamp.composited(over: dark)
+        func red(_ h: Double) -> Float {
+            var rec = FilmRecipe(); rec.lens = 0; rec.flash = 0; rec.leak = 0; rec.halation = h; rec.grain = 0; rec.glare = 0
+            let out = FilmLab.develop(scene, stock: FilmStock.all[0], push: 0, preview: false, seed: 1, shot: FilmShot(recipe: rec))
+            var px = [Float](repeating: 0, count: 4)
+            CIContext().render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 236, y: 150, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+            XCTAssertTrue(px.allSatisfy { $0.isFinite })
+            return px[0]
+        }
+        XCTAssertGreaterThan(red(2), red(0))
+        let old = try? JSONDecoder().decode(FilmRecipe.self, from: Data(#"{"lens":0.2}"#.utf8))
+        XCTAssertEqual(old?.lens, 0.2)
+        XCTAssertEqual(old?.grain, 1)
+    }
 }

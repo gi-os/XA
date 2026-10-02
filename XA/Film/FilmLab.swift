@@ -144,15 +144,34 @@ enum FilmLab {
         return addLightKernel?.apply(extent: e, arguments: [a, b]) ?? a
     }
 
+    /// What the sensor clipped, given back: the brightest parts pushed up to the light they
+    /// really were, so a lamp or a window throws a halo the way it does on film (spektrafilm's
+    /// highlight boost).
+    private static let boostKernel = CIColorKernel(source: """
+    kernel vec4 xaBoost(__sample c, float ev, float range) {
+        float m = max(c.r, max(c.g, c.b));
+        float t = smoothstep(1.0 - range, 1.0, m);
+        return vec4(c.rgb * exp2(ev * t), 1.0);
+    }
+    """)
+
     private static let addLightKernel = CIColorKernel(source: """
     kernel vec4 xaAddLight(__sample a, __sample b) { return vec4(a.rgb + b.rgb, 1.0); }
     """)
 
+    /// Grain in three layers, as the film is built: red and green at the fitted clump size, the
+    /// blue layer twice as coarse (spektrafilm's particle_scale 1.6, 1.6, 3.2). Each layer has a
+    /// fast emulsion of bigger grains under its slow one, and the thin parts of the negative (the
+    /// shadows) are made mostly by the fast, coarse grains.
     private static let grainKernel = CIColorKernel(source: """
-    kernel vec4 xaGrain(__sample c, __sample n1, __sample n2, float rms, float chroma, float top, float norm, vec3 dmin, vec3 dmax) {
+    kernel vec4 xaGrain(__sample c, __sample a, __sample b, __sample cc, float rms, float chroma, float top, vec3 norm, vec3 dmin, vec3 dmax) {
         vec3 D = c.rgb * (dmax - dmin) + dmin;
-        vec3 n = (sqrt(1.0 - chroma) * (n1.r - 0.5) + sqrt(chroma) * (n2.rgb - vec3(0.5))) * norm;
+        float l = sqrt(1.0 - chroma);
+        float k = sqrt(chroma);
+        vec3 fine = vec3(l * (a.r - 0.5) + k * (a.g - 0.5) , l * (a.r - 0.5) + k * (a.b - 0.5), l * (b.r - 0.5) + k * (b.a - 0.5)) * vec3(norm.x, norm.x, norm.y);
+        vec3 coarse = vec3(l * (b.r - 0.5) + k * (b.g - 0.5), l * (b.r - 0.5) + k * (b.b - 0.5), l * (cc.r - 0.5) + k * (cc.a - 0.5)) * vec3(norm.y, norm.y, norm.z);
         vec3 d = max(D - dmin, vec3(0.02));
+        vec3 n = mix(fine, coarse, 0.6 * exp(-d / 0.35));
         vec3 q = d / top;
         vec3 amp = rms * sqrt(d) / (vec3(1.0) + q * q);
         D = D + n * amp;
@@ -190,17 +209,36 @@ enum FilmLab {
         trace?("input", img)
         // The camera: lens, flash, mist and leaks, as light on the scene before the film.
         if let shot { img = FilmCamera.apply(img, shot, um: um) }
+        let scene = img
         img = scale(img, gain, gain, gain)
+        let r = shot?.recipe
+        // Stray light in the camera: a few percent of the frame's light veils it, most where it
+        // is brightest (spektrafilm's film glare, 3%).
+        let filmGlare = CGFloat(0.03 * (r?.glare ?? 0))
+        if filmGlare > 0 { img = addLight(img, scale(veil(img, full), filmGlare, filmGlare, filmGlare)) }
         trace?("exposed", img)
         // Light spreading in the emulsion, then the red halo from the film base.
         let mix = CIFilter.dissolveTransition()
         mix.inputImage = img; mix.targetImage = blur(img, Fit.scatterUM); mix.time = Fit.scatterWeight
         img = (mix.outputImage ?? img).cropped(to: full)
         trace?("scattered", img)
-        let h = CGFloat(stock.halation)
+        let h = CGFloat(stock.halation * (r?.halation ?? 1))
         // The halo is light only. (Compositing it with CIAdditionCompositing doubled the alpha, and
         // Core Image then halved every colour un-premultiplying it: a stop of lost exposure.)
-        let halo = scale(blur(img, Fit.halationUM), Fit.halationR * h, Fit.halationG * h, 0)
+        // Light goes through the base, bounces off the back and comes back wider each time: three
+        // bounces, each half the last and √k as wide (spektrafilm's n_bounces 3, decay 0.5), from
+        // the scene with its clipped highlights given back.
+        var source = scale(scene, gain, gain, gain)
+        if r != nil, let k = boostKernel, let b = k.apply(extent: full, arguments: [scene, 1.5, 0.3]) { source = scale(b, gain, gain, gain) }
+        var bounced = scale(blur(source, Fit.halationUM), 4.0 / 7, 4.0 / 7, 4.0 / 7)
+        if r != nil {
+            for (k, w) in [(2.0, 2.0 / 7), (3.0, 1.0 / 7)] {
+                bounced = addLight(bounced, scale(blur(source, Fit.halationUM * CGFloat(k.squareRoot())), w, w, w))
+            }
+        } else {
+            bounced = blur(source, Fit.halationUM)
+        }
+        let halo = scale(bounced, Fit.halationR * h, Fit.halationG * h, 0)
         if let k = addLightKernel, let lit = k.apply(extent: full, arguments: [img, halo]) { img = lit }
         trace?("halation", img)
         // Into the tables' code space: sRGB-encoded, 0…1.
@@ -224,14 +262,18 @@ enum FilmLab {
         if let g = grainKernel, let rnd = CIFilter.randomGenerator().outputImage {
             let clump = max(0.35, Fit.grainClumpUM / um / 2.355)
             let shift = CGFloat(seed % 9973) * 37
-            let n1 = rnd.transformed(by: CGAffineTransform(translationX: shift, y: shift * 0.7)).cropped(to: full)
-                .clampedToExtent().applyingGaussianBlur(sigma: Double(clump)).cropped(to: full)
-            let n2 = rnd.transformed(by: CGAffineTransform(translationX: -shift * 1.3 - 5000, y: shift + 3000)).cropped(to: full)
-                .clampedToExtent().applyingGaussianBlur(sigma: Double(clump)).cropped(to: full)
+            func noise(_ dx: CGFloat, _ dy: CGFloat, _ sigma: CGFloat) -> CIImage {
+                rnd.transformed(by: CGAffineTransform(translationX: dx, y: dy)).cropped(to: full)
+                    .clampedToExtent().applyingGaussianBlur(sigma: Double(sigma)).cropped(to: full)
+            }
+            let a = noise(shift, shift * 0.7, clump)
+            let b = noise(-shift * 1.3 - 5000, shift + 3000, clump * 2)
+            let c = noise(shift * 0.6 + 9000, -shift - 7000, clump * 4)
             // Uniform noise has a spread of 0.289; a blur of `clump` pixels averages it down.
-            let norm = Float(max(1, 2 * clump * sqrt(.pi)) / 0.2887)
-            let rms = Float(stock.grain * max(0.5, 1 + 0.3 * Double(push)))
-            if let out = g.apply(extent: full, arguments: [img, n1, n2, rms, Fit.grainChroma, Fit.grainTop, norm, t.dmin, t.dmax]) {
+            func norm(_ s: CGFloat) -> CGFloat { max(1, 2 * s * sqrt(.pi)) / 0.2887 }
+            let rms = Float(stock.grain * (r?.grain ?? 1) * max(0.5, 1 + 0.3 * Double(push)))
+            let norms = CIVector(x: norm(clump), y: norm(clump * 2), z: norm(clump * 4))
+            if let out = g.apply(extent: full, arguments: [img, a, b, c, rms, Fit.grainChroma, Fit.grainTop, norms, t.dmin, t.dmax]) {
                 img = out
             }
         }
@@ -241,6 +283,11 @@ enum FilmLab {
         img = cube(img, t.print, t.size, full)
         trace?("print", img)
         img = img.applyingFilter("CISRGBToneCurveToLinear")
+        // Flare on the print: a little of its light lifts its deepest blacks.
+        let printGlare = CGFloat(0.012 * (r?.glare ?? 0))
+        if printGlare > 0 {
+            img = addLight(scale(img, 1 - printGlare, 1 - printGlare, 1 - printGlare), scale(veil(img, full), printGlare, printGlare, printGlare))
+        }
         // The lab scanner's sharpening.
         if !preview || um < 40 {
             let us = CIFilter.unsharpMask()
@@ -248,6 +295,14 @@ enum FilmLab {
             img = (us.outputImage ?? img).cropped(to: full)
         }
         return Sanitize.apply(img, floor: 0).transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY))
+    }
+
+    /// The light of the whole frame, spread wide: what a veiling glare adds.
+    static func veil(_ i: CIImage, _ full: CGRect) -> CIImage {
+        let k: CGFloat = 64 / max(full.width, full.height, 1)
+        let small = i.transformed(by: CGAffineTransform(scaleX: k, y: k))
+        let b = small.clampedToExtent().applyingGaussianBlur(sigma: 9).cropped(to: small.extent)
+        return b.clampedToExtent().samplingLinear().transformed(by: CGAffineTransform(scaleX: 1 / k, y: 1 / k)).cropped(to: full)
     }
 
     /// Print filter density per printing light. Warmer: less density on the blue printing light
