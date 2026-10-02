@@ -362,6 +362,8 @@ enum DateBack {
         switch style {
         case .dots: return max(1.5, short / 175 * scale) * 7
         case .quartz: return max(0.7, long / 720 * scale) * 13
+        // The camcorder and digicam overlays were big, chunky on-screen text.
+        case .camcorder, .lcd: return long / 34 * scale * 1.1
         default: return long / 34 * scale * 0.72
         }
     }

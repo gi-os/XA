@@ -166,7 +166,7 @@ enum Darkroom {
                 img = img.cropped(to: img.extent.integral)
             }
         }
-        var shot = FilmShot(recipe: r, flashFired: flashFired, seed: Int(date.timeIntervalSince1970 * 1000) % 100_000)
+        var shot = FilmShot(recipe: r, flashFired: flashFired, seed: Int(date.timeIntervalSince1970 * 1000))
         // A leak is a surprise on the print, never in the finder.
         if preview { shot.recipe.leak = 0 }
         let sim = FilmCatalog.sim(s.stack.simID)
@@ -174,8 +174,19 @@ enum Darkroom {
             img = SimEngine.apply(sim, to: img, preview: preview, push: s.stack.push, seed: preview ? nil : shot.seed, shot: shot)
         }
         if preview && frame != img.extent {
-            // The finder is the frame's shape and fills with the picture: show it the format's crop.
-            img = img.cropped(to: frame).transformed(by: CGAffineTransform(translationX: -frame.minX, y: -frame.minY))
+            // Bright-line finder: the whole picture stays, what falls outside the format is
+            // shaded, with a thin line on the frame's edge.
+            let e = img.extent
+            let shade = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.5)).cropped(to: e)
+            let line = max(1, min(e.width, e.height) / 360)
+            let outer = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 0.55)).cropped(to: frame.insetBy(dx: -line, dy: -line))
+            let hole = CIImage(color: .white).cropped(to: frame)
+            let lineMask = hole.composited(over: CIImage(color: .black).cropped(to: e))
+            let b = CIFilter.blendWithMask()
+            b.inputImage = CIImage(color: .clear).cropped(to: e)
+            b.backgroundImage = outer.composited(over: shade)
+            b.maskImage = lineMask
+            if let m = b.outputImage { img = m.cropped(to: e).composited(over: img) }
         }
         return stamp(img, s, date: date, dateShift: dateShift, mono: sim?.mono ?? false)
     }

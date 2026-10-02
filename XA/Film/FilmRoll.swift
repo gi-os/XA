@@ -191,12 +191,41 @@ enum FilmCamera {
         return mix3(img, 1 - kh - kc, core, kc, halo, kh, e)
     }
 
-    /// Light getting past the back door: warm white flooding in from one edge, as light, so the
-    /// film burns it orange and red the way it really does.
+    /// Light getting past the back door, and never the same twice. Each one is a different
+    /// kind of leak (a glow off one edge, a band across the frame from the film advance, a burnt
+    /// corner, or two at once), from a random place, in a random color of light, as light, so
+    /// the film turns it the oranges, reds and magentas real leaks come out as.
     static func leak(_ img: CIImage, amount a: Double, rng: inout SeededRandom) -> CIImage {
         let e = img.extent
+        var out = img
+        let kind = Int(rng.next() * 4)
+        let count = kind == 3 ? 2 : 1
+        for _ in 0..<count {
+            let light: CIImage?
+            switch kind == 3 ? Int(rng.next() * 3) : kind {
+            case 1: light = band(e, a, &rng)
+            case 2: light = corner(e, a, &rng)
+            default: light = edgeGlow(e, a, &rng)
+            }
+            if let light { out = FilmLab.addLight(out, light) }
+        }
+        return out
+    }
+
+    /// The color of the leaking light: mostly warm, sometimes pink-red, sometimes nearly white.
+    private static func leakColor(_ s: CGFloat, _ rng: inout SeededRandom) -> CIColor {
+        let pick = rng.next()
+        let (g, b): (CGFloat, CGFloat)
+        if pick < 0.45 { (g, b) = (0.55 + 0.15 * CGFloat(rng.next()), 0.22) }        // orange
+        else if pick < 0.7 { (g, b) = (0.25, 0.32 + 0.2 * CGFloat(rng.next())) }   // pink, magenta
+        else if pick < 0.88 { (g, b) = (0.8, 0.35) }                               // yellow
+        else { (g, b) = (0.9, 0.8) }                                               // almost white
+        return CIColor(red: s, green: s * g, blue: s * b)
+    }
+
+    private static func edgeGlow(_ e: CGRect, _ a: Double, _ rng: inout SeededRandom) -> CIImage? {
         let side = Int(rng.next() * 4)
-        let along = rng.next()
+        let along = CGFloat(rng.next())
         let p: CGPoint
         switch side {
         case 0: p = CGPoint(x: e.minX, y: e.minY + e.height * along)
@@ -207,12 +236,59 @@ enum FilmCamera {
         let g = CIFilter.radialGradient()
         g.center = p
         g.radius0 = 0
-        g.radius1 = Float(min(e.width, e.height) * CGFloat(0.35 + 0.45 * rng.next()) * CGFloat(0.6 + 0.6 * a))
-        let s = CGFloat(1.2 + 2.5 * a)
-        g.color0 = CIColor(red: s, green: s * 0.62, blue: s * 0.3)
+        g.radius1 = Float(min(e.width, e.height) * CGFloat(0.3 + 0.6 * rng.next()) * CGFloat(0.6 + 0.6 * a))
+        g.color0 = leakColor(CGFloat(1 + 3 * a * (0.5 + rng.next())), &rng)
         g.color1 = CIColor(red: 0, green: 0, blue: 0)
-        guard let light = g.outputImage?.cropped(to: e) else { return img }
-        return FilmLab.addLight(img, light)
+        return g.outputImage?.cropped(to: e)
+    }
+
+    /// A soft band across the frame, the way a leak through the film gate fogs a strip.
+    private static func band(_ e: CGRect, _ a: Double, _ rng: inout SeededRandom) -> CIImage? {
+        let vertical = rng.next() < 0.6
+        let at = CGFloat(0.05 + 0.9 * rng.next())
+        let width = min(e.width, e.height) * CGFloat(0.08 + 0.25 * rng.next())
+        let c = leakColor(CGFloat(0.8 + 2.4 * a * (0.5 + rng.next())), &rng)
+        let center = vertical ? e.minX + e.width * at : e.minY + e.height * at
+        // A band is two gradients back to back, fading out on either side.
+        func ramp(_ from: CGFloat, _ to: CGFloat) -> CIImage? {
+            let g = CIFilter.linearGradient()
+            g.point0 = vertical ? CGPoint(x: from, y: e.midY) : CGPoint(x: e.midX, y: from)
+            g.point1 = vertical ? CGPoint(x: to, y: e.midY) : CGPoint(x: e.midX, y: to)
+            g.color0 = c
+            g.color1 = CIColor(red: 0, green: 0, blue: 0)
+            return g.outputImage
+        }
+        guard let lo = ramp(center, center - width), let hi = ramp(center, center + width) else { return nil }
+        let loR = vertical ? CGRect(x: e.minX, y: e.minY, width: center - e.minX, height: e.height) : CGRect(x: e.minX, y: e.minY, width: e.width, height: center - e.minY)
+        let hiR = vertical ? CGRect(x: center, y: e.minY, width: e.maxX - center, height: e.height) : CGRect(x: e.minX, y: center, width: e.width, height: e.maxY - center)
+        var light = hi.cropped(to: hiR).composited(over: lo.cropped(to: loR)).cropped(to: e)
+        // Stronger toward one end, as the light came in from one side.
+        let fade = CIFilter.linearGradient()
+        let end = rng.next() < 0.5
+        fade.point0 = vertical ? CGPoint(x: e.midX, y: end ? e.minY : e.maxY) : CGPoint(x: end ? e.minX : e.maxX, y: e.midY)
+        fade.point1 = vertical ? CGPoint(x: e.midX, y: end ? e.maxY : e.minY) : CGPoint(x: end ? e.maxX : e.minX, y: e.midY)
+        fade.color0 = CIColor(red: 1, green: 1, blue: 1)
+        let f = CGFloat(0.2 + 0.4 * rng.next())
+        fade.color1 = CIColor(red: f, green: f, blue: f)
+        if let m = fade.outputImage {
+            let mul = CIFilter.multiplyCompositing()
+            mul.inputImage = light
+            mul.backgroundImage = m.cropped(to: e)
+            light = (mul.outputImage ?? light).cropped(to: e)
+        }
+        return light
+    }
+
+    /// A burnt corner: the light floods one corner hard.
+    private static func corner(_ e: CGRect, _ a: Double, _ rng: inout SeededRandom) -> CIImage? {
+        let cx = rng.next() < 0.5 ? e.minX : e.maxX, cy = rng.next() < 0.5 ? e.minY : e.maxY
+        let g = CIFilter.radialGradient()
+        g.center = CGPoint(x: cx, y: cy)
+        g.radius0 = Float(min(e.width, e.height) * 0.05)
+        g.radius1 = Float(min(e.width, e.height) * CGFloat(0.4 + 0.5 * rng.next()))
+        g.color0 = leakColor(CGFloat(2 + 4 * a), &rng)
+        g.color1 = CIColor(red: 0, green: 0, blue: 0)
+        return g.outputImage?.cropped(to: e)
     }
 
     private static func mix3(_ a: CIImage, _ ka: CGFloat, _ b: CIImage, _ kb: CGFloat, _ c: CIImage, _ kc: CGFloat, _ e: CGRect) -> CIImage {
@@ -230,9 +306,14 @@ enum FilmCamera {
 /// A small fixed random sequence: a photo keeps its leak.
 struct SeededRandom {
     private var s: UInt64
-    init(_ seed: Int) { s = UInt64(truncatingIfNeeded: seed) &* 6364136223846793005 &+ 1442695040888963407 }
+    init(_ seed: Int) { s = UInt64(truncatingIfNeeded: seed) }
+    /// SplitMix64: neighbouring seeds give unrelated sequences.
     mutating func next() -> Double {
-        s = s &* 6364136223846793005 &+ 1442695040888963407
-        return Double((s >> 33) % 1_000_000) / 1_000_000
+        s = s &+ 0x9E3779B97F4A7C15
+        var z = s
+        z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+        z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+        z = z ^ (z >> 31)
+        return Double(z >> 11) / Double(1 << 53)
     }
 }

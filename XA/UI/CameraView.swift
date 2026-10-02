@@ -166,11 +166,8 @@ struct CameraView: View {
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
-    /// The finder takes the shape of the frame: FILM's format (2:3 for 35mm, square for 120),
-    /// 3:4 otherwise. The picture fills it, so what is outside the format simply isn't there.
-    private var finderAspect: CGFloat {
-        camera.mode == .film ? settings.filmRecipe.format.aspect : 3 / 4
-    }
+    /// The finder is the same 3:4 window in every mode; FILM shows its format with frame lines.
+    private var finderAspect: CGFloat { 3 / 4 }
 
     @ViewBuilder private var viewfinder: some View {
         ZStack {
