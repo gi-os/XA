@@ -22,6 +22,9 @@ struct CustomizeView: View {
                                 .onChange(of: settings.digiZero) { _, _ in camera.zeroChanged() }
                             Text("Shoots RAW and develops it flat, with no Smart HDR, tone mapping or sharpening from the iPhone, so the film is the only look. Slower to save.")
                                 .font(.system(size: 12)).foregroundStyle(XA.faint)
+                            if !camera.lastTiming.isEmpty {
+                                Text("Last shot: \(camera.lastTiming)").font(.system(size: 12, design: .monospaced)).foregroundStyle(XA.faint)
+                            }
                             FlatSlider(label: "Save quality", value: $settings.crunch, range: 0.3...0.95, format: { "\(Int(($0 * 100).rounded()))" })
                             FlatSlider(label: "Sensor noise", value: $settings.noise, format: { "\(Int(($0 * 100).rounded()))" })
                             NavigationLink { DateScreen(settings: settings, camera: camera) } label: {

@@ -190,6 +190,7 @@ final class CameraModel: NSObject, ObservableObject {
             self.applyProOnQueue(m)
             if m == .video { self.addAudioIfNeeded() }
         }
+        preparePhotos()
         // Camera Control is rebuilt once the fade is over, so it cannot stall the feed during it.
         sessionQueue.asyncAfter(deadline: .now() + 0.7) {
             guard self.mode == m, let dev = self.device else { return }
@@ -248,6 +249,7 @@ final class CameraModel: NSObject, ObservableObject {
         applyRotation()
         session.startRunning()
         applyProOnQueue(m)
+        DispatchQueue.main.async { self.preparePhotos() }
     }
 
     private func setupPhotoOutput(_ dev: AVCaptureDevice, _ m: CaptureMode) {
@@ -715,11 +717,9 @@ final class CameraModel: NSObject, ObservableObject {
 
     // MARK: shooting
 
-    func shoot() {
-        guard authorized == true, input != nil else { return }
-        if mode == .video { toggleRecording(); return }
-        skipReview()
-        let m = mode
+    /// The settings for one shot in mode `m`. A fresh object every time (each has its own id);
+    /// the same recipe is handed to the output ahead of time so its buffers are ready.
+    private func photoSettings(_ m: CaptureMode) -> (AVCapturePhotoSettings, zero: Bool) {
         let settingsP: AVCapturePhotoSettings
         let zero = m == .digi && settings.digiZero && zeroFormat != nil
         if zero, let raw = zeroFormat {
@@ -736,18 +736,62 @@ final class CameraModel: NSObject, ObservableObject {
         if photoOutput.supportedFlashModes.contains(fm) { settingsP.flashMode = fm }
         // XA plays its own shutter; the system click is dropped where the law allows it.
         if settings.sounds && photoOutput.isShutterSoundSuppressionSupported { settingsP.isShutterSoundSuppressionEnabled = true }
-        if let c = photoOutput.connection(with: .video), let rc = rotation {
-            let a = rc.videoRotationAngleForHorizonLevelCapture
-            if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
+        return (settingsP, zero)
+    }
+
+    /// Warm the photo pipeline for the next shot, so the first press doesn't wait while the
+    /// camera allocates its buffers. Called when the session starts and whenever the recipe changes.
+    func preparePhotos() {
+        guard input != nil, mode != .video else { return }
+        let (template, _) = photoSettings(mode)
+        sessionQueue.async {
+            self.photoOutput.setPreparedPhotoSettingsArray([template]) { _, _ in }
         }
+    }
+
+    /// The shot is taken from the moment of the press. With zero shutter lag that is literally
+    /// true (the frame comes from the press), so the click, the blink and the review start right
+    /// away instead of when the camera reports back. With the flash or RAW the camera has to make
+    /// a new exposure, so those wait for it.
+    func shoot() {
+        guard authorized == true, input != nil else { return }
+        if mode == .video { toggleRecording(); return }
+        let pressed = CACurrentMediaTime()
+        skipReview()
+        let m = mode
+        let (settingsP, zero) = photoSettings(m)
         syncFrameSettings()
         let (_, dev) = frameState()
-        pending[settingsP.uniqueID] = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date(), zero: zero)
-        if settings.sounds && settingsP.isShutterSoundSuppressionEnabled { quietShots.insert(settingsP.uniqueID) }
-        photoOutput.capturePhoto(with: settingsP, delegate: self)
+        let id = settingsP.uniqueID
+        pending[id] = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date(), zero: zero, pressed: pressed)
+        let instant = settings.flash == .off && !zero && photoOutput.isZeroShutterLagEnabled
+        if instant {
+            answered.insert(id)
+            if settings.sounds { CameraSounds.shared.play(.shutter) }
+            if m == .digi && settings.instantReview { startReview() }
+            flash = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { self.flash = false }
+        } else if settings.sounds && settingsP.isShutterSoundSuppressionEnabled {
+            quietShots.insert(id)
+        }
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         developing += 1
+        let rc = rotation
+        // Off the main thread: whatever the screen is busy drawing can't hold the shot up.
+        sessionQueue.async {
+            if let c = self.photoOutput.connection(with: .video), let rc {
+                let a = rc.videoRotationAngleForHorizonLevelCapture
+                if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
+            }
+            self.photoOutput.capturePhoto(with: settingsP, delegate: self)
+        }
     }
+
+    /// How long the last shot took, for Customize: press → taken → photo → developed.
+    @Published private(set) var lastTiming = ""
+    private var timing: (taken: Double, photo: Double) = (0, 0)
+    /// Shots that already clicked and blinked at the press.
+    private var answered: Set<Int64> = []
 
     /// Zero shutter lag hands back a frame from the moment you pressed, which with the flash on
     /// is the frame from before it fired. So with the flash on (or auto) the fast paths go off
@@ -768,6 +812,7 @@ final class CameraModel: NSObject, ObservableObject {
             self.photoOutput.isAppleProRAWEnabled = on
             self.session.commitConfiguration()
         }
+        preparePhotos()
     }
 
     /// The RAW format ZERO shoots: Apple ProRAW where there is one, else the sensor's Bayer RAW.
@@ -784,9 +829,10 @@ final class CameraModel: NSObject, ObservableObject {
             self.applyCapturePolicy(flash: on)
             self.session.commitConfiguration()
         }
+        preparePhotos()
     }
 
-    private struct Shot { let mode: CaptureMode; let develop: DevelopSettings; let crunch: Double; let date: Date; var zero = false }
+    private struct Shot { let mode: CaptureMode; let develop: DevelopSettings; let crunch: Double; let date: Date; var zero = false; var pressed: Double = 0 }
     private var pending: [Int64: Shot] = [:]
     /// Shots whose system click was dropped, so XA plays its own when the picture is really taken.
     private var quietShots: Set<Int64> = []
@@ -835,7 +881,10 @@ final class CameraModel: NSObject, ObservableObject {
             let k: CGFloat = 200 / max(e.width, 1)
             let small = thumbSource.transformed(by: CGAffineTransform(scaleX: k, y: k))
             let thumb = Looks.context.createCGImage(small, from: small.extent)
+            let done = CACurrentMediaTime() - shot.pressed
             DispatchQueue.main.async {
+                func ms(_ t: Double) -> String { t < 1 ? "\(Int(t * 1000)) ms" : String(format: "%.1f s", t) }
+                self.lastTiming = "taken \(ms(self.timing.taken)) · photo \(ms(self.timing.photo)) · saved \(ms(done))"
                 if let thumb { self.lastShot = UIImage(cgImage: thumb) }
                 if let lib = self.library {
                     lib.save(data: out, type: type) { ok in
@@ -995,7 +1044,10 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
     /// and the screen blinks, so neither happens before the flash.
     func photoOutput(_ output: AVCapturePhotoOutput, willCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
         let id = resolvedSettings.uniqueID
+        let now = CACurrentMediaTime()
         DispatchQueue.main.async {
+            if let p = self.pending[id]?.pressed { self.timing.taken = now - p }
+            if self.answered.remove(id) != nil { return }
             if self.quietShots.remove(id) != nil { CameraSounds.shared.play(.shutter) }
             if self.pending[id]?.mode == .digi && self.settings.instantReview { self.startReview() }
             self.flash = true
@@ -1006,8 +1058,11 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         let id = photo.resolvedSettings.uniqueID
         let data = photo.fileDataRepresentation()
+        let now = CACurrentMediaTime()
         DispatchQueue.main.async {
             guard let shot = self.pending.removeValue(forKey: id) else { return }
+            self.timing.photo = now - shot.pressed
+            self.preparePhotos()
             guard error == nil, let data else { self.developing = max(0, self.developing - 1); return }
             self.develop(data, shot)
         }
