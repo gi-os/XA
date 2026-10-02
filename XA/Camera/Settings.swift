@@ -4,7 +4,7 @@ import Combine
 enum ProFormat: String, CaseIterable, Codable { case heif, jpeg }
 enum DigiSlide: String, CaseIterable, Codable { case sim, look }
 enum ProSlide: String, CaseIterable, Codable { case exposure, zoom }
-enum OpenIn: String, CaseIterable, Codable { case last, digi, pro }
+enum OpenIn: String, CaseIterable, Codable { case last, digi, film, pro }
 /// The flash. In DIGI a shot the flash lit gets the party-flash look.
 enum FlashSetting: String, CaseIterable, Codable {
     case off, auto, on

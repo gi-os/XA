@@ -2,16 +2,18 @@ import AVFoundation
 import CoreImage
 import CoreImage.CIFilterBuiltins
 
-/// Two cameras in one body.
+/// Cameras in one body.
 /// DIGI is a 2003 point-and-shoot: a small file, cheap processing, sims, looks, shapes, a date back.
+/// FILM is DIGI's twin for the film stocks: full size, no digicam crunch, only the stocks.
 /// PRO is the iPhone at its best: full resolution, full processing, saved untouched.
 enum CaptureMode: String, CaseIterable, Identifiable, Codable {
-    case digi, pro, video
+    case digi, film, pro, video
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .digi: return "DIGI"
+        case .film: return "FILM"
         case .pro: return "PRO"
         case .video: return "VIDEO"
         }
@@ -19,6 +21,9 @@ enum CaptureMode: String, CaseIterable, Identifiable, Codable {
 
     /// Whether the viewfinder runs through the darkroom (everything but PRO).
     var developed: Bool { self != .pro }
+
+    /// The two modes that shoot through a film box: DIGI's sims and FILM's stocks.
+    var usesFilm: Bool { self == .digi || self == .film }
 
     /// Largest photo asked of the sensor. DIGI reads out 12MP fast and shrinks it after.
     var maxSensorPixels: Int { self == .pro ? Int.max : 12_600_000 }

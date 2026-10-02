@@ -5,6 +5,7 @@ extension CaptureMode {
     var lamp: Color {
         switch self {
         case .digi: return Color(hex: "#FF8A2B")
+        case .film: return Color(hex: "#F2B33D")
         case .pro: return Color(hex: "#5BD3F0")
         case .video: return Color(hex: "#FF3B30")
         }

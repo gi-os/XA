@@ -64,7 +64,7 @@ enum Encoder {
         let out = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(out, type.identifier as CFString, 1, nil) else { return nil }
         var p = properties
-        if type == .jpeg { p[kCGImageDestinationLossyCompressionQuality as String] = quality }
+        if type == .jpeg || type == .heic { p[kCGImageDestinationLossyCompressionQuality as String] = quality }
         CGImageDestinationAddImage(dest, cg, p as CFDictionary)
         guard CGImageDestinationFinalize(dest) else { return nil }
         return out as Data

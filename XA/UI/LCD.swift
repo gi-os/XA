@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The small screen under the viewfinder. It is the one part of the camera that changes with
-/// the mode: a green dot-matrix LCD in DIGI, a blue backlit segment panel in PRO, an amber
-/// camcorder panel in VIDEO. Switching modes slides the old one out and powers the new one on.
+/// the mode: a VCR-blue menu screen in DIGI, a green dot-matrix LCD in FILM, a blue backlit
+/// segment panel in PRO, an amber camcorder panel in VIDEO. Switching modes slides the old one out and powers the new one on.
 struct LCDStrip: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
@@ -14,7 +14,8 @@ struct LCDStrip: View {
     var body: some View {
         ZStack {
             switch camera.mode {
-            case .digi: DigiLCD(camera: camera, settings: settings).transition(Self.swap)
+            case .digi: VcrLCD(camera: camera, settings: settings).transition(Self.swap)
+            case .film: FilmLCD(camera: camera, settings: settings).transition(Self.swap)
             case .pro: ProLCD(camera: camera, settings: settings, field: $proField).transition(Self.swap)
             case .video: VideoLCD(camera: camera).transition(Self.swap)
             }
@@ -102,24 +103,23 @@ private struct PixelGrid: View {
 
 // MARK: DIGI
 
-private struct DigiLCD: View {
+private struct FilmLCD: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
     private let ink = Color(hex: "#1B2216")
 
     var body: some View {
-        let film = ([camera.stack.filmTitle] + [camera.stack.look == .none ? nil : camera.stack.look.title, camera.stack.effectiveShape?.title].compactMap { $0 }).joined(separator: " + ")
         GreenPanel()
             .overlay {
                 HStack {
-                    dot(film, 14)
+                    dot(">" + camera.stack.filmTitle, 14)
                     Spacer(minLength: 8)
-                    if settings.digiZero { dot("ZERO", 14) }
-                    if settings.date.placement != .off { dot(Self.dateText(), 14) }
+                    if settings.digiZero { dot("RAW", 14) }
                 }
                 .padding(.horizontal, 10)
-                .modifier(ColdWake())
             }
+            // Powering on: the segments light from left to right.
+            .modifier(Wake(axis: .horizontal))
     }
 
     private func dot(_ s: String, _ size: CGFloat) -> some View {
@@ -131,6 +131,60 @@ private struct DigiLCD: View {
     static func dateText() -> String {
         let f = DateFormatter(); f.dateFormat = "''yy MM dd"
         return f.string(from: Date())
+    }
+}
+
+// MARK: DIGI
+
+/// A VCR's on-screen menu: flat royal blue, every item an off-white block with blocky blue
+/// capitals. Only what is true right now: the sim (and look), the size, the flash when it is
+/// on, the date when the date back is on.
+private struct VcrLCD: View {
+    @ObservedObject var camera: CameraModel
+    @ObservedObject var settings: AppSettings
+    static let blue = Color(hex: "#1D2FAE")
+
+    var body: some View {
+        let film = ([FilmCatalog.sim(camera.stack.simID)?.title ?? Sim.neutral.title] + [camera.stack.look == .none ? nil : camera.stack.look.title, camera.stack.effectiveShape?.title].compactMap { $0 }).joined(separator: "+")
+        Self.blue
+            .overlay(Rectangle().strokeBorder(Color(hex: "#4F8EE0"), lineWidth: 1))
+            .overlay {
+                HStack(spacing: 6) {
+                    chip(film)
+                    Spacer(minLength: 4)
+                    if settings.flash != .off { chip(settings.flash == .on ? "FLASH" : "AUTO") }
+                    if settings.date.placement != .off { chip(FilmLCD.dateText()) }
+                    chip("\(settings.digiMegapixels)MP")
+                }
+                .padding(.horizontal, 7)
+            }
+            // Powering on: the picture comes in line by line from the top, like a CRT.
+            .modifier(Wake(axis: .vertical))
+    }
+
+    private func chip(_ s: String) -> some View {
+        Text(s).font(.custom("Silkscreen-Regular", fixedSize: 12)).tracking(1.6).foregroundStyle(Self.blue)
+            .lineLimit(1).minimumScaleFactor(0.5)
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(Color(hex: "#ECEBE6"))
+    }
+}
+
+/// A display powering on: a mask sweeps across it, top to bottom or left to right.
+private struct Wake: ViewModifier {
+    enum Axis { case vertical, horizontal }
+    let axis: Axis
+    @State private var on = false
+    func body(content: Content) -> some View {
+        content
+            .mask(alignment: axis == .vertical ? .top : .leading) {
+                GeometryReader { g in
+                    Rectangle()
+                        .frame(width: axis == .horizontal ? (on ? g.size.width : 0) : g.size.width,
+                               height: axis == .vertical ? (on ? g.size.height : 0) : g.size.height)
+                }
+            }
+            .onAppear { withAnimation(.linear(duration: axis == .vertical ? 0.22 : 0.3).delay(0.18)) { on = true } }
     }
 }
 

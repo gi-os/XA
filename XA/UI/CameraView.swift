@@ -25,6 +25,10 @@ struct CameraView: View {
             viewfinder
                 .overlay { FocusTapLayer(camera: camera, filmOpen: $filmOpen) }
                 .onReceive(NotificationCenter.default.publisher(for: .xaBackToCamera)) { _ in filmOpen = false }
+                // DIGI prints its settings on the picture as plain text, like the camera did.
+                .overlay(alignment: .bottom) {
+                    if camera.mode == .digi { DigiOSD(camera: camera).allowsHitTesting(false).transition(.opacity) }
+                }
                 .contentShape(Rectangle())
                 .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded(swipe))
                 .simultaneousGesture(
@@ -38,7 +42,7 @@ struct CameraView: View {
             LCDStrip(camera: camera, settings: settings, proField: $proField)
             ZStack {
                 switch camera.mode {
-                case .digi:
+                case .digi, .film:
                     if filmOpen { FilmControls(camera: camera, open: $filmOpen, onFilm: onFilm).transition(Self.rows) }
                 case .video:
                     if filmOpen || camera.recording { VideoRows(camera: camera, open: $filmOpen, onFilm: onFilm).transition(Self.rows) }
@@ -81,11 +85,12 @@ struct CameraView: View {
             FannedTape(look: camera.videoLook) { withAnimation(.snappy) { filmOpen = true } }
                 .modifier(SwipeToStep { camera.stepTape($0) })
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
-        } else if camera.mode == .digi && !filmOpen {
+        } else if camera.mode.usesFilm && !filmOpen {
             FannedFilm(stack: camera.stack) { withAnimation(.snappy) { filmOpen = true } }
                 .rotationEffect(.degrees(tilt.angle))
                 .animation(.spring(response: 0.35, dampingFraction: 0.8), value: tilt.angle)
-                .modifier(SwipeToStep(step: { camera.stack.push = 0; camera.stepSim($0) }, vertical: { camera.stepPush($0) }))
+                .modifier(SwipeToStep(step: { camera.stack.push = 0; camera.stepSim($0) },
+                                      vertical: camera.mode == .film ? { camera.stepPush($0) } : nil))
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
         } else if camera.mode == .digi {
             MPMenu(camera: camera, settings: settings)
@@ -116,7 +121,8 @@ struct CameraView: View {
                 let i = all.firstIndex(of: camera.videoLook) ?? 0
                 camera.videoLook = all[((i + (dy < 0 ? 1 : -1)) % n + n) % n]
                 UISelectionFeedbackGenerator().selectionChanged()
-            } else { camera.stepLook(dy < 0 ? 1 : -1) }
+            } else if camera.mode == .film { camera.stepPush(dy < 0 ? 1 : -1) }
+            else { camera.stepLook(dy < 0 ? 1 : -1) }
         }
     }
 
@@ -187,14 +193,15 @@ private struct FilmControls: View {
                 }
                 .buttonStyle(.plain).foregroundStyle(.white)
                 .accessibilityLabel("See every film")
-                RowPicker(row: $row)
-                FilmStrip(camera: camera, row: row, onPick: poke)
+                if camera.mode == .digi { RowPicker(row: $row) }
+                FilmStrip(camera: camera, row: camera.mode == .film ? 0 : row, onPick: poke)
                     .id(row)
                     .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
             }
             .contentShape(Rectangle())
             .simultaneousGesture(DragGesture(minimumDistance: 16).onEnded { v in
                 guard abs(v.translation.height) > abs(v.translation.width), abs(v.translation.height) > 24 else { return }
+                guard camera.mode == .digi else { return }
                 withAnimation(.snappy) { row = min(2, max(0, row + (v.translation.height < 0 ? 1 : -1))) }
                 poke()
             })
@@ -265,7 +272,7 @@ struct FilmStrip: View {
                 HStack(spacing: 10) {
                     switch row {
                     case 0:
-                        ForEach(FilmCatalog.sims) { s in
+                        ForEach(FilmCatalog.sims(for: camera.mode)) { s in
                             let on = FilmCatalog.sim(camera.stack.simID)?.id == s.id
                             tile(.sim(on ? (camera.stack.shownSim ?? s) : s), on: on) {
                                 if !on { camera.stack.push = 0 }
@@ -621,4 +628,24 @@ final class DeviceTilt: ObservableObject {
 extension Notification.Name {
     /// The app went to the background: next time it opens, it opens on the camera.
     static let xaBackToCamera = Notification.Name("xaBackToCamera")
+}
+
+
+/// DIGI's settings printed on the finder: aperture, shutter and ISO as the camera reports them.
+private struct DigiOSD: View {
+    @ObservedObject var camera: CameraModel
+    var body: some View {
+        HStack {
+            Text("F\(String(format: "%.1f", camera.aperture)) \(Self.shutter(camera.meterShutter))")
+            Spacer()
+            Text("ISO \(Int(camera.meterISO.rounded()))")
+        }
+        .font(.custom("Silkscreen-Regular", fixedSize: 12))
+        .foregroundStyle(Color(hex: "#F4F4F0"))
+        .padding(.horizontal, 12).padding(.bottom, 10)
+    }
+    static func shutter(_ s: Double) -> String {
+        guard s > 0 else { return "" }
+        return s >= 0.5 ? String(format: "%.1f\"", s) : "1/\(Int((1 / s).rounded()))"
+    }
 }

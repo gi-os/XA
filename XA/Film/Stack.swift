@@ -48,6 +48,11 @@ enum FilmCatalog {
 
     static var sims: [Sim] { Sim.presets + custom }
 
+    /// What each mode can load: FILM only the stocks, DIGI everything else.
+    static func sims(for mode: CaptureMode) -> [Sim] {
+        mode == .film ? Sim.stocks : sims.filter { $0.stock == nil }
+    }
+
     /// No sim is Neutral: there is always a film loaded.
     static func sim(_ id: String?) -> Sim? {
         guard let id else { return Sim.neutral }
@@ -79,6 +84,8 @@ struct DevelopSettings {
     var noise: Double = 0.5
     var date = DateConfig()
     var recipe = DigiRecipe()
+    /// FILM: full size, the stock only, none of the digicam's processing.
+    var film = false
 }
 
 /// The darkroom: the same chain for the viewfinder and for the saved photograph.
@@ -91,12 +98,14 @@ enum Darkroom {
         // Read before any filter: the photo's EXIF says whether the flash fired and how dark it was.
         let conditions = demo ?? DigicamFX.Conditions(properties: src.properties)
         let src = Sanitize.apply(src)
-        var img = preview ? src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
-                          : Digicam.shrink(src, megapixels: s.megapixels)
+        var img = preview || s.film ? src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
+                                    : Digicam.shrink(src, megapixels: s.megapixels)
         let sim = FilmCatalog.sim(s.stack.simID)
         if let sim, !sim.isNeutral {
             img = SimEngine.apply(sim, to: img, preview: preview, push: s.stack.push, seed: preview ? nil : Int(date.timeIntervalSince1970 * 1000) % 100_000)
-        } else { img = Digicam.tone(img) }
+        } else if !s.film { img = Digicam.tone(img) }
+        // FILM stops here: the stock is the whole look, at full size.
+        if s.film { return (img, false) }
         if s.stack.look != .none {
             let w: CGFloat? = s.stack.look.pixelWidth != nil && !preview ? img.extent.width : nil
             img = Looks.apply(s.stack.look, to: img, outputWidth: w)
@@ -135,7 +144,8 @@ enum Darkroom {
 
 /// The line XA writes into a photo's metadata, so the roll can say how it was made.
 enum Recipe {
-    static func describe(_ s: Stack, megapixels: Int) -> String {
+    static func describe(_ s: Stack, megapixels: Int, film: Bool = false) -> String {
+        if film { return "XA FILM · \(s.filmTitle)" }
         var parts: [String] = []
         if let sim = FilmCatalog.sim(s.simID) { parts.append(sim.title) }
         if s.look != .none { parts.append(s.look.title) }

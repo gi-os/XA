@@ -130,14 +130,16 @@ final class CameraModel: NSObject, ObservableObject {
     init(settings: AppSettings) {
         self.settings = settings
         super.init()
-        if let s: Stack = AppSettings.load("stack") { stack = s }
+
         if let v = VideoLook(rawValue: UserDefaults.standard.integer(forKey: "videoLook")) { videoLook = v; frameVideoLook = v }
         let last = CaptureMode(rawValue: UserDefaults.standard.string(forKey: "mode") ?? "") ?? .digi
         switch settings.openIn {
         case .last: mode = last
         case .digi: mode = .digi
         case .pro: mode = .pro
+        case .film: mode = .film
         }
+        stack = Self.loadStack(for: mode)
         _toDigi = mode.developed
         syncFrameSettings()
     }
@@ -145,8 +147,19 @@ final class CameraModel: NSObject, ObservableObject {
     /// The last viewfinder frame, small, for the editors' previews.
     var latestFrame: CIImage? { lock.lock(); defer { lock.unlock() }; return _latest }
 
+    /// DIGI (and VIDEO) and FILM each keep their own loaded film.
+    static func stackKey(_ m: CaptureMode) -> String { m == .film ? "filmStack" : "stack" }
+    static func loadStack(for m: CaptureMode) -> Stack {
+        var s: Stack = AppSettings.load(stackKey(m)) ?? Stack(simID: m == .film ? "bowery400" : "nocturne")
+        let isStock = FilmCatalog.sim(s.simID)?.stock != nil
+        if m == .film && !isStock { s = Stack(simID: "bowery400") }
+        if m != .film && isStock { s.simID = "nocturne"; s.pushStops = nil }
+        return s
+    }
+
     func syncFrameSettings() {
         var d = DevelopSettings()
+        d.film = mode == .film
         d.stack = stack
         d.megapixels = settings.digiMegapixels
         d.noise = settings.noise
@@ -169,7 +182,7 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     private func stackChanged() {
-        if let data = try? JSONEncoder().encode(stack) { UserDefaults.standard.set(data, forKey: "stack") }
+        if let data = try? JSONEncoder().encode(stack) { UserDefaults.standard.set(data, forKey: Self.stackKey(mode)) }
         syncFrameSettings()
         onStackChange?()
     }
@@ -181,6 +194,7 @@ final class CameraModel: NSObject, ObservableObject {
             skipReview()
             lock.lock(); _switchPending = true; _switchStart = CACurrentMediaTime(); _toDigi = mode.developed; lock.unlock()
             if old == .video && recording { stopRecording() }
+            if (old == .film) != (mode == .film) { stack = Self.loadStack(for: mode) }
         }
         syncFrameSettings()
         guard old != mode, input != nil else { return }
@@ -269,7 +283,7 @@ final class CameraModel: NSObject, ObservableObject {
 
     private func shotDims(_ m: CaptureMode) -> CMVideoDimensions {
         lock.lock(); defer { lock.unlock() }
-        return m == .digi ? digiDims : proDims
+        return m == .pro ? proDims : digiDims
     }
 
     private func publishPhotoSize(_ m: CaptureMode) {
@@ -309,8 +323,8 @@ final class CameraModel: NSObject, ObservableObject {
         let zoom = AVCaptureSystemZoomSlider(device: dev) { [weak self] z in
             DispatchQueue.main.async { self?.zoom = z }
         }
-        if m == .digi {
-            let sims = FilmCatalog.sims
+        if m.usesFilm {
+            let sims = FilmCatalog.sims(for: m)
             let simTitles = sims.map { $0.title.capitalized }
             let simPicker = AVCaptureIndexPicker("Sim", symbolName: "film", localizedIndexTitles: simTitles)
             let loaded = FilmCatalog.sim(stack.simID)?.id
@@ -324,9 +338,9 @@ final class CameraModel: NSObject, ObservableObject {
             lookPicker.setActionQueue(.main) { [weak self] i in
                 self?.stack.look = Look(rawValue: i) ?? .none
             }
-            let first: AVCaptureControl = settings.digiSlide == .sim ? simPicker : lookPicker
-            let second: AVCaptureControl = settings.digiSlide == .sim ? lookPicker : simPicker
-            for c in [first, second] where session.canAddControl(c) { session.addControl(c) }
+            let first: AVCaptureControl = settings.digiSlide == .sim || m == .film ? simPicker : lookPicker
+            let second: AVCaptureControl = settings.digiSlide == .sim || m == .film ? lookPicker : simPicker
+            for c in [first, second] where session.canAddControl(c) && (m == .digi || c === simPicker) { session.addControl(c) }
         } else if m == .video {
             let looks = AVCaptureIndexPicker("Look", symbolName: "film", localizedIndexTitles: VideoLook.allCases.map { $0.title.capitalized })
             looks.selectedIndex = videoLook.rawValue
@@ -339,7 +353,7 @@ final class CameraModel: NSObject, ObservableObject {
             let order: [AVCaptureControl] = settings.proSlide == .exposure ? [bias, zoom] : [zoom, bias]
             for c in order where session.canAddControl(c) { session.addControl(c) }
         }
-        if m == .digi, session.canAddControl(zoom) { session.addControl(zoom) }
+        if m.usesFilm, session.canAddControl(zoom) { session.addControl(zoom) }
         session.setControlsDelegate(self, queue: sessionQueue)
         DispatchQueue.main.async { self.hasCameraControl = true }
     }
@@ -629,7 +643,7 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     func stepSim(_ by: Int) {
-        let ids: [String] = FilmCatalog.sims.map { $0.id }
+        let ids: [String] = FilmCatalog.sims(for: mode).map { $0.id }
         let loaded = FilmCatalog.sim(stack.simID)?.id
         let i = ids.firstIndex(where: { $0 == loaded }) ?? 0
         let n = ids.count
@@ -639,7 +653,7 @@ final class CameraModel: NSObject, ObservableObject {
 
     /// Push or pull the loaded stock a stop: swipe up on its box to push, down to pull.
     func stepPush(_ by: Int) {
-        guard FilmStock.stock(FilmCatalog.sim(stack.simID)?.stock) != nil else { return }
+        guard mode == .film, FilmStock.stock(FilmCatalog.sim(stack.simID)?.stock) != nil else { return }
         let before = stack.push
         stack.push = before + by
         if stack.push != before { UISelectionFeedbackGenerator().selectionChanged() }
@@ -721,7 +735,7 @@ final class CameraModel: NSObject, ObservableObject {
     /// the same recipe is handed to the output ahead of time so its buffers are ready.
     private func photoSettings(_ m: CaptureMode) -> (AVCapturePhotoSettings, zero: Bool) {
         let settingsP: AVCapturePhotoSettings
-        let zero = m == .digi && settings.digiZero && zeroFormat != nil
+        let zero = m == .film && settings.digiZero && zeroFormat != nil
         if zero, let raw = zeroFormat {
             settingsP = AVCapturePhotoSettings(rawPixelFormatType: raw)
         } else if m == .pro && settings.proFormat == .heif && photoOutput.availablePhotoCodecTypes.contains(.hevc) {
@@ -768,7 +782,7 @@ final class CameraModel: NSObject, ObservableObject {
         if instant {
             answered.insert(id)
             if settings.sounds { CameraSounds.shared.play(.shutter) }
-            if m == .digi && settings.instantReview { startReview() }
+            if m.usesFilm && settings.instantReview { startReview() }
             flash = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { self.flash = false }
         } else if settings.sounds && settingsP.isShutterSoundSuppressionEnabled {
@@ -863,7 +877,7 @@ final class CameraModel: NSObject, ObservableObject {
                 type = self.settings.proFormat == .heif ? .heic : .jpeg
             } else {
                 let (developed, alpha) = Darkroom.develop(src, shot.develop, date: shot.date, preview: false, demo: demo)
-                let recipe = Recipe.describe(shot.develop.stack, megapixels: shot.develop.megapixels)
+                let recipe = Recipe.describe(shot.develop.stack, megapixels: shot.develop.megapixels, film: shot.develop.film)
                 thumbSource = developed
                 // The thumbnail first: it is the reference the full render is checked against,
                 // cell by cell, so a render that came back with black tiles is redone on the CPU.
@@ -873,8 +887,13 @@ final class CameraModel: NSObject, ObservableObject {
                 let reference = Encoder.gpu.createCGImage(small, from: small.extent.integral)
                 guard let cg = Encoder.render(developed, reference: reference) else { return }
                 let props = Recipe.properties(from: fileProps, recipe: recipe)
-                type = alpha ? .png : .jpeg
-                out = Encoder.encode(cg, type: type, quality: CGFloat(shot.crunch), properties: props)
+                // FILM keeps everything: HEIC at a high quality. DIGI saves the crunch you chose.
+                type = shot.develop.film ? .heic : (alpha ? .png : .jpeg)
+                out = Encoder.encode(cg, type: type, quality: shot.develop.film ? 0.92 : CGFloat(shot.crunch), properties: props)
+                if out == nil && type == .heic {
+                    type = .jpeg
+                    out = Encoder.encode(cg, type: .jpeg, quality: 0.95, properties: props)
+                }
             }
             guard let out else { return }
             let e = thumbSource.extent
@@ -1008,6 +1027,10 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         } else {
             // Develop the frame the way the photograph will be turned, so the date back and the
             // shape sit where they will on the print, then turn it back for the viewfinder.
+            if frameCount % 15 == 0, let dev = device {
+                let d = dev.exposureDuration.seconds, iso = dev.iso
+                DispatchQueue.main.async { self.meterShutter = d; self.meterISO = iso }
+            }
             let t = turn
             let upright = Self.rotated(src, clockwise: t)
             var developed = Darkroom.develop(upright, dev, date: Date(), preview: true, dateShift: 1 - amount).0
@@ -1049,7 +1072,7 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
             if let p = self.pending[id]?.pressed { self.timing.taken = now - p }
             if self.answered.remove(id) != nil { return }
             if self.quietShots.remove(id) != nil { CameraSounds.shared.play(.shutter) }
-            if self.pending[id]?.mode == .digi && self.settings.instantReview { self.startReview() }
+            if self.pending[id]?.mode.usesFilm == true && self.settings.instantReview { self.startReview() }
             self.flash = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { self.flash = false }
         }

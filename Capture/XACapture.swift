@@ -30,7 +30,7 @@ struct LockedCameraView: View {
     var body: some View {
         // The same camera screen as the app, so the Lock Screen, the Action button and Camera
         // Control open exactly what you know. Anything that needs the unlocked app opens it.
-        CameraView(camera: camera, settings: settings, onRoll: { open() }, onCustomize: { open() }, onFilm: {}, modes: [.digi, .pro])
+        CameraView(camera: camera, settings: settings, onRoll: { open() }, onCustomize: { open() }, onFilm: {}, modes: [.digi, .film, .pro])
         .environment(\.scenePhase, .active)
         .task {
             await loadContext()

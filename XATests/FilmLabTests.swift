@@ -85,6 +85,23 @@ final class FilmLabTests: XCTestCase {
         }
     }
 
+    func testFilmLoadsOnlyStocksAndDigiNone() {
+        XCTAssertEqual(Set(FilmCatalog.sims(for: .film).map(\.id)), Set(FilmStock.all.map(\.id)))
+        XCTAssertTrue(FilmCatalog.sims(for: .digi).allSatisfy { $0.stock == nil })
+        XCTAssertTrue(FilmCatalog.sims(for: .digi).contains { $0.id == Sim.neutral.id })
+        XCTAssertEqual(Recipe.describe(Stack(simID: "bowery400"), megapixels: 12, film: true), "XA FILM · BOWERY 400")
+    }
+
+    func testFilmDevelopKeepsFullSize() {
+        let big = CIImage(color: CIColor(red: 0.2, green: 0.2, blue: 0.2)).cropped(to: CGRect(x: 0, y: 0, width: 4032, height: 3024))
+        var d = DevelopSettings(); d.stack = Stack(simID: "bowery400"); d.film = true
+        let (out, alpha) = Darkroom.develop(big, d, date: Date(), preview: false)
+        XCTAssertEqual(out.extent.size, big.extent.size)
+        XCTAssertFalse(alpha)
+        d.film = false; d.stack = Stack(simID: "nocturne"); d.megapixels = 2
+        XCTAssertLessThan(Darkroom.develop(big, d, date: Date(), preview: false).0.extent.width, 2000)
+    }
+
     func testStocksAreFilmBoxes() {
         let ids = Sim.presets.compactMap { $0.stock }
         XCTAssertEqual(Set(ids), Set(FilmStock.all.map { $0.id }))

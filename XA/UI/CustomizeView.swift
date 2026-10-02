@@ -18,10 +18,6 @@ struct CustomizeView: View {
                                 row("Your recipe", "\(settings.recipe.onCount) on", accent: true)
                             }
                             Toggle("Instant review", isOn: $settings.instantReview).tint(XA.orange).font(.system(size: 15))
-                            Toggle("ZERO · no iPhone processing", isOn: $settings.digiZero).tint(XA.orange).font(.system(size: 15))
-                                .onChange(of: settings.digiZero) { _, _ in camera.zeroChanged() }
-                            Text("Shoots RAW and develops it flat, with no Smart HDR, tone mapping or sharpening from the iPhone, so the film is the only look. Slower to save.")
-                                .font(.system(size: 12)).foregroundStyle(XA.faint)
                             if !camera.lastTiming.isEmpty {
                                 Text("Last shot: \(camera.lastTiming)").font(.system(size: 12, design: .monospaced)).foregroundStyle(XA.faint)
                             }
@@ -73,11 +69,17 @@ struct CustomizeView: View {
                         }
                     }
                     group("OPENS IN") {
-                        Segmented(items: [(OpenIn.last, "Last mode"), (.digi, "DIGI"), (.pro, "PRO")], selection: $settings.openIn)
+                        Segmented(items: [(OpenIn.last, "Last"), (.digi, "DIGI"), (.film, "FILM"), (.pro, "PRO")], selection: $settings.openIn)
                     }
                     group("FILM") {
+                        VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Develop from RAW", isOn: $settings.digiZero).tint(XA.orange).font(.system(size: 15))
+                            .onChange(of: settings.digiZero) { _, _ in camera.zeroChanged() }
+                        Text("FILM saves full size with none of DIGI's digicam processing. From RAW it also skips the iPhone's own (Smart HDR, tone mapping, sharpening), so the stock is the only look. Slower to save.")
+                            .font(.system(size: 12)).foregroundStyle(XA.faint)
                         Text("The film stocks (Bowery, Coney, Chelsea, Prospect, Canal, Orchard, Ludlow) are developed through tables baked with spektrafilm, Andrea Volpato's spectral simulation of film from published datasheets, with grain, halation and coupler effects fitted to it. Film modeling powered by spektrafilm (github.com/andreavolpato/spektrafilm); tables CC BY-SA 4.0. Swipe a stock's box up to push it a stop, down to pull.")
                             .font(.system(size: 12)).foregroundStyle(XA.dim)
+                        }
                     }
                     group("CAMERA BUTTON") {
                         Text("Make XA the camera: Settings › Camera › Camera Control › Launch Camera › XA. Add the XA control to Control Center or the Lock Screen to open it while locked.")
