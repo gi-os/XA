@@ -233,6 +233,7 @@ private struct Masonry: View {
     var onTap: (Pile) -> Void
     var onAction: (Pile, PileAction) -> Void = { _, _ in }
     var onStep: (Pile, Int) -> Void = { _, _ in }
+    @Namespace private var table
 
     var body: some View {
         GeometryReader { g in
@@ -244,9 +245,22 @@ private struct Masonry: View {
                     VStack(spacing: gap + 8) {
                         ForEach(cols.items[c], id: \.id) { p in
                             PileView(pile: p, width: cw, library: library, onStep: onStep, onRestack: { onAction(p, .restack) })
+                                // Every print is the same print wherever it lies: fanning a pile
+                                // slides its prints out of it into their places, and restacking
+                                // slides them back in, across columns.
+                                .matchedGeometryEffect(id: p.id, in: table)
+                                .background {
+                                    if p.fanOf == nil && p.assets.count > 1 {
+                                        ZStack {
+                                            ForEach(p.assets.dropFirst(), id: \.localIdentifier) { a in
+                                                Color.clear.matchedGeometryEffect(id: a.localIdentifier, in: table)
+                                            }
+                                        }
+                                    }
+                                }
                                 .onTapGesture { onTap(p) }
                                 .contextMenu { menu(p) }
-                                .transition(.scale(scale: 0.85).combined(with: .opacity))
+                                .transition(.asymmetric(insertion: .identity, removal: .opacity.animation(.easeIn(duration: 0.12).delay(0.25))))
                         }
                     }
                     .frame(width: cw)
