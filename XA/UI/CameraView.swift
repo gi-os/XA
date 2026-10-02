@@ -616,3 +616,9 @@ final class DeviceTilt: ObservableObject {
         }
     }
 }
+
+
+extension Notification.Name {
+    /// The app went to the background: next time it opens, it opens on the camera.
+    static let xaBackToCamera = Notification.Name("xaBackToCamera")
+}
