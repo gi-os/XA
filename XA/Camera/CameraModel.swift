@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import ImageIO
 import UIKit
 import UniformTypeIdentifiers
 
@@ -402,7 +403,9 @@ final class CameraModel: NSObject, ObservableObject {
             // out upside down. XA turns and mirrors the frames itself (see `upright`).
             if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = false }
             let a = c.isVideoRotationAngleSupported(portrait) ? portrait : rc.videoRotationAngleForHorizonLevelCapture
-            if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
+            // The selfie camera's frames come in as the sensor reads them and XA turns them.
+            let set: CGFloat = frontFlag ? 0 : a
+            if c.isVideoRotationAngleSupported(set) { c.videoRotationAngle = set }
             previewAngle = a
         }
         angleObservation = rc.observe(\.videoRotationAngleForHorizonLevelCapture, options: [.initial, .new]) { [weak self] rc, _ in
@@ -419,11 +422,12 @@ final class CameraModel: NSObject, ObservableObject {
 
     /// Turn a frame clockwise by a multiple of 90°, keeping it at the origin.
     /// A viewfinder frame or a selfie made portrait and, for the selfie camera, mirrored the way
-    /// a mirror shows you. If the connection didn't turn the frame (it came in landscape), XA turns
-    /// it a quarter clockwise itself.
+    /// a mirror shows you. The selfie camera's frames and photos arrive as its sensor reads them,
+    /// landscape, and the same turn makes both upright, so what you see is what is saved. Its
+    /// sensor sits the other way round from the back camera's: a three-quarter turn, not a quarter.
     static func upright(_ img: CIImage, mirror: Bool) -> CIImage {
         var out = img
-        if out.extent.width > out.extent.height { out = rotated(out, clockwise: 90) }
+        if out.extent.width > out.extent.height { out = rotated(out, clockwise: mirror ? 270 : 90) }
         if mirror {
             let w = out.extent.width
             out = out.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: w + out.extent.minX * 2, ty: 0))
@@ -854,8 +858,7 @@ final class CameraModel: NSObject, ObservableObject {
                     // mirrored, the same turn and the same mirror as the frames. Its horizon
                     // angle came out upside down once mirrored.
                     if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = false }
-                    let a = self.previewAngle
-                    if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
+                    if c.isVideoRotationAngleSupported(0) { c.videoRotationAngle = 0 }
                 } else {
                     if let rc {
                         let a = rc.videoRotationAngleForHorizonLevelCapture
@@ -940,10 +943,22 @@ final class CameraModel: NSObject, ObservableObject {
             var out: Data?
             var type: UTType = .jpeg
             var thumbSource = src
-            if shot.mode == .pro {
+            if shot.mode == .pro && !shot.front {
                 // Saved exactly as the camera made it.
                 out = data
                 type = self.settings.proFormat == .heif ? .heic : .jpeg
+            } else if shot.mode == .pro {
+                // The selfie camera in PRO: turned upright and mirrored, nothing else.
+                type = self.settings.proFormat == .heif ? .heic : .jpeg
+                if let cg = Encoder.render(src, reference: nil) {
+                    var props = fileProps
+                    props[kCGImagePropertyOrientation as String] = 1
+                    if var tiff = props[kCGImagePropertyTIFFDictionary as String] as? [String: Any] {
+                        tiff[kCGImagePropertyTIFFOrientation as String] = 1
+                        props[kCGImagePropertyTIFFDictionary as String] = tiff
+                    }
+                    out = Encoder.encode(cg, type: type, quality: 0.95, properties: props)
+                }
             } else {
                 let (developed, alpha) = Darkroom.develop(src, shot.develop, date: shot.date, preview: false, demo: demo)
                 let recipe = shot.develop.booth.map { "XA BOOTH · \($0.title)" } ?? Recipe.describe(shot.develop.stack, megapixels: shot.develop.megapixels, film: shot.develop.film)

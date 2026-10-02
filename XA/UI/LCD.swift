@@ -14,14 +14,11 @@ struct LCDStrip: View {
     @State private var swaps = 0
 
     var body: some View {
+        // Two layers: the glass, whose color morphs from one mode's to the next while the screen
+        // changes shape, and the readings on it, which go out at once and draw in on the new glass.
         ZStack {
-            switch camera.mode {
-            case .digi: VcrLCD(camera: camera, settings: settings).transition(Self.swap).zIndex(Double(swaps))
-            case .film: FilmLCD(camera: camera, settings: settings).transition(Self.swap).zIndex(Double(swaps))
-            case .pro: ProLCD(camera: camera, settings: settings, field: $proField).transition(Self.proSwap).zIndex(Double(swaps))
-            case .video: VideoLCD(camera: camera).transition(Self.swap).zIndex(Double(swaps))
-            case .booth: BoothLCD(camera: camera, settings: settings).transition(Self.swap).zIndex(Double(swaps))
-            }
+            ZStack { panel(glass: true) }
+            ZStack { panel(glass: false) }
         }
         // PRO grows the strip into the full panel; DIGI and VIDEO keep one row.
         .onChange(of: camera.mode) { _, _ in swaps += 1 }
@@ -62,19 +59,32 @@ struct LCDStrip: View {
         }
     }
 
+    @ViewBuilder private func panel(glass: Bool) -> some View {
+        let t = glass ? (camera.mode == .pro ? Self.proGlass : Self.glassSwap) : Self.inkSwap
+        switch camera.mode {
+        case .digi: VcrLCD(camera: camera, settings: settings, glass: glass).transition(t).zIndex(Double(swaps))
+        case .film: FilmLCD(camera: camera, settings: settings, glass: glass).transition(t).zIndex(Double(swaps))
+        case .pro: ProLCD(camera: camera, settings: settings, field: $proField, glass: glass).transition(t).zIndex(Double(swaps))
+        case .video: VideoLCD(camera: camera, glass: glass).transition(t).zIndex(Double(swaps))
+        case .booth: BoothLCD(camera: camera, settings: settings, glass: glass).transition(t).zIndex(Double(swaps))
+        }
+    }
+
     static func height(_ m: CaptureMode) -> CGFloat { m == .pro ? 112 : 36 }
 
     static func zoomText(_ z: CGFloat) -> String {
         z < 10 ? String(format: "%.1f×", z) : String(format: "%.0f×", z)
     }
 
-    /// The old picture goes dark, the new one comes up in the same glass.
-    /// The new picture fades up over the old one, which stays lit underneath until it is covered.
-    static let swap: AnyTransition = .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.24)),
-                                                 removal: .opacity.animation(.linear(duration: 0.01).delay(0.3)))
-    /// PRO's panel stays lit while the screen shrinks around it, then goes out.
-    static let proSwap: AnyTransition = .asymmetric(insertion: .identity,
-                                                    removal: .opacity.animation(.easeIn(duration: 0.12)))
+    /// The new glass color comes up over the old one in the time the screen takes to change
+    /// shape, so color and shape morph together; the old one stays lit underneath until covered.
+    static let glassSwap: AnyTransition = .asymmetric(insertion: .opacity.animation(.easeInOut(duration: 0.22)),
+                                                      removal: .opacity.animation(.linear(duration: 0.01).delay(0.3)))
+    /// PRO's glass lights with its own flicker once it has grown.
+    static let proGlass: AnyTransition = .asymmetric(insertion: .identity,
+                                                     removal: .opacity.animation(.linear(duration: 0.01).delay(0.3)))
+    /// The readings: gone at once, the new ones draw themselves in.
+    static let inkSwap: AnyTransition = .asymmetric(insertion: .identity, removal: .opacity.animation(.easeIn(duration: 0.07)))
 }
 
 // MARK: panels
@@ -118,21 +128,22 @@ private struct PixelGrid: View {
 private struct FilmLCD: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
+    var glass = true
     private let ink = Color(hex: "#1B2216")
 
     var body: some View {
-        GreenPanel()
-            .overlay {
-                HStack {
-                    dot(">" + camera.stack.filmTitle, 14)
-                    Spacer(minLength: 8)
-                    if settings.filmDate.placement != .off { dot(Self.dateText(), 14) }
-                    if settings.digiZero { dot("RAW", 14) }
-                }
-                .padding(.horizontal, 10)
-                // A reflective LCD left unused for years: the text swims in slowly.
-                .modifier(ColdWake())
+        if glass { GreenPanel() } else {
+            HStack {
+                dot(">" + camera.stack.filmTitle, 14)
+                Spacer(minLength: 8)
+                if settings.filmDate.placement != .off { dot(Self.dateText(), 14) }
+                if settings.digiZero { dot("RAW", 14) }
             }
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // A reflective LCD left unused for years: the text swims in slowly.
+            .modifier(ColdWake())
+        }
     }
 
     private func dot(_ s: String, _ size: CGFloat) -> some View {
@@ -155,24 +166,26 @@ private struct FilmLCD: View {
 private struct VcrLCD: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
+    var glass = true
     static let blue = Color(hex: "#1D2FAE")
 
     var body: some View {
         let film = ([FilmCatalog.sim(camera.stack.simID)?.title ?? Sim.neutral.title] + [camera.stack.look == .none ? nil : camera.stack.look.title, camera.stack.effectiveShape?.title].compactMap { $0 }).joined(separator: "+")
-        Self.blue
-            .overlay(Rectangle().strokeBorder(Color(hex: "#4F8EE0"), lineWidth: 1))
-            .overlay {
-                HStack(spacing: 6) {
-                    chip(film)
-                    Spacer(minLength: 4)
-                    if settings.flash != .off { chip(settings.flash == .on ? "FLASH" : "AUTO") }
-                    if settings.date.placement != .off { chip(FilmLCD.dateText()) }
-                    chip("\(settings.digiMegapixels)MP")
-                }
-                .padding(.horizontal, 7)
-                // The menu draws in line by line from the top, like a CRT; the blue is already there.
-                .modifier(Wake(axis: .vertical))
+        if glass {
+            Self.blue.overlay(Rectangle().strokeBorder(Color(hex: "#4F8EE0"), lineWidth: 1))
+        } else {
+            HStack(spacing: 6) {
+                chip(film)
+                Spacer(minLength: 4)
+                if settings.flash != .off { chip(settings.flash == .on ? "FLASH" : "AUTO") }
+                if settings.date.placement != .off { chip(FilmLCD.dateText()) }
+                chip("\(settings.digiMegapixels)MP")
             }
+            .padding(.horizontal, 7)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // The menu draws in line by line from the top, like a CRT; the blue is already there.
+            .modifier(Wake(axis: .vertical))
+        }
     }
 
     private func chip(_ s: String) -> some View {
@@ -190,12 +203,14 @@ private struct VcrLCD: View {
 private struct BoothLCD: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
+    var glass = true
     static let hot = Color(hex: "#FF4FA0")
 
     var body: some View {
         let running = camera.boothShot != nil
-        LinearGradient(colors: [Color(hex: "#FFD1E6"), Color(hex: "#FFE9F3"), Color(hex: "#D9F6EA")], startPoint: .leading, endPoint: .trailing)
-            .overlay {
+        if glass {
+            LinearGradient(colors: [Color(hex: "#FFD1E6"), Color(hex: "#FFE9F3"), Color(hex: "#D9F6EA")], startPoint: .leading, endPoint: .trailing)
+        } else {
                 HStack(spacing: 8) {
                     bubble(camera.boothShot.map { "SHOT \($0) / \(Booth.shots)" } ?? "♥ " + settings.boothSkin.title + " · " + settings.boothDeco.title, 14, Self.hot)
                     Spacer(minLength: 4)
@@ -210,8 +225,9 @@ private struct BoothLCD: View {
                 }
                 .padding(.horizontal, 10)
                 .animation(.spring(response: 0.25, dampingFraction: 0.6), value: camera.boothCount)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .modifier(Wake(axis: .horizontal))
-            }
+        }
     }
 
     private func bubble(_ s: String, _ size: CGFloat, _ c: Color) -> some View {
@@ -244,18 +260,22 @@ private struct ProLCD: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
     @Binding var field: ProField
+    var glass = true
 
     var body: some View {
-        LitPanel(center: Color(hex: "#D4F8FF"), mid: Color(hex: "#9FE6F2"), edge: Color(hex: "#6FC9DC"), glow: Color(red: 0.47, green: 0.84, blue: 1).opacity(0.5))
-            // The readings keep their full size while the glass grows (or shrinks) around them.
-            .overlay(alignment: .top) {
-                ProPanel(camera: camera, settings: settings, field: $field)
-                    .frame(height: LCDStrip.height(.pro), alignment: .top)
-                    .modifier(SlideWake())
-            }
-            .clipped()
-            // The backlight strikes once the glass has grown: a few stuttering flashes, then on.
-            .modifier(Flicker())
+        if glass {
+            LitPanel(center: Color(hex: "#D4F8FF"), mid: Color(hex: "#9FE6F2"), edge: Color(hex: "#6FC9DC"), glow: Color(red: 0.47, green: 0.84, blue: 1).opacity(0.5))
+                // The backlight strikes once the glass has grown: a few stuttering flashes, then on.
+                .modifier(Flicker())
+        } else {
+            // The readings keep their full size while the glass grows around them.
+            ProPanel(camera: camera, settings: settings, field: $field)
+                .frame(height: LCDStrip.height(.pro), alignment: .top)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .clipped()
+                .modifier(SlideWake())
+                .modifier(Flicker())
+        }
     }
 }
 
@@ -281,14 +301,18 @@ private struct Histo: View {
 
 private struct VideoLCD: View {
     @ObservedObject var camera: CameraModel
+    var glass = true
     private let ink = Color(hex: "#2A1406"), off = Color(red: 0.16, green: 0.08, blue: 0.02).opacity(0.08), shade = Color(red: 0.35, green: 0.16, blue: 0).opacity(0.25)
 
     var body: some View {
         let t = Int(camera.recordSeconds)
         let counter = "\(t / 3600):" + String(format: "%02d:%02d", (t / 60) % 60, t % 60)
         let fps = Int(camera.videoLook.heldFPS ?? 30)
-        LitPanel(center: Color(hex: "#FFE9BD"), mid: Color(hex: "#FFC86F"), edge: Color(hex: "#E59A3E"), glow: Color(red: 1, green: 0.67, blue: 0.27).opacity(0.5))
-            .overlay(alignment: .leading) {
+        if glass {
+            LitPanel(center: Color(hex: "#FFE9BD"), mid: Color(hex: "#FFC86F"), edge: Color(hex: "#E59A3E"), glow: Color(red: 1, green: 0.67, blue: 0.27).opacity(0.5))
+                // An old TV warming up: a bright line opens into the picture, then the tube glows up slowly.
+                .modifier(TubeWarmup())
+        } else {
                 HStack(spacing: 10) {
                     HStack(spacing: 4) {
                         Circle().fill(camera.recording ? ink : off).frame(width: 7, height: 7)
@@ -303,10 +327,10 @@ private struct VideoLCD: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .modifier(SlideWake())
-            }
-            // An old TV warming up: a bright line opens into the picture, then the tube glows up slowly.
-            .modifier(TubeWarmup())
+                .modifier(TubeWarmup())
+        }
     }
 
     private func label(_ s: String, _ size: CGFloat) -> some View {
