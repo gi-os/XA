@@ -45,6 +45,8 @@ final class AppSettings: ObservableObject {
     @Published var showFlipButton: Bool { didSet { d.set(showFlipButton, forKey: "showFlipButton") } }
     /// BOOTH: the skin setting and the sticker sheet's layout.
     @Published var boothSkin: BoothSkin { didSet { d.set(boothSkin.rawValue, forKey: "boothSkin") } }
+    /// The first shot's frame; the other three take the next ones.
+    @Published var boothDeco: BoothDeco { didSet { d.set(boothDeco.rawValue, forKey: "boothDeco") } }
     @Published var boothLayout: BoothLayout { didSet { d.set(boothLayout.rawValue, forKey: "boothLayout") } }
 
     init() {
@@ -68,6 +70,7 @@ final class AppSettings: ObservableObject {
         flash = FlashSetting(rawValue: d.string(forKey: "flash") ?? "") ?? .off
         sounds = d.object(forKey: "sounds") as? Bool ?? true
         boothSkin = BoothSkin(rawValue: d.string(forKey: "boothSkin") ?? "") ?? .doll
+        boothDeco = BoothDeco(rawValue: d.string(forKey: "boothDeco") ?? "") ?? .stars
         boothLayout = BoothLayout(rawValue: d.string(forKey: "boothLayout") ?? "") ?? .sheet
     }
 

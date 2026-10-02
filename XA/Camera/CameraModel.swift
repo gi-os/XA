@@ -46,7 +46,7 @@ final class CameraModel: NSObject, ObservableObject {
     @Published private(set) var developing = 0
     @Published private(set) var flash = false
     /// BOOTH: which of the four shots is coming (1…4) while a session runs, and the countdown to it.
-    @Published private(set) var boothShot: Int?
+    @Published private(set) var boothShot: Int? { didSet { if boothShot != oldValue { syncFrameSettings() } } }
     @Published private(set) var boothCount: Int?
     @Published private(set) var hasCameraControl = false
     @Published private(set) var lastShot: UIImage?
@@ -175,7 +175,10 @@ final class CameraModel: NSObject, ObservableObject {
         d.noise = settings.noise
         d.date = settings.date
         d.recipe = settings.recipe
-        if mode == .booth { d.booth = settings.boothSkin }
+        if mode == .booth {
+            d.booth = settings.boothSkin
+            d.deco = settings.boothDeco.step((boothShot ?? 1) - 1)
+        }
         lock.lock(); _develop = d; _frameMode = mode; lock.unlock()
     }
 
@@ -810,7 +813,8 @@ final class CameraModel: NSObject, ObservableObject {
         let m = mode
         let (settingsP, zero) = photoSettings(m)
         syncFrameSettings()
-        let (_, dev) = frameState()
+        var (_, dev) = frameState()
+        if let booth { dev.deco = settings.boothDeco.step(booth.index) }
         let id = settingsP.uniqueID
         pending[id] = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date(), zero: zero, pressed: pressed, booth: booth)
         let instant = settings.flash == .off && !zero && photoOutput.isZeroShutterLagEnabled

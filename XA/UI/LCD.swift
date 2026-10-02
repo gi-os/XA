@@ -185,9 +185,9 @@ private struct BoothLCD: View {
         LinearGradient(colors: [Color(hex: "#FFD1E6"), Color(hex: "#FFE9F3"), Color(hex: "#D9F6EA")], startPoint: .leading, endPoint: .trailing)
             .overlay {
                 HStack(spacing: 8) {
-                    bubble(camera.boothShot.map { "SHOT \($0) / \(Booth.shots)" } ?? "♥ " + settings.boothSkin.title, 14, Self.hot)
+                    bubble(camera.boothShot.map { "SHOT \($0) / \(Booth.shots)" } ?? "♥ " + settings.boothSkin.title + " · " + settings.boothDeco.title, 14, Self.hot)
                     Spacer(minLength: 4)
-                    bubble(running ? "SMILE!" : "\(Booth.shots) SHOTS · " + settings.boothLayout.title, 12, Color(hex: "#7A5AD9"))
+                    bubble(running ? "SMILE!" : settings.boothLayout.title, 12, Color(hex: "#7A5AD9"))
                     if let n = camera.boothCount {
                         Text("\(n)").font(.custom(BoothInk.font, fixedSize: 26)).foregroundStyle(.white)
                             .shadow(color: Self.hot, radius: 0, x: 1.5, y: 0).shadow(color: Self.hot, radius: 0, x: -1.5, y: 0)

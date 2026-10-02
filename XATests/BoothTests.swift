@@ -53,4 +53,16 @@ final class BoothTests: XCTestCase {
         XCTAssertEqual(BoothLayout.sheet.step(-1), .strip)
         XCTAssertEqual(BoothLayout.strip.step(1), .sheet)
     }
+
+    func testEveryFrameDrawsAndKeepsTheSize() {
+        let src = grey(300, 400)
+        let face = Booth.Face(eyes: [CGPoint(x: 120, y: 260), CGPoint(x: 180, y: 260)], span: 60, nose: CGPoint(x: 150, y: 225), jaw: CGPoint(x: 150, y: 170), width: 180)
+        for d in BoothDeco.allCases {
+            XCTAssertNotNil(Deco.backdrop(d, size: src.extent.size), "\(d)")
+            XCTAssertNotNil(Deco.overlay(d, size: src.extent.size, faces: [face], date: Date()), "\(d)")
+            let out = Booth.develop(src, .doll, deco: d, faces: [face], preview: true)
+            XCTAssertEqual(out.extent, src.extent, "\(d)")
+        }
+        XCTAssertEqual(BoothDeco.kitty.step(1), .stars)
+    }
 }

@@ -122,8 +122,13 @@ struct CameraView: View {
             return
         }
         if camera.mode == .booth {
-            // Sideways: the next skin setting.
+            // Sideways: the next skin setting. Up and down: the next frame.
             if horizontal { stepSkin(dx < 0 ? 1 : -1) }
+            else {
+                settings.boothDeco = settings.boothDeco.step(dy < 0 ? 1 : -1)
+                camera.syncFrameSettings()
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
             return
         }
         withAnimation(.snappy) {
