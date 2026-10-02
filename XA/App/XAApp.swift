@@ -58,7 +58,15 @@ struct RootView: View {
             pushContext()
             syncThumb()
         }
-        .onChange(of: phase) { _, p in if p == .active { camera.resume() } else if p == .background { camera.stop() } }
+        .onChange(of: phase) { _, p in
+            if p == .active { camera.resume() }
+            else if p == .background {
+                camera.stop()
+                // Coming back always lands on the camera: roll, viewer, pickers and settings close.
+                showRoll = false; showCustomize = false; showFilm = false; pull = 0
+                NotificationCenter.default.post(name: .xaBackToCamera, object: nil)
+            }
+        }
         .onChange(of: settings.date) { _, _ in camera.syncFrameSettings(); pushContext() }
         .onChange(of: settings.digiMegapixels) { _, _ in camera.applyResolution(); pushContext() }
         .onChange(of: settings.proMegapixels) { _, _ in camera.applyResolution() }
@@ -115,4 +123,10 @@ struct RootView: View {
         }
         Task { try? await LockedCameraCaptureManager.shared.invalidateSessionContent(at: dir) }
     }
+}
+
+
+extension Notification.Name {
+    /// The app went to the background: next time it opens, it opens on the camera.
+    static let xaBackToCamera = Notification.Name("xaBackToCamera")
 }

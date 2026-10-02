@@ -47,6 +47,7 @@ struct ContactSheet: View {
         .background(Color.black.ignoresSafeArea())
         .foregroundStyle(.white)
         .preferredColorScheme(.dark)
+        .onReceive(NotificationCenter.default.publisher(for: .xaBackToCamera)) { _ in open = nil }
         .fullScreenCover(item: $open) { o in
             PhotoViewer(library: library, current: o.asset.localIdentifier)
         }

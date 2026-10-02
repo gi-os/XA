@@ -9,7 +9,7 @@ struct CameraView: View {
     var onFilm: () -> Void
     var modes: [CaptureMode] = CaptureMode.allCases
     /// The film rows are open; folded, the loaded film sits in the mode row as a little box.
-    @State private var filmOpen = true
+    @State private var filmOpen = false
     /// Which way up the phone is held, so the film box can turn with it.
     @StateObject private var tilt = DeviceTilt()
     /// Pinch anchor: the zoom when the pinch started, so the gesture scales from there
@@ -24,6 +24,7 @@ struct CameraView: View {
             // swallowed every touch and the pinch and swipes never arrived.
             viewfinder
                 .overlay { FocusTapLayer(camera: camera, filmOpen: $filmOpen) }
+                .onReceive(NotificationCenter.default.publisher(for: .xaBackToCamera)) { _ in filmOpen = false }
                 .contentShape(Rectangle())
                 .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded(swipe))
                 .simultaneousGesture(
