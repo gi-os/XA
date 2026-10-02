@@ -9,5 +9,5 @@ xcodebuild test -project "$SCHEME.xcodeproj" -scheme "$SCHEME" -destination "id=
   CODE_SIGNING_ALLOWED=NO > /tmp/xctest.log 2>&1
 status=$?
 set -e
-grep -E "error:|: warning: .*XCT|Test Case .*(failed|passed)|Executed [0-9]+ test|\*\* TEST" /tmp/xctest.log | grep -v "^$" | tail -250 || true
+grep -E "CUBE got|DEVELOP |error:|: warning: .*XCT|Test Case .*(failed|passed)|Executed [0-9]+ test|\*\* TEST" /tmp/xctest.log | grep -v "^$" | tail -250 || true
 exit $status
