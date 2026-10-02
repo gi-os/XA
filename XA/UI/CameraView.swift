@@ -10,6 +10,8 @@ struct CameraView: View {
     var modes: [CaptureMode] = CaptureMode.allCases
     /// The film rows are open; folded, the loaded film sits in the mode row as a little box.
     @State private var filmOpen = true
+    /// Which way up the phone is held, so the film box can turn with it.
+    @StateObject private var tilt = DeviceTilt()
     /// Pinch anchor: the zoom when the pinch started, so the gesture scales from there
     /// instead of compounding on the live value.
     @State private var pinchFrom: CGFloat?
@@ -80,6 +82,8 @@ struct CameraView: View {
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
         } else if camera.mode == .digi && !filmOpen {
             FannedFilm(stack: camera.stack) { withAnimation(.snappy) { filmOpen = true } }
+                .rotationEffect(.degrees(tilt.angle))
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: tilt.angle)
                 .modifier(SwipeToStep(step: { camera.stack.push = 0; camera.stepSim($0) }, vertical: { camera.stepPush($0) }))
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
         } else if camera.mode == .digi {
@@ -579,5 +583,35 @@ struct FannedTape: View {
         .buttonStyle(.plain)
         .animation(.snappy(duration: 0.25), value: look)
         .accessibilityLabel("Tape: \(look.title)")
+    }
+}
+
+
+/// The way the phone is held, as the angle the screen's contents turn to stay upright. The app
+/// itself stays in portrait; only the pieces that matter (the film box) turn.
+final class DeviceTilt: ObservableObject {
+    @Published private(set) var angle: Double = 0
+    private var token: NSObjectProtocol?
+
+    init() {
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        token = NotificationCenter.default.addObserver(forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.update()
+        }
+        update()
+    }
+
+    deinit {
+        if let token { NotificationCenter.default.removeObserver(token) }
+        UIDevice.current.endGeneratingDeviceOrientationNotifications()
+    }
+
+    private func update() {
+        switch UIDevice.current.orientation {
+        case .portrait: angle = 0
+        case .landscapeLeft: angle = 90      // top of the phone to the left
+        case .landscapeRight: angle = -90    // top of the phone to the right
+        default: break                       // face up/down or upside down: keep the last
+        }
     }
 }

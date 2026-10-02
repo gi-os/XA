@@ -145,6 +145,14 @@ private struct PhotoPage: View {
     @Binding var zoomed: Bool
     @State private var img: UIImage?
     @State private var player: AVPlayer?
+    /// A photo saved a moment ago can still be being written: ask again shortly if it isn't there.
+    private func load(tries: Int) {
+        library.full(asset) { got in
+            if let got { img = got }
+            else if tries > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { load(tries: tries - 1) } }
+        }
+    }
+
     var body: some View {
         ZStack {
             if asset.mediaType == .video {
@@ -157,9 +165,9 @@ private struct PhotoPage: View {
         .onAppear {
             if asset.mediaType == .video {
                 if player == nil { library.playerItem(asset) { item in if let item { player = AVPlayer(playerItem: item) } } }
-            } else if img == nil { library.full(asset) { img = $0 } }
+            } else if img == nil { load(tries: 4) }
         }
-        .onChange(of: asset.modificationDate) { _, _ in library.full(asset) { img = $0 } }
+        .onChange(of: asset.modificationDate) { _, _ in load(tries: 4) }
     }
 }
 

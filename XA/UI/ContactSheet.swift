@@ -102,7 +102,7 @@ struct ZoomableImage: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeUIView(context: Context) -> UIScrollView {
-        let sv = UIScrollView()
+        let sv = FittingScrollView()
         sv.delegate = context.coordinator
         sv.minimumZoomScale = 1
         sv.maximumZoomScale = 8
@@ -116,6 +116,7 @@ struct ZoomableImage: UIViewRepresentable {
         iv.backgroundColor = .clear
         sv.addSubview(iv)
         context.coordinator.imageView = iv
+        sv.imageView = iv
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.doubleTap(_:)))
         tap.numberOfTapsRequired = 2
         sv.addGestureRecognizer(tap)
@@ -151,5 +152,17 @@ struct ZoomableImage: UIViewRepresentable {
                 sv.zoom(to: CGRect(x: p.x - w / 2, y: p.y - h / 2, width: w, height: h), animated: true)
             }
         }
+    }
+}
+
+
+/// Keeps the photo fitted to the screen whenever the scroll view is laid out. Fitting it once,
+/// right after it was made, sometimes ran while the view was still zero by zero: the photo got
+/// a zero frame and the page stayed black.
+final class FittingScrollView: UIScrollView {
+    weak var imageView: UIImageView?
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if zoomScale == 1, let iv = imageView, iv.frame.size != bounds.size { iv.frame = bounds }
     }
 }
