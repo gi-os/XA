@@ -249,7 +249,8 @@ private struct ProLCD: View {
                     .modifier(SlideWake())
             }
             .clipped()
-            .modifier(PowerOn())
+            // The backlight strikes once the glass has grown: a few stuttering flashes, then on.
+            .modifier(Flicker())
     }
 }
 
@@ -299,7 +300,8 @@ private struct VideoLCD: View {
                 .padding(.horizontal, 8)
                 .modifier(SlideWake())
             }
-            .modifier(PowerOn())
+            // An old TV warming up: a bright line opens into the picture, then the tube glows up slowly.
+            .modifier(TubeWarmup())
     }
 
     private func label(_ s: String, _ size: CGFloat) -> some View {
@@ -329,6 +331,55 @@ private struct PowerOn: ViewModifier {
                 }
             }
             .onAppear { go.toggle() }
+    }
+}
+
+/// A fluorescent backlight striking: dark while the screen grows, then a stutter of flashes.
+private struct Flicker: ViewModifier {
+    @State private var go = false
+    func body(content: Content) -> some View {
+        content
+            .keyframeAnimator(initialValue: Lamp(), trigger: go) { view, l in
+                view.opacity(l.on).brightness(l.flash)
+            } keyframes: { _ in
+                KeyframeTrack(\.on) {
+                    MoveKeyframe(0.06)
+                    LinearKeyframe(0.06, duration: 0.26)
+                    LinearKeyframe(1, duration: 0.03)
+                    LinearKeyframe(0.15, duration: 0.05)
+                    LinearKeyframe(0.95, duration: 0.03)
+                    LinearKeyframe(0.3, duration: 0.07)
+                    LinearKeyframe(1, duration: 0.03)
+                    LinearKeyframe(0.6, duration: 0.05)
+                    LinearKeyframe(1, duration: 0.08)
+                }
+                KeyframeTrack(\.flash) {
+                    MoveKeyframe(0)
+                    LinearKeyframe(0, duration: 0.29)
+                    LinearKeyframe(0.35, duration: 0.03)
+                    LinearKeyframe(0, duration: 0.15)
+                    LinearKeyframe(0.2, duration: 0.03)
+                    LinearKeyframe(0, duration: 0.2)
+                }
+            }
+            .onAppear { go.toggle() }
+    }
+    struct Lamp { var on: Double = 0.06; var flash: Double = 0 }
+}
+
+/// A CRT coming on: a thin bright line opens to the full picture, then the glow comes up slowly.
+private struct TubeWarmup: ViewModifier {
+    @State private var open = false
+    @State private var warm = false
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(x: 1, y: open ? 1 : 0.05, anchor: .center)
+            .brightness(warm ? 0 : -0.55)
+            .saturation(warm ? 1 : 0.35)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.2).delay(0.16)) { open = true }
+                withAnimation(.easeIn(duration: 1.6).delay(0.3)) { warm = true }
+            }
     }
 }
 
