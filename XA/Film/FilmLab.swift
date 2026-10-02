@@ -125,13 +125,24 @@ enum FilmLab {
     }
 
     private static let densityKernel = CIColorKernel(source: """
-    kernel vec4 xaDensity(__sample c, __sample bc, __sample bt, float kc, float kt, float gam, vec3 off, vec3 dmin, vec3 dmax) {
+    kernel vec4 xaDensity(__sample c, __sample bc, __sample bt, float kc, float kt, float gam, vec3 off, vec3 dmin, vec3 dmax, vec3 timing, float pre) {
         vec3 code = c.rgb + kc * (c.rgb - bc.rgb) + kt * (c.rgb - bt.rgb);
         vec3 D = code * (dmax - dmin) + dmin;
         D = max(D, vec3(0.0)) * gam + min(D, vec3(0.0)) + off;
+        // The lab's printing: color timing is filter density in each printing light, the same as
+        // density on the negative; a preflash is a little even light on the paper, which the
+        // densest parts of the negative (the highlights) feel most.
+        D = D + timing;
+        D = -log(pow(vec3(10.0), -D) + vec3(pre)) / 2.302585;
         return vec4((D - dmin) / (dmax - dmin), 1.0);
     }
     """)
+
+    /// Two lights added (alpha stays 1).
+    static func addLight(_ a: CIImage, _ b: CIImage) -> CIImage {
+        let e = a.extent
+        return addLightKernel?.apply(extent: e, arguments: [a, b]) ?? a
+    }
 
     private static let addLightKernel = CIColorKernel(source: """
     kernel vec4 xaAddLight(__sample a, __sample b) { return vec4(a.rgb + b.rgb, 1.0); }
@@ -154,13 +165,14 @@ enum FilmLab {
     /// Tests can look at each stage.
     static var trace: ((String, CIImage) -> Void)?
 
-    static func develop(_ input: CIImage, stock: FilmStock, push: Int, preview: Bool, seed: Int) -> CIImage {
+    static func develop(_ input: CIImage, stock: FilmStock, push: Int, preview: Bool, seed: Int, shot: FilmShot? = nil) -> CIImage {
         guard let t = tables(stock.id) else { return input }
         let e = input.extent
         guard e.width > 1, e.height > 1, e.width.isFinite, e.height.isFinite else { return input }
         var img = input.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY))
         let full = CGRect(origin: .zero, size: e.size)
-        let um: CGFloat = 36000 / max(e.width, e.height)
+        // Microns of negative per pixel: the format sets how big grain and glow are on the picture.
+        let um: CGFloat = (shot?.recipe.format.longMM ?? 36) * 1000 / max(e.width, e.height)
         func blur(_ i: CIImage, _ microns: CGFloat) -> CIImage {
             let r = microns / um
             guard r > 0.3 else { return i }
@@ -176,6 +188,8 @@ enum FilmLab {
         // Exposure: a push is shot at a faster speed, so the negative gets less light.
         let gain = CGFloat(pow(2, t.ev - Double(push)))
         trace?("input", img)
+        // The camera: lens, flash, mist and leaks, as light on the scene before the film.
+        if let shot { img = FilmCamera.apply(img, shot, um: um) }
         img = scale(img, gain, gain, gain)
         trace?("exposed", img)
         // Light spreading in the emulsion, then the red halo from the film base.
@@ -201,7 +215,8 @@ enum FilmLab {
         if let k = densityKernel,
            let d = k.apply(extent: full, arguments: [img, blur(img, Fit.couplerUM), blur(img, Fit.couplerTailUM),
                                                       Fit.couplerK, Fit.couplerTailK, gamma,
-                                                      t.pushOffset[push] ?? CIVector(x: 0, y: 0, z: 0), t.dmin, t.dmax]) {
+                                                      t.pushOffset[push] ?? CIVector(x: 0, y: 0, z: 0), t.dmin, t.dmax,
+                                                      timing(shot?.recipe), Float(max(0, shot?.recipe.preflash ?? 0) * 0.02)]) {
             img = d
         }
         trace?("developed", img)
@@ -233,6 +248,14 @@ enum FilmLab {
             img = (us.outputImage ?? img).cropped(to: full)
         }
         return Sanitize.apply(img, floor: 0).transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY))
+    }
+
+    /// Print filter density per printing light. Warmer: less density on the blue printing light
+    /// (more yellow dye on the print). Magenta: more on the green.
+    static func timing(_ r: FilmRecipe?) -> CIVector {
+        guard let r else { return CIVector(x: 0, y: 0, z: 0) }
+        let w = CGFloat(r.warmth) * 0.12, m = CGFloat(r.tint) * 0.1
+        return CIVector(x: w * 0.25, y: -m, z: -w)
     }
 
     static func cube(_ i: CIImage, _ data: Data, _ n: Int, _ full: CGRect) -> CIImage {

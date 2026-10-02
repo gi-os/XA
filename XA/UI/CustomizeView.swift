@@ -76,6 +76,22 @@ struct CustomizeView: View {
                         NavigationLink { DateScreen(settings: settings, camera: camera, film: true) } label: {
                             row("Date back", "\(settings.filmDate.style.title.capitalized) · \(Self.placement(settings.filmDate))", accent: true)
                         }
+                        Text("CAMERA").font(XA.display(11)).foregroundStyle(XA.faint).padding(.top, 4)
+                        FlatSlider(label: "Cheap lens", value: $settings.filmRecipe.lens, format: { "\(Int(($0 * 100).rounded()))" })
+                        FlatSlider(label: "Flash falloff", value: $settings.filmRecipe.flash, format: { "\(Int(($0 * 100).rounded()))" })
+                        FlatSlider(label: "Light leaks", value: $settings.filmRecipe.leak, format: { "\(Int(($0 * 100).rounded()))" })
+                        FlatSlider(label: "Mist filter", value: $settings.filmRecipe.mist, format: { "\(Int(($0 * 100).rounded()))" })
+                        Text("FORMAT").font(XA.display(11)).foregroundStyle(XA.faint).padding(.top, 4)
+                        Segmented(items: FilmFormat.allCases.map { ($0, $0.title) }, selection: $settings.filmRecipe.format)
+                        Text("The size of the negative: smaller formats show bigger grain and glow. 35mm is cut 2:3, 120 square.")
+                            .font(.system(size: 12)).foregroundStyle(XA.faint)
+                        Text("LAB").font(XA.display(11)).foregroundStyle(XA.faint).padding(.top, 4)
+                        Segmented(items: [(FilmScan.lab, "Lab scan"), (.full, "Full size")], selection: $settings.filmRecipe.scan)
+                        FlatSlider(label: "Print warmth", value: $settings.filmRecipe.warmth, range: -1...1, format: { String(format: "%+d", Int(($0 * 100).rounded())) })
+                        FlatSlider(label: "Print tint", value: $settings.filmRecipe.tint, range: -1...1, format: { String(format: "%+d", Int(($0 * 100).rounded())) })
+                        FlatSlider(label: "Preflash", value: $settings.filmRecipe.preflash, format: { "\(Int(($0 * 100).rounded()))" })
+                        Text("Leaks show up on the print, not in the finder, on some frames. The lab scans at a minilab's size (3088 px), where grain sits the way it does on real scans.")
+                            .font(.system(size: 12)).foregroundStyle(XA.faint)
                         Toggle("Develop from RAW", isOn: $settings.digiZero).tint(XA.orange).font(.system(size: 15))
                             .onChange(of: settings.digiZero) { _, _ in camera.zeroChanged() }
                         Text("FILM saves full size with none of DIGI's digicam processing. From RAW it also skips the iPhone's own (Smart HDR, tone mapping, sharpening), so the stock is the only look. Slower to save.")

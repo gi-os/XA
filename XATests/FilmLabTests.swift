@@ -95,9 +95,19 @@ final class FilmLabTests: XCTestCase {
     func testFilmDevelopKeepsFullSize() {
         let big = CIImage(color: CIColor(red: 0.2, green: 0.2, blue: 0.2)).cropped(to: CGRect(x: 0, y: 0, width: 4032, height: 3024))
         var d = DevelopSettings(); d.stack = Stack(simID: "bowery400"); d.film = true
+        d.filmRecipe.scan = .full; d.filmRecipe.format = .half
         let (out, alpha) = Darkroom.develop(big, d, date: Date(), preview: false)
         XCTAssertEqual(out.extent.size, big.extent.size)
         XCTAssertFalse(alpha)
+        // 35mm at the lab: cut to 2:3 and scanned at a Frontier's 3088 on the long side.
+        d.filmRecipe = FilmRecipe()
+        let lab = Darkroom.develop(big, d, date: Date(), preview: false).0.extent.size
+        XCTAssertEqual(lab.width, 3088, accuracy: 2)
+        XCTAssertEqual(lab.height, 3088 * 2 / 3, accuracy: 3)
+        // 120 is square.
+        d.filmRecipe.format = .mf120
+        let sq = Darkroom.develop(big, d, date: Date(), preview: false).0.extent.size
+        XCTAssertEqual(sq.width, sq.height, accuracy: 2)
         d.film = false; d.stack = Stack(simID: "nocturne"); d.megapixels = 2
         XCTAssertLessThan(Darkroom.develop(big, d, date: Date(), preview: false).0.extent.width, 2000)
     }
@@ -105,5 +115,23 @@ final class FilmLabTests: XCTestCase {
     func testStocksAreFilmBoxes() {
         let ids = Sim.presets.compactMap { $0.stock }
         XCTAssertEqual(Set(ids), Set(FilmStock.all.map { $0.id }))
+    }
+
+    func testCameraAndLabKeepTheFrameAndStayFinite() {
+        let src = CIImage(color: CIColor(red: 0.18, green: 0.18, blue: 0.18)).cropped(to: CGRect(x: 0, y: 0, width: 600, height: 400))
+        var r = FilmRecipe(); r.lens = 1; r.flash = 1; r.leak = 1; r.mist = 1; r.warmth = 1; r.tint = -1; r.preflash = 1
+        for seed in 0..<4 {
+            let out = FilmLab.develop(src, stock: FilmStock.all[0], push: 0, preview: false, seed: seed, shot: FilmShot(recipe: r, flashFired: true, seed: seed))
+            XCTAssertEqual(out.extent, src.extent)
+            var px = [Float](repeating: 0, count: 4)
+            CIContext().render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 300, y: 200, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+            XCTAssertTrue(px.allSatisfy { $0.isFinite })
+        }
+        // Warmer printing: more red than blue in a grey.
+        var warm = FilmRecipe(); warm.lens = 0; warm.flash = 0; warm.leak = 0; warm.warmth = 1
+        let w = FilmLab.develop(src, stock: FilmStock.all[0], push: 0, preview: false, seed: 1, shot: FilmShot(recipe: warm))
+        var px = [Float](repeating: 0, count: 4)
+        CIContext().render(w, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 300, y: 200, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        XCTAssertGreaterThan(px[0], px[2])
     }
 }

@@ -1,4 +1,5 @@
 import CoreImage
+import CoreImage.CIFilterBuiltins
 import Foundation
 import ImageIO
 
@@ -86,6 +87,8 @@ struct DevelopSettings {
     var recipe = DigiRecipe()
     /// FILM: full size, the stock only, none of the digicam's processing.
     var film = false
+    /// FILM's camera and lab.
+    var filmRecipe = FilmRecipe()
     /// BOOTH: the skin setting, and (in the viewfinder) where the eyes were last seen.
     var booth: BoothSkin? = nil
     var eyes: Booth.Eyes? = nil
@@ -108,6 +111,7 @@ enum Darkroom {
             let faces = preview ? s.eyes : (s.eyes ?? Booth.eyes(in: src))
             return (Booth.develop(src, skin, deco: s.deco, faces: faces, preview: preview), false)
         }
+        if s.film { return (developFilm(src, s, date: date, preview: preview, dateShift: dateShift, flashFired: conditions.flashFired), false) }
         var img = preview || s.film ? src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
                                     : Digicam.shrink(src, megapixels: s.megapixels)
         let sim = FilmCatalog.sim(s.stack.simID)
@@ -144,6 +148,44 @@ enum Darkroom {
         }
         img = stamp(img, s, date: date, dateShift: dateShift, mono: mono, shape: shapeForDate, instant: instant)
         return (img, alpha)
+    }
+
+    /// FILM: the frame cut to the format, scanned at the lab's size, the camera, the stock and the
+    /// lab's printing; then the date back.
+    private static func developFilm(_ src: CIImage, _ s: DevelopSettings, date: Date, preview: Bool, dateShift: CGFloat, flashFired: Bool) -> CIImage {
+        var img = src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
+        let r = s.filmRecipe
+        let frame = r.format.frame(in: img.extent)
+        if !preview {
+            img = img.cropped(to: frame).transformed(by: CGAffineTransform(translationX: -frame.minX, y: -frame.minY))
+            if let edge = r.scan.longEdge, max(img.extent.width, img.extent.height) > edge {
+                let down = CIFilter.lanczosScaleTransform()
+                down.inputImage = img
+                down.scale = Float(edge / max(img.extent.width, img.extent.height))
+                if let o = down.outputImage { img = o.transformed(by: CGAffineTransform(translationX: -o.extent.minX, y: -o.extent.minY)) }
+                img = img.cropped(to: img.extent.integral)
+            }
+        }
+        var shot = FilmShot(recipe: r, flashFired: flashFired, seed: Int(date.timeIntervalSince1970 * 1000) % 100_000)
+        // A leak is a surprise on the print, never in the finder.
+        if preview { shot.recipe.leak = 0 }
+        let sim = FilmCatalog.sim(s.stack.simID)
+        if let sim, !sim.isNeutral {
+            img = SimEngine.apply(sim, to: img, preview: preview, push: s.stack.push, seed: preview ? nil : shot.seed, shot: shot)
+        }
+        if preview && frame != img.extent {
+            // The finder shows the frame lines: what falls outside the format is dimmed.
+            let e = img.extent
+            let dim = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.6)).cropped(to: e)
+            let hole = CIImage(color: .white).cropped(to: frame)
+            let mask = hole.composited(over: CIImage(color: .black).cropped(to: e))
+            let b = CIFilter.blendWithMask()
+            b.inputImage = CIImage(color: .clear).cropped(to: e)
+            b.backgroundImage = dim
+            b.maskImage = mask
+            if let m = b.outputImage { img = m.cropped(to: e).composited(over: img) }
+        }
+        return stamp(img, s, date: date, dateShift: dateShift, mono: sim?.mono ?? false)
     }
 
     /// The date back's orange numbers, burned into the corner.

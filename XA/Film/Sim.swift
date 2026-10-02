@@ -301,9 +301,9 @@ enum SimEngine {
     }
 
     /// The whole sim on an image: cube, then halation, grain and vignette.
-    static func apply(_ s: Sim, to img: CIImage, preview: Bool, push: Int = 0, seed: Int? = nil) -> CIImage {
+    static func apply(_ s: Sim, to img: CIImage, preview: Bool, push: Int = 0, seed: Int? = nil, shot: FilmShot? = nil) -> CIImage {
         if let st = FilmStock.stock(s.stock) {
-            return FilmLab.develop(img, stock: st, push: push, preview: preview, seed: seed ?? Int.random(in: 0..<100_000))
+            return FilmLab.develop(img, stock: st, push: push, preview: preview, seed: seed ?? Int.random(in: 0..<100_000), shot: shot)
         }
         let e = img.extent
         let clean = Sanitize.apply(img)

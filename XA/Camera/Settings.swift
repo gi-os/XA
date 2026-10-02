@@ -26,6 +26,8 @@ final class AppSettings: ObservableObject {
     @Published var date: DateConfig { didSet { save(date, "dateConfig") } }
     /// FILM has its own date back.
     @Published var filmDate: DateConfig { didSet { save(filmDate, "filmDateConfig") } }
+    /// FILM's camera and lab.
+    @Published var filmRecipe: FilmRecipe { didSet { save(filmRecipe, "filmRecipe") } }
     /// Which digicam faults DIGI photos get, and how much.
     @Published var recipe: DigiRecipe { didSet { save(recipe, "digiRecipe") } }
     /// DIGI shows each shot on the viewfinder for a moment, like a digicam's review.
@@ -59,6 +61,7 @@ final class AppSettings: ObservableObject {
         let digiDate: DateConfig = AppSettings.load("dateConfig") ?? DateConfig()
         date = digiDate
         filmDate = AppSettings.load("filmDateConfig") ?? digiDate
+        filmRecipe = AppSettings.load("filmRecipe") ?? FilmRecipe()
         recipe = AppSettings.load("digiRecipe") ?? DigiRecipe()
         instantReview = d.object(forKey: "instantReview") as? Bool ?? true
         digiZero = d.object(forKey: "digiZero") as? Bool ?? false

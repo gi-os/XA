@@ -175,6 +175,7 @@ final class CameraModel: NSObject, ObservableObject {
         d.megapixels = settings.digiMegapixels
         d.noise = settings.noise
         d.date = mode == .film ? settings.filmDate : settings.date
+        d.filmRecipe = settings.filmRecipe
         d.recipe = settings.recipe
         if mode == .booth {
             d.booth = settings.boothSkin
