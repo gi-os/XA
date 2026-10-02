@@ -56,8 +56,9 @@ final class AppSettings: ObservableObject {
         proMegapixels = d.object(forKey: "proMP") as? Int ?? 0
         crunch = d.object(forKey: "crunch") as? Double ?? 0.6
         noise = d.object(forKey: "noise") as? Double ?? 0.5
-        date = AppSettings.load("dateConfig") ?? DateConfig()
-        filmDate = AppSettings.load("filmDateConfig") ?? date
+        let digiDate: DateConfig = AppSettings.load("dateConfig") ?? DateConfig()
+        date = digiDate
+        filmDate = AppSettings.load("filmDateConfig") ?? digiDate
         recipe = AppSettings.load("digiRecipe") ?? DigiRecipe()
         instantReview = d.object(forKey: "instantReview") as? Bool ?? true
         digiZero = d.object(forKey: "digiZero") as? Bool ?? false
