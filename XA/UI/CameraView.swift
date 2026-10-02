@@ -166,6 +166,12 @@ struct CameraView: View {
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
+    /// The finder takes the shape of the frame: FILM's format (2:3 for 35mm, square for 120),
+    /// 3:4 otherwise. The picture fills it, so what is outside the format simply isn't there.
+    private var finderAspect: CGFloat {
+        camera.mode == .film ? settings.filmRecipe.format.aspect : 3 / 4
+    }
+
     @ViewBuilder private var viewfinder: some View {
         ZStack {
             Color.black
@@ -177,7 +183,7 @@ struct CameraView: View {
                 .foregroundStyle(.white)
             } else {
                 Viewfinder(camera: camera)
-                    .aspectRatio(3 / 4, contentMode: .fit)
+                    .aspectRatio(finderAspect, contentMode: .fit)
                     .overlay { if settings.grid && camera.mode == .pro { GridLines() } }
                     .overlay { FocusBracket(camera: camera) }
                     // DIGI prints its settings across the top of the picture as plain text, like the
@@ -188,7 +194,8 @@ struct CameraView: View {
                     .overlay { if camera.flash { Color.white.opacity(0.7) } }
             }
         }
-        .aspectRatio(3 / 4, contentMode: .fit)
+        .aspectRatio(finderAspect, contentMode: .fit)
+        .animation(.snappy(duration: 0.3), value: finderAspect)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 }

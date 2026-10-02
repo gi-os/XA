@@ -174,16 +174,8 @@ enum Darkroom {
             img = SimEngine.apply(sim, to: img, preview: preview, push: s.stack.push, seed: preview ? nil : shot.seed, shot: shot)
         }
         if preview && frame != img.extent {
-            // The finder shows the frame lines: what falls outside the format is dimmed.
-            let e = img.extent
-            let dim = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.6)).cropped(to: e)
-            let hole = CIImage(color: .white).cropped(to: frame)
-            let mask = hole.composited(over: CIImage(color: .black).cropped(to: e))
-            let b = CIFilter.blendWithMask()
-            b.inputImage = CIImage(color: .clear).cropped(to: e)
-            b.backgroundImage = dim
-            b.maskImage = mask
-            if let m = b.outputImage { img = m.cropped(to: e).composited(over: img) }
+            // The finder is the frame's shape and fills with the picture: show it the format's crop.
+            img = img.cropped(to: frame).transformed(by: CGAffineTransform(translationX: -frame.minX, y: -frame.minY))
         }
         return stamp(img, s, date: date, dateShift: dateShift, mono: sim?.mono ?? false)
     }
