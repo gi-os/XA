@@ -137,15 +137,15 @@ final class FilmLabTests: XCTestCase {
 
     func testHalationGrainAndGlareScaleWithTheRecipe() {
         // A bright lamp in the dark: more halation, more red around it.
-        let r = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let r = CGRect(x: 0, y: 0, width: 1600, height: 1200)
         let dark = CIImage(color: CIColor(red: 0.01, green: 0.01, blue: 0.01)).cropped(to: r)
-        let lamp = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: CGRect(x: 190, y: 140, width: 20, height: 20))
+        let lamp = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: CGRect(x: 780, y: 580, width: 40, height: 40))
         let scene = lamp.composited(over: dark)
         func red(_ h: Double) -> Float {
             var rec = FilmRecipe(); rec.lens = 0; rec.flash = 0; rec.leak = 0; rec.halation = h; rec.grain = 0; rec.glare = 0
             let out = FilmLab.develop(scene, stock: FilmStock.all[0], push: 0, preview: false, seed: 1, shot: FilmShot(recipe: rec))
             var px = [Float](repeating: 0, count: 4)
-            CIContext().render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 236, y: 150, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+            CIContext().render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 824, y: 600, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
             XCTAssertTrue(px.allSatisfy { $0.isFinite })
             return px[0]
         }
