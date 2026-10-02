@@ -32,15 +32,18 @@ final class FilmLabTests: XCTestCase {
     }
 
     func testEveryStockHasTablesAndDevelops() {
-        let grey = CIImage(color: CIColor(red: 0.18, green: 0.18, blue: 0.18)).cropped(to: CGRect(x: 0, y: 0, width: 96, height: 72))
-        let ctx = CIContext()
+        // An 18% grey card in linear light (Core Image's working space), read back linear.
+        let lin = CGColorSpace(name: CGColorSpace.linearSRGB)!
+        let grey = CIImage(color: CIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 1, colorSpace: lin)!)
+            .cropped(to: CGRect(x: 0, y: 0, width: 96, height: 72))
+        let ctx = CIContext(options: [.workingColorSpace: lin])
         for st in FilmStock.all {
             XCTAssertNotNil(FilmLab.tables(st.id), st.id)
             for push in [-1, 0, 1] {
                 let out = FilmLab.develop(grey, stock: st, push: push, preview: false, seed: 3)
                 XCTAssertEqual(out.extent, grey.extent, st.id)
                 var px = [Float](repeating: 0, count: 4)
-                ctx.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 48, y: 36, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+                ctx.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 48, y: 36, width: 1, height: 1), format: .RGBAf, colorSpace: lin)
                 // An 18% grey card prints as 18% grey at any push: the lab prints a pushed roll back.
                 XCTAssertEqual(px[1], 0.18, accuracy: 0.045, "\(st.id) push \(push) mid grey")
                 for c in 0..<3 {
