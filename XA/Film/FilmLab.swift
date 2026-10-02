@@ -147,6 +147,9 @@ enum FilmLab {
 
     /// Develop a frame (linear, Core Image's working space) on `stock`, shot `push` stops over
     /// or under box speed. `seed` fixes the grain of a photo; the viewfinder passes a fresh one.
+    /// Tests can look at each stage.
+    static var trace: ((String, CIImage) -> Void)?
+
     static func develop(_ input: CIImage, stock: FilmStock, push: Int, preview: Bool, seed: Int) -> CIImage {
         guard let t = tables(stock.id) else { return input }
         let e = input.extent
@@ -180,7 +183,9 @@ enum FilmLab {
         img = img.applyingFilter("CILinearToSRGBToneCurve")
         img = img.applyingFilter("CIColorClamp", parameters: ["inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 1),
                                                              "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1)])
+        trace?("code in", img)
         img = cube(img, t.film, t.size, full)
+        trace?("negative", img)
         // On the negative: inhibitor couplers (local contrast), push development, dye clouds, grain.
         let gamma = Float(1 + 0.12 * Double(push))
         if let k = densityKernel,
@@ -189,6 +194,7 @@ enum FilmLab {
                                                       t.pushOffset[push] ?? CIVector(x: 0, y: 0, z: 0), t.dmin, t.dmax]) {
             img = d
         }
+        trace?("developed", img)
         img = blur(img, Fit.dyeBlurUM)
         if let g = grainKernel, let rnd = CIFilter.randomGenerator().outputImage {
             let clump = max(0.35, Fit.grainClumpUM / um / 2.355)
@@ -206,7 +212,9 @@ enum FilmLab {
         }
         img = img.applyingFilter("CIColorClamp", parameters: ["inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 1),
                                                              "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1)])
+        trace?("grained", img)
         img = cube(img, t.print, t.size, full)
+        trace?("print", img)
         img = img.applyingFilter("CISRGBToneCurveToLinear")
         // The lab scanner's sharpening.
         if !preview || um < 40 {

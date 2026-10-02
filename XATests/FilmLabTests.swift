@@ -37,6 +37,13 @@ final class FilmLabTests: XCTestCase {
         let grey = CIImage(color: CIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 1, colorSpace: lin)!)
             .cropped(to: CGRect(x: 0, y: 0, width: 96, height: 72))
         let ctx = CIContext(options: [.workingColorSpace: lin])
+        FilmLab.trace = { name, img in
+            var q = [Float](repeating: 0, count: 4)
+            ctx.render(img.cropped(to: CGRect(x: 48, y: 36, width: 1, height: 1)), toBitmap: &q, rowBytes: 16,
+                       bounds: CGRect(x: 48, y: 36, width: 1, height: 1), format: .RGBAf, colorSpace: lin)
+            print("DEVELOP stage", name, q)
+        }
+        defer { FilmLab.trace = nil }
         for st in FilmStock.all {
             XCTAssertNotNil(FilmLab.tables(st.id), st.id)
             for push in [-1, 0, 1] {
