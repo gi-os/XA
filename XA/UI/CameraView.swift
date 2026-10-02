@@ -17,6 +17,8 @@ struct CameraView: View {
     @State private var pinchFrom: CGFloat?
     /// PRO: the panel field the command wheel changes.
     @State private var proField: ProField = .shutter
+    /// The deck's sideways drag, for the ribbon to follow.
+    @State private var ribbonDrag: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 8) {
@@ -25,11 +27,6 @@ struct CameraView: View {
             viewfinder
                 .overlay { FocusTapLayer(camera: camera, filmOpen: $filmOpen) }
                 .onReceive(NotificationCenter.default.publisher(for: .xaBackToCamera)) { _ in filmOpen = false }
-                // DIGI prints its settings across the top of the picture as plain text, like the
-                // camera did, clear of the date back in the bottom corner.
-                .overlay(alignment: .top) {
-                    if camera.mode == .digi { DigiOSD(camera: camera).allowsHitTesting(false).transition(.opacity) }
-                }
                 .contentShape(Rectangle())
                 .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded(swipe))
                 .simultaneousGesture(
@@ -48,7 +45,7 @@ struct CameraView: View {
                 case .video:
                     if filmOpen || camera.recording { VideoRows(camera: camera, open: $filmOpen, onFilm: onFilm).transition(Self.rows) }
                 case .pro:
-                    ProKeys(camera: camera, settings: settings, field: $proField, onCustomize: onCustomize).transition(Self.rows)
+                    ProKeys(camera: camera, settings: settings, field: $proField, onCustomize: onCustomize).transition(Self.expand)
                 case .booth:
                     EmptyView()
                 }
@@ -62,16 +59,23 @@ struct CameraView: View {
                 }
                 ShutterRow(camera: camera, settings: settings, onRoll: onRoll)
                 // Under the shutter, in the space the home bar leaves: the viewfinder keeps the room.
-                ModeRibbon(camera: camera, modes: modes)
+                ModeRibbon(camera: camera, modes: modes, drag: ribbonDrag)
             }
             .animation(.snappy(duration: 0.3), value: camera.mode)
             .contentShape(Rectangle())
             // The deck: swipe sideways to change mode, like the iPhone camera; up opens the roll.
-            .gesture(DragGesture(minimumDistance: 24).onEnded { v in
-                let dx = v.translation.width, dy = v.translation.height
-                if dy < -60 && abs(dy) > abs(dx) { onRoll() }
-                else if abs(dx) > 50 && abs(dx) > abs(dy) * 1.3 { ModeRibbon.step(dx < 0 ? 1 : -1, modes, camera) }
-            })
+            // Drag sideways and the ribbon follows the finger: let go on the mode you want.
+            .gesture(DragGesture(minimumDistance: 24)
+                .onChanged { v in
+                    let dx = v.translation.width, dy = v.translation.height
+                    if !camera.recording && abs(dx) > abs(dy) * 1.3 { ribbonDrag = dx }
+                }
+                .onEnded { v in
+                    let dx = v.translation.width, dy = v.translation.height
+                    if dy < -60 && abs(dy) > abs(dx) { onRoll() }
+                    else if !camera.recording && abs(dx) > abs(dy) * 1.3 { ModeRibbon.land(drag: dx, modes, camera) }
+                    withAnimation(.snappy(duration: 0.28)) { ribbonDrag = 0 }
+                })
         }
         .padding(.horizontal, 11)
         // The shutter sits where the system camera's does, so thumbs find it without looking;
@@ -106,6 +110,10 @@ struct CameraView: View {
             Color.clear.frame(width: 44, height: 44)
         }
     }
+
+    /// PRO's keys open out of the screen as it grows, in the same motion, and fold back into it.
+    static let expand: AnyTransition = .modifier(active: Unfold(k: 0), identity: Unfold(k: 1))
+        .animation(.spring(response: 0.42, dampingFraction: 0.86))
 
     /// Mode rows: the old one drops away, the new one rises in after it.
     static let rows: AnyTransition = .asymmetric(
@@ -171,6 +179,11 @@ struct CameraView: View {
                     .aspectRatio(3 / 4, contentMode: .fit)
                     .overlay { if settings.grid && camera.mode == .pro { GridLines() } }
                     .overlay { FocusBracket(camera: camera) }
+                    // DIGI prints its settings across the top of the picture as plain text, like the
+                    // camera did, clear of the date back in the bottom corner.
+                    .overlay(alignment: .top) {
+                        if camera.mode == .digi { DigiOSD(camera: camera).allowsHitTesting(false).transition(.opacity) }
+                    }
                     .overlay { if camera.flash { Color.white.opacity(0.7) } }
             }
         }
@@ -726,4 +739,14 @@ struct SheetCard: View {
     }
 
     private func tile(_ c: Color) -> some View { RoundedRectangle(cornerRadius: 2).fill(c) }
+}
+
+/// Folds a view up into its top edge: 0 folded, 1 open.
+private struct Unfold: ViewModifier {
+    let k: CGFloat
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(x: 1, y: max(k, 0.001), anchor: .top)
+            .opacity(Double(min(1, k * 3)))
+    }
 }

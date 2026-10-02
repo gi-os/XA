@@ -4,7 +4,15 @@ import SwiftUI
 struct DateScreen: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var camera: CameraModel
+    /// FILM's date back instead of DIGI's.
+    var film = false
     @State private var preview: UIImage?
+
+    private var cfg: DateConfig {
+        get { film ? settings.filmDate : settings.date }
+        nonmutating set { if film { settings.filmDate = newValue } else { settings.date = newValue } }
+    }
+    private var cfgB: Binding<DateConfig> { Binding(get: { cfg }, set: { cfg = $0 }) }
 
     var body: some View {
         ScrollView {
@@ -18,8 +26,8 @@ struct DateScreen: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
                         ForEach(DateStyle.allCases) { s in
-                            let on = settings.date.style == s
-                            Button { settings.date.style = s } label: {
+                            let on = cfg.style == s
+                            Button { cfg.style = s } label: {
                                 VStack(alignment: .leading, spacing: 6) {
                                     DateChip(style: s).frame(width: 104, height: 56)
                                         .overlay(Rectangle().strokeBorder(on ? XA.orange : .clear, lineWidth: 2))
@@ -36,15 +44,15 @@ struct DateScreen: View {
                     Text("Sunday 600 and Sunday Round write it by hand on the print instead.").font(.system(size: 13)).foregroundStyle(XA.dim)
                 }
                 SectionLabel(text: "PLACEMENT")
-                Segmented(items: [(DatePlacement.off, "Off"), (.corner, "Corner"), (.follow, "Follow frame")], selection: $settings.date.placement)
+                Segmented(items: [(DatePlacement.off, "Off"), (.corner, "Corner"), (.follow, "Follow frame")], selection: cfgB.placement)
                 SectionLabel(text: "FORMAT")
-                Segmented(items: [(DateFormat.own, "Style's own"), (.dmy, "28.09.26"), (.long, "SEP 28 2026")], selection: $settings.date.format)
+                Segmented(items: [(DateFormat.own, "Style's own"), (.dmy, "28.09.26"), (.long, "SEP 28 2026")], selection: cfgB.format)
                 SectionLabel(text: "INK")
                 HStack(spacing: 12) {
                     inkButton(nil)
                     ForEach([RGBA8(255, 138, 43), RGBA8(200, 245, 106), RGBA8(216, 65, 47), RGBA8(255, 255, 255), RGBA8(255, 210, 63)], id: \.self) { inkButton($0) }
                     Spacer()
-                    Toggle("Time", isOn: $settings.date.time).tint(XA.orange).fixedSize()
+                    Toggle("Time", isOn: cfgB.time).tint(XA.orange).fixedSize()
                 }
             }
             .padding(16)
@@ -54,12 +62,12 @@ struct DateScreen: View {
         .navigationTitle("DATE BACK")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: render)
-        .onChange(of: settings.date) { _, _ in render(); camera.syncFrameSettings() }
+        .onChange(of: cfg) { _, _ in render(); camera.syncFrameSettings() }
     }
 
     private func inkButton(_ c: RGBA8?) -> some View {
-        let on = settings.date.color == c
-        return Button { settings.date.color = c } label: {
+        let on = cfg.color == c
+        return Button { cfg.color = c } label: {
             ZStack {
                 if let c { Circle().fill(Color(uiColor: c.ui)) } else { Circle().fill(XA.fill); Text("A").font(XA.display(13)) }
             }
@@ -74,7 +82,8 @@ struct DateScreen: View {
         let stack = camera.stack
         var d = DevelopSettings()
         d.stack = stack
-        d.date = settings.date
+        d.date = cfg
+        d.film = film
         let src = camera.latestFrame ?? SimEditor.sample
         DispatchQueue.global(qos: .userInitiated).async {
             let (img, _) = Darkroom.develop(src, d, date: Date(), preview: true)

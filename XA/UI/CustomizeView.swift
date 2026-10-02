@@ -24,7 +24,7 @@ struct CustomizeView: View {
                             FlatSlider(label: "Save quality", value: $settings.crunch, range: 0.3...0.95, format: { "\(Int(($0 * 100).rounded()))" })
                             FlatSlider(label: "Sensor noise", value: $settings.noise, format: { "\(Int(($0 * 100).rounded()))" })
                             NavigationLink { DateScreen(settings: settings, camera: camera) } label: {
-                                row("Date back", "\(settings.date.style.title.capitalized) · \(placement)", accent: true)
+                                row("Date back", "\(settings.date.style.title.capitalized) · \(Self.placement(settings.date))", accent: true)
                             }
                         }
                     }
@@ -73,6 +73,9 @@ struct CustomizeView: View {
                     }
                     group("FILM") {
                         VStack(alignment: .leading, spacing: 8) {
+                        NavigationLink { DateScreen(settings: settings, camera: camera, film: true) } label: {
+                            row("Date back", "\(settings.filmDate.style.title.capitalized) · \(Self.placement(settings.filmDate))", accent: true)
+                        }
                         Toggle("Develop from RAW", isOn: $settings.digiZero).tint(XA.orange).font(.system(size: 15))
                             .onChange(of: settings.digiZero) { _, _ in camera.zeroChanged() }
                         Text("FILM saves full size with none of DIGI's digicam processing. From RAW it also skips the iPhone's own (Smart HDR, tone mapping, sharpening), so the stock is the only look. Slower to save.")
@@ -99,8 +102,8 @@ struct CustomizeView: View {
         .onDisappear { camera.applyResolution(); camera.rebuildControls() }
     }
 
-    private var placement: String {
-        switch settings.date.placement {
+    static func placement(_ d: DateConfig) -> String {
+        switch d.placement {
         case .off: return "off"
         case .corner: return "corner"
         case .follow: return "follows frame"

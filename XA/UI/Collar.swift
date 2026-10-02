@@ -18,13 +18,18 @@ extension CaptureMode {
 struct ModeRibbon: View {
     @ObservedObject var camera: CameraModel
     var modes: [CaptureMode]
-    private let pitch: CGFloat = 74
+    /// How far a finger has dragged the deck sideways right now: the ribbon follows it, and the
+    /// name under the dot is where you land when you let go.
+    var drag: CGFloat = 0
+    static let pitch: CGFloat = 74
+    private var pitch: CGFloat { Self.pitch }
 
     var body: some View {
-        let i = CGFloat(modes.firstIndex(of: camera.mode) ?? 0)
+        let i = CGFloat(modes.firstIndex(of: camera.mode) ?? 0) - drag / pitch
+        let target = Self.target(camera.mode, drag: drag, modes)
         ZStack {
             ForEach(Array(modes.enumerated()), id: \.element) { k, m in
-                let on = camera.mode == m
+                let on = target == m
                 Button { ModeRibbon.set(m, camera) } label: {
                     Text(m.title).font(XA.display(13)).tracking(0.6)
                         .foregroundStyle(on ? m.lamp : Color.white.opacity(camera.recording ? 0.25 : 0.55))
@@ -35,8 +40,9 @@ struct ModeRibbon: View {
                 .disabled(camera.recording)
                 .offset(x: (CGFloat(k) - i) * pitch)
             }
-            Circle().fill(camera.mode.lamp).frame(width: 5, height: 5).offset(y: 14)
+            Circle().fill(target.lamp).frame(width: 5, height: 5).offset(y: 14)
         }
+        .onChange(of: target) { _, _ in UISelectionFeedbackGenerator().selectionChanged() }
         .frame(maxWidth: .infinity).frame(height: 30)
         .clipped()
         .animation(.snappy(duration: 0.28), value: camera.mode)
@@ -47,6 +53,19 @@ struct ModeRibbon: View {
         guard m != camera.mode, !camera.recording else { return }
         withAnimation(.snappy) { camera.mode = m }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    /// The mode a drag of `drag` points would land on.
+    static func target(_ from: CaptureMode, drag: CGFloat, _ modes: [CaptureMode]) -> CaptureMode {
+        guard let i = modes.firstIndex(of: from), !modes.isEmpty else { return from }
+        let j = Int((CGFloat(i) - drag / pitch).rounded())
+        return modes[min(modes.count - 1, max(0, j))]
+    }
+
+    /// Let go after a drag: land on the mode under the dot; a short flick still moves one.
+    static func land(drag: CGFloat, _ modes: [CaptureMode], _ camera: CameraModel) {
+        let t = target(camera.mode, drag: drag, modes)
+        if t != camera.mode { set(t, camera) } else if abs(drag) > 30 { step(drag < 0 ? 1 : -1, modes, camera) }
     }
 
     /// Swipe left for the mode to the right, as on the iPhone.

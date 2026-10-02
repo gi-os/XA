@@ -173,7 +173,7 @@ final class CameraModel: NSObject, ObservableObject {
         d.stack = stack
         d.megapixels = settings.digiMegapixels
         d.noise = settings.noise
-        d.date = settings.date
+        d.date = mode == .film ? settings.filmDate : settings.date
         d.recipe = settings.recipe
         if mode == .booth {
             d.booth = settings.boothSkin
@@ -412,7 +412,8 @@ final class CameraModel: NSObject, ObservableObject {
         }
     }
 
-    private var turn: CGFloat { lock.lock(); defer { lock.unlock() }; return _turn }
+    /// The selfie camera's picture is never turned: it is saved the way the viewfinder shows it.
+    private var turn: CGFloat { lock.lock(); defer { lock.unlock() }; return frontFlag ? 0 : _turn }
 
     /// Turn a frame clockwise by a multiple of 90°, keeping it at the origin.
     static func rotated(_ img: CIImage, clockwise deg: CGFloat) -> CIImage {
@@ -832,14 +833,21 @@ final class CameraModel: NSObject, ObservableObject {
         let rc = rotation
         // Off the main thread: whatever the screen is busy drawing can't hold the shot up.
         sessionQueue.async {
-            if let c = self.photoOutput.connection(with: .video), let rc {
-                let a = rc.videoRotationAngleForHorizonLevelCapture
-                if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
-            }
-            // BOOTH saves you as you saw yourself: mirrored, like the booth's screen.
-            if let c = self.photoOutput.connection(with: .video), c.isVideoMirroringSupported {
-                if m == .booth { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = self.frontFlag }
-                else if !c.automaticallyAdjustsVideoMirroring { c.automaticallyAdjustsVideoMirroring = true }
+            if let c = self.photoOutput.connection(with: .video) {
+                if self.frontFlag {
+                    // The selfie camera is shot exactly as the viewfinder shows it: upright and
+                    // mirrored, the same turn and the same mirror as the frames. Its horizon
+                    // angle came out upside down once mirrored.
+                    let a = self.previewAngle
+                    if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
+                    if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = true }
+                } else {
+                    if let rc {
+                        let a = rc.videoRotationAngleForHorizonLevelCapture
+                        if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
+                    }
+                    if c.isVideoMirroringSupported && !c.automaticallyAdjustsVideoMirroring { c.automaticallyAdjustsVideoMirroring = true }
+                }
             }
             self.photoOutput.capturePhoto(with: settingsP, delegate: self)
         }

@@ -24,6 +24,8 @@ final class AppSettings: ObservableObject {
     @Published var crunch: Double { didSet { d.set(crunch, forKey: "crunch") } }
     @Published var noise: Double { didSet { d.set(noise, forKey: "noise") } }
     @Published var date: DateConfig { didSet { save(date, "dateConfig") } }
+    /// FILM has its own date back.
+    @Published var filmDate: DateConfig { didSet { save(filmDate, "filmDateConfig") } }
     /// Which digicam faults DIGI photos get, and how much.
     @Published var recipe: DigiRecipe { didSet { save(recipe, "digiRecipe") } }
     /// DIGI shows each shot on the viewfinder for a moment, like a digicam's review.
@@ -55,6 +57,7 @@ final class AppSettings: ObservableObject {
         crunch = d.object(forKey: "crunch") as? Double ?? 0.6
         noise = d.object(forKey: "noise") as? Double ?? 0.5
         date = AppSettings.load("dateConfig") ?? DateConfig()
+        filmDate = AppSettings.load("filmDateConfig") ?? date
         recipe = AppSettings.load("digiRecipe") ?? DigiRecipe()
         instantReview = d.object(forKey: "instantReview") as? Bool ?? true
         digiZero = d.object(forKey: "digiZero") as? Bool ?? false
