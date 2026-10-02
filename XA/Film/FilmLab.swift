@@ -62,9 +62,8 @@ enum FilmLab {
         static let dyeBlurUM: CGFloat = 14.4
         static let grainClumpUM: CGFloat = 7, grainChroma: Float = 0.06, grainTop: Float = 0.7
         static let sharpen: Float = 0.774, sharpenUM: CGFloat = 20.95
-        /// The tables put the source's white four stops over middle grey; this brings a normally
-        /// exposed phone frame back to a normally exposed negative.
-        static let exposureEV: Double = -0.9
+        /// Used only when a stock has no calibrated exposure of its own (stocks.json "ev").
+        static let exposureEV: Double = -1.5
     }
 
     struct Tables {
@@ -73,6 +72,10 @@ enum FilmLab {
         let print: Data
         let dmin: CIVector
         let dmax: CIVector
+        /// The exposure that prints an 18% grey card as 18% grey (tools/filmsim/calibrate_ev.py).
+        let ev: Double
+        /// The density the lab adds back when printing a pushed or pulled roll, per push.
+        let pushOffset: [Int: CIVector]
     }
 
     private static let lock = NSLock()
@@ -96,8 +99,13 @@ enum FilmLab {
         guard let m = meta[id], let n = m["size"] as? Int,
               let dmin = m["dmin"] as? [Double], let dmax = m["dmax"] as? [Double],
               let film = rgba(id + "_film", n), let print = rgba(id + "_print", n) else { return nil }
+        var offsets: [Int: CIVector] = [:]
+        for (k, v) in (m["push_offset"] as? [String: [Double]]) ?? [:] where v.count == 3 {
+            if let p = Int(k) { offsets[p] = CIVector(x: v[0], y: v[1], z: v[2]) }
+        }
         let t = Tables(size: n, film: film, print: print,
-                       dmin: CIVector(x: dmin[0], y: dmin[1], z: dmin[2]), dmax: CIVector(x: dmax[0], y: dmax[1], z: dmax[2]))
+                       dmin: CIVector(x: dmin[0], y: dmin[1], z: dmin[2]), dmax: CIVector(x: dmax[0], y: dmax[1], z: dmax[2]),
+                       ev: (m["ev"] as? Double) ?? Fit.exposureEV, pushOffset: offsets)
         cache[id] = t
         return t
     }
@@ -117,10 +125,10 @@ enum FilmLab {
     }
 
     private static let densityKernel = CIColorKernel(source: """
-    kernel vec4 xaDensity(__sample c, __sample bc, __sample bt, float kc, float kt, float gam, vec3 dmin, vec3 dmax) {
+    kernel vec4 xaDensity(__sample c, __sample bc, __sample bt, float kc, float kt, float gam, vec3 off, vec3 dmin, vec3 dmax) {
         vec3 code = c.rgb + kc * (c.rgb - bc.rgb) + kt * (c.rgb - bt.rgb);
         vec3 D = code * (dmax - dmin) + dmin;
-        D = max(D, vec3(0.0)) * gam + min(D, vec3(0.0));
+        D = max(D, vec3(0.0)) * gam + min(D, vec3(0.0)) + off;
         return vec4((D - dmin) / (dmax - dmin), 1.0);
     }
     """)
@@ -159,7 +167,7 @@ enum FilmLab {
             return (m.outputImage ?? i).cropped(to: full)
         }
         // Exposure: a push is shot at a faster speed, so the negative gets less light.
-        let gain = CGFloat(pow(2, Fit.exposureEV - Double(push)))
+        let gain = CGFloat(pow(2, t.ev - Double(push)))
         img = scale(img, gain, gain, gain)
         // Light spreading in the emulsion, then the red halo from the film base.
         let mix = CIFilter.dissolveTransition()
@@ -177,7 +185,8 @@ enum FilmLab {
         let gamma = Float(1 + 0.12 * Double(push))
         if let k = densityKernel,
            let d = k.apply(extent: full, arguments: [img, blur(img, Fit.couplerUM), blur(img, Fit.couplerTailUM),
-                                                      Fit.couplerK, Fit.couplerTailK, gamma, t.dmin, t.dmax]) {
+                                                      Fit.couplerK, Fit.couplerTailK, gamma,
+                                                      t.pushOffset[push] ?? CIVector(x: 0, y: 0, z: 0), t.dmin, t.dmax]) {
             img = d
         }
         img = blur(img, Fit.dyeBlurUM)

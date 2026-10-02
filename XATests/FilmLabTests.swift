@@ -41,6 +41,8 @@ final class FilmLabTests: XCTestCase {
                 XCTAssertEqual(out.extent, grey.extent, st.id)
                 var px = [Float](repeating: 0, count: 4)
                 ctx.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 48, y: 36, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+                // An 18% grey card prints as 18% grey at any push: the lab prints a pushed roll back.
+                XCTAssertEqual(px[1], 0.18, accuracy: 0.045, "\(st.id) push \(push) mid grey")
                 for c in 0..<3 {
                     XCTAssertTrue(px[c].isFinite, "\(st.id) push \(push)")
                     XCTAssertGreaterThan(px[c], 0.0, "\(st.id) push \(push) not black")
