@@ -155,6 +155,8 @@ final class CameraModel: NSObject, ObservableObject {
     }
     private var patch = PatchSpring()
     private var lastLens: Float = -1
+    private var lastKick: CFTimeInterval = 0
+    private var finderLight: CGFloat = 1
     // FILM's ultra-wide: the second camera behind the finder's surround.
     private let uwOutput = AVCaptureVideoDataOutput()
     private var uwInput: AVCaptureDeviceInput?
@@ -171,6 +173,7 @@ final class CameraModel: NSObject, ObservableObject {
     let finderMotion = FinderMotion()
     private var sway: CGSize = .zero
     private var lastSway: CGSize = .zero
+    private var lastLight: CGFloat = 1
     /// When FILM's finder started arriving (it steps back into place over 0.75 s), and whether
     /// the patch has dropped in yet.
     private var _introStart: CFTimeInterval = 0
@@ -1232,10 +1235,15 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                     hunting = d.isAdjustingFocus
                 }
                 let kick = min(1, max(motionDrive, abs(depth)))
-                if kick > 0.12 && kick > abs(patch.pos) * 0.9 {
-                    let sign: CGFloat = depth != 0 ? (depth > 0 ? 1 : -1) : (Bool.random() ? 1 : -1)
-                    patch.pos = sign * kick
-                    patch.vel = 0
+                let now = CACurrentMediaTime()
+                if kick > 0.12 && kick > abs(patch.pos) * 0.9 && now - lastKick > 0.35 {
+                    // Pushed, not teleported: the image slides off. While the camera keeps moving it
+                    // keeps going the same way rather than flipping sides every frame.
+                    lastKick = now
+                    let settled = abs(patch.pos) < 0.05 && abs(patch.vel) < 0.3
+                    let sign: CGFloat = depth != 0 ? (depth > 0 ? 1 : -1)
+                        : (settled ? (Bool.random() ? 1 : -1) : (patch.pos + patch.vel * 0.1 >= 0 ? 1 : -1))
+                    patch.vel += sign * kick * 12
                     // further to turn: a slower, looser hand; a nudge: quick and tight
                     patch.k = 95 - 60 * kick + CGFloat.random(in: -10...10)
                     patch.zeta = CGFloat.random(in: 0.28...0.75) + (kick < 0.3 ? 0.15 : 0)
@@ -1256,6 +1264,16 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                 if abs(sw.width - lastSway.width) > 0.25 || abs(sw.height - lastSway.height) > 0.25 {
                     lastSway = sw
                     DispatchQueue.main.async { self.finderMotion.sway = sw }
+                }
+                // The bright frame is lit by the scene, through its window: dim in the dark.
+                if frameCount % 6 == 0, let y = XAFinder.brightness(shown) {
+                    let target = max(0.14, min(1, 0.1 + y * 2.4))
+                    finderLight = finderLight * 0.6 + target * 0.4
+                    let lit = finderLight
+                    if abs(lit - lastLight) > 0.02 {
+                        lastLight = lit
+                        DispatchQueue.main.async { self.finderMotion.light = lit }
+                    }
                 }
                 lock.lock(); let uw = _uw; let ratio = _uwRatio; var gain = _uwGain; let flong = _finderLong; lock.unlock()
                 if let uw, frameCount % 12 == 0, let g = XAFinder.matchGain(main: shown, wide: uw, ratio: ratio) {
@@ -1589,4 +1607,6 @@ extension CameraModel {
 /// The finder's swing with the camera's motion, observed only by the finder.
 final class FinderMotion: ObservableObject {
     @Published var sway: CGSize = .zero
+    /// How brightly the scene lights the bright frame, 0.14…1.
+    @Published var light: CGFloat = 1
 }

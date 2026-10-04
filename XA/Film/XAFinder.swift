@@ -43,9 +43,10 @@ enum XAFinder {
     /// shows it (portrait); the result has the same extent.
     /// The rangefinder patch in landscape finder space: centred in the frame.
     static func landscapePatch(_ f: FilmFormat, long: CGFloat = 4) -> CGRect {
-        // in the middle of the finder, where the eye looks
+        // in the middle of the bright frame, where the eye looks
+        let fr = landscapeFrame(f, long: long)
         let w: CGFloat = 0.39, h: CGFloat = 0.315
-        return CGRect(x: long / 2 - w / 2, y: LH / 2 - h / 2, width: w, height: h)
+        return CGRect(x: fr.midX - w / 2, y: fr.midY - h / 2, width: w, height: h)
     }
     static func patch(_ f: FilmFormat, long: CGFloat = 4) -> CGRect { toPortrait(landscapePatch(f, long: long), long: long) }
 
@@ -132,7 +133,10 @@ enum XAFinder {
                 .cropped(to: e)
         }
         let feather = short * 0.025
-        let mask = softRect(t.insetBy(dx: feather * 0.6, dy: feather * 0.6), in: e, sigma: feather * 0.5)
+        // The sharp picture runs out under the bright-frame bars (their middle sits 0.0286 of the
+        // width outside the frame), so the hand-over to the surround hides behind them.
+        let bar = e.width * 0.0286 * p
+        let mask = softRect(t.insetBy(dx: -bar, dy: -bar), in: e, sigma: short * 0.006)
         let b = CIFilter.blendWithMask()
         b.inputImage = mapped.cropped(to: e)
         b.backgroundImage = around
@@ -195,6 +199,12 @@ enum XAFinder {
         guard let a = average(main, main.extent), let b = average(wide, mid) else { return nil }
         func g(_ x: Float, _ y: Float) -> CGFloat { CGFloat(min(2, max(0.5, (x + 0.002) / (y + 0.002)))) }
         return CIVector(x: g(a[0], b[0]), y: g(a[1], b[1]), z: g(a[2], b[2]))
+    }
+
+    /// The scene's brightness (0…1, display-referred luma), for lighting the bright frame.
+    static func brightness(_ img: CIImage) -> CGFloat? {
+        guard let a = average(img, img.extent) else { return nil }
+        return CGFloat(0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2])
     }
 
     private static let meter = CIContext(options: [.workingColorSpace: NSNull()])

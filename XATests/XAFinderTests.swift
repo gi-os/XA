@@ -11,6 +11,9 @@ final class XAFinderTests: XCTestCase {
             // portrait in the viewfinder (3 wide, 4 high): width/height in real units is the format's short/long
             XCTAssertEqual((r.width * 3) / (r.height * 4), f.aspect, accuracy: 0.01, "\(f)")
             XCTAssertTrue(r.contains(XAFinder.patch(f)), "\(f)")
+            // the rangefinder patch sits in the middle of the bright frame
+            XCTAssertEqual(XAFinder.patch(f).midX, r.midX, accuracy: 0.001, "\(f)")
+            XCTAssertEqual(XAFinder.patch(f).midY, r.midY, accuracy: 0.001, "\(f)")
         }
     }
 

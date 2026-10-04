@@ -33,10 +33,11 @@ struct XAFinderView: View {
                   }
                 }
                 // the finder, in its own landscape space, turned with the body
-                SwayLayer(motion: camera.finderMotion) {
+                SwayLayer(motion: camera.finderMotion, turned: true) {
                   ZStack(alignment: .topLeading) {
                     // drawn once for a size and format, not on every update
-                    Markings(format: format, size: CGSize(width: g.size.height, height: g.size.width)).equatable()
+                    LitMarkings(motion: camera.finderMotion,
+                                format: format, size: CGSize(width: g.size.height, height: g.size.width))
                     needle(CGSize(width: g.size.height, height: g.size.width))
                   }
                 }
@@ -227,10 +228,25 @@ private struct Markings: View, Equatable {
 /// Offsets its content by the finder's sway; only this re-evaluates when the phone moves.
 private struct SwayLayer<Content: View>: View {
     @ObservedObject var motion: FinderMotion
-    @ViewBuilder var content: () -> Content
+    /// Inside the finder's quarter turn: the offset is turned back so it moves with the screen.
+    var turned = false
+        @ViewBuilder var content: () -> Content
     var body: some View {
         content()
-            .offset(motion.sway)
+            .offset(turned ? CGSize(width: motion.sway.height, height: -motion.sway.width) : motion.sway)
             .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.8), value: motion.sway)
+    }
+}
+
+/// The bright frame as the scene lights it: the markings drawn once, dimmed with the light.
+private struct LitMarkings: View {
+    @ObservedObject var motion: FinderMotion
+    let format: FilmFormat
+    let size: CGSize
+    var body: some View {
+        Markings(format: format, size: size).equatable()
+            .colorMultiply(Color(white: Double(motion.light)))
+            .opacity(Double(0.35 + 0.65 * motion.light))
+            .animation(.easeOut(duration: 0.4), value: motion.light)
     }
 }
