@@ -122,6 +122,9 @@ struct CustomizeView: View {
             NavigationLink { DateScreen(settings: settings, camera: camera, film: true) } label: {
                 row("Date back", "\(settings.filmDate.style.title.capitalized) · \(Self.placement(settings.filmDate))", accent: true)
             }
+            Toggle("XA viewfinder", isOn: $settings.filmRecipe.xaFinder).tint(XA.orange).font(.system(size: 15))
+            Text("Look through an Olympus XA's finder: the photo in a bright frame, the speed scale with its meter needle, the rangefinder patch. Off: the plain viewfinder.")
+                .font(.system(size: 12)).foregroundStyle(XA.faint)
             Text("FILM").font(XA.display(11)).foregroundStyle(XA.faint).padding(.top, 4)
             FlatSlider(label: "Halation", value: $settings.filmRecipe.halation, range: 0...2, format: { "\(Int(($0 * 100).rounded()))" })
             FlatSlider(label: "Grain", value: $settings.filmRecipe.grain, range: 0...2, format: { "\(Int(($0 * 100).rounded()))" })
