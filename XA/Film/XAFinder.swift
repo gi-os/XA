@@ -136,7 +136,12 @@ enum XAFinder {
         // The sharp picture runs out under the bright-frame bars (their middle sits 0.0286 of the
         // width outside the frame) and fades into the surround softly, with no straight seam.
         let bar = e.width * 0.0286 * p
-        let mask = softRect(t.insetBy(dx: -bar * 0.5, dy: -bar * 0.5), in: e, sigma: short * 0.016)
+        let seam = short * 0.022
+        // Where the main camera's picture runs out (the scale side, when the format uses its whole
+        // length) the fade finishes inside it, so there is never a hard edge.
+        var keepRect = t.insetBy(dx: -bar, dy: -bar).intersection(mapped.extent.insetBy(dx: seam * 1.6, dy: seam * 1.6))
+        if keepRect.isNull || keepRect.width < 8 { keepRect = t }
+        let mask = softRect(keepRect, in: e, sigma: seam)
         let b = CIFilter.blendWithMask()
         // where the main camera's picture ends (the format can use its full length) the surround
         // carries on under the bars instead of black
@@ -155,8 +160,11 @@ enum XAFinder {
         }
         // Looking through a finder: past the bright-frame lines the scene goes dark quickly, so
         // the surround never shows where it ends.
-        let reach = bar + short * 0.02
-        let outer = softRect(t.insetBy(dx: -reach, dy: -reach), in: e, sigma: short * 0.014)
+        let reach = bar + short * 0.025
+        var lit = t.insetBy(dx: -reach, dy: -reach)
+        // on the scale side the scene carries on behind the speed scale's column too
+        lit.size.height += e.width * 0.09 * p
+        let outer = softRect(lit.intersection(e.insetBy(dx: -short, dy: -short)), in: e, sigma: short * 0.016)
         let dark = CIFilter.blendWithMask()
         dark.inputImage = out
         dark.backgroundImage = CIImage(color: .black).cropped(to: e)
