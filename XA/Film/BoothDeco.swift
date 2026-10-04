@@ -110,10 +110,13 @@ enum Deco {
         if let hit { return hit }
         guard let cg = render(size, { ctx in drawBackdrop(d, ctx, size) }) else { return nil }
         let img = CIImage(cgImage: cg)
-        lock.lock()
-        if backdrops.count > 12 { backdrops.removeAll() }
-        backdrops[key] = img
-        lock.unlock()
+        // Only the viewfinder's size is worth keeping; a photo's backdrop is drawn once.
+        if size.width * size.height <= 2_500_000 {
+            lock.lock()
+            if backdrops.count > 6 { backdrops.removeAll() }
+            backdrops[key] = img
+            lock.unlock()
+        }
         return img
     }
 

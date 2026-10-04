@@ -108,6 +108,16 @@ enum Darkroom {
         let src = Sanitize.apply(src)
         // BOOTH: full size, the skin filter and nothing else.
         if let skin = s.booth {
+            // A booth print is small: 2400 px on the long side is plenty, and keeps four shots
+            // of cut-outs, warps and doodles light enough for any phone.
+            var src = src
+            let long = max(src.extent.width, src.extent.height)
+            if !preview && long > 2400 {
+                let down = CIFilter.lanczosScaleTransform()
+                down.inputImage = src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
+                down.scale = Float(2400 / long)
+                if let o = down.outputImage { src = o.cropped(to: o.extent.integral) }
+            }
             let faces = preview ? s.eyes : (s.eyes ?? Booth.eyes(in: src))
             return (Booth.develop(src, skin, deco: s.deco, faces: faces, preview: preview), false)
         }
