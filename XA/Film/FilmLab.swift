@@ -46,22 +46,22 @@ struct FilmStock: Equatable, Hashable, Identifiable {
         // Grain is RMS density at a lab scan's pixel, spread out the way the stocks are known for:
         // Ektar the finest, Portra fine, consumer 200 and 400 visibly grainy, 500T and 1600 coarse.
         FilmStock(id: "bowery400", name: "Bowery", rated: 400, suffix: "", grain: 0.010, halation: 1,
-                  toe: CIVector(x: 0, y: 0.04, z: -0.03)),
+                  toe: CIVector(x: 0, y: 0.035, z: -0.025)),
         FilmStock(id: "bowery800", name: "Bowery", rated: 800, suffix: "", grain: 0.015, halation: 1,
-                  toe: CIVector(x: 0, y: 0.05, z: -0.03)),
+                  toe: CIVector(x: 0, y: 0.04, z: -0.025)),
         FilmStock(id: "coney200", name: "Coney", rated: 200, suffix: "", grain: 0.013, halation: 1,
-                  toe: CIVector(x: 0.01, y: 0.08, z: -0.06)),
+                  toe: CIVector(x: 0.01, y: 0.06, z: -0.04)),
         FilmStock(id: "chelsea100", name: "Chelsea", rated: 100, suffix: "", grain: 0.006, halation: 0.9,
-                  toe: CIVector(x: 0, y: 0.03, z: -0.01)),
+                  toe: CIVector(x: 0, y: 0.025, z: -0.01)),
         FilmStock(id: "prospect200", name: "Prospect", rated: 200, suffix: "", grain: 0.013, halation: 1,
-                  toe: CIVector(x: -0.04, y: 0.09, z: -0.02)),
+                  toe: CIVector(x: 0.05, y: 0.06, z: 0)),
         FilmStock(id: "canal500t", name: "Canal", rated: 500, suffix: "T", grain: 0.017, halation: 1.5,
-                  toe: CIVector(x: -0.04, y: 0.05, z: 0)),
+                  toe: CIVector(x: 0.03, y: 0.04, z: 0.01)),
         FilmStock(id: "orchard400", name: "Orchard", rated: 400, suffix: "", grain: 0.015, halation: 1,
-                  toe: CIVector(x: -0.03, y: 0.1, z: -0.03)),
+                  toe: CIVector(x: 0.06, y: 0.07, z: 0)),
         // Natura 1600 (Superia 1600 in Japan's box), read from Fujifilm's datasheet: tools/filmsim/natura.
         FilmStock(id: "ludlow1600", name: "Ludlow", rated: 1600, suffix: "", grain: 0.023, halation: 1.1,
-                  toe: CIVector(x: -0.03, y: 0.07, z: -0.02)),
+                  toe: CIVector(x: 0.03, y: 0.1, z: -0.07)),
     ]
     static func stock(_ id: String?) -> FilmStock? { all.first { $0.id == id } }
 }
@@ -91,6 +91,8 @@ enum FilmLab {
         let ev: Double
         /// The density the lab adds back when printing a pushed or pulled roll, per push.
         let pushOffset: [Int: CIVector]
+        /// Where an 18% grey card lands on the negative (mean code value): what "thin" is measured from.
+        let greyCode: Double
     }
 
     private static let lock = NSLock()
@@ -120,7 +122,8 @@ enum FilmLab {
         }
         let t = Tables(size: n, film: film, print: print,
                        dmin: CIVector(x: dmin[0], y: dmin[1], z: dmin[2]), dmax: CIVector(x: dmax[0], y: dmax[1], z: dmax[2]),
-                       ev: (m["ev"] as? Double) ?? Fit.exposureEV, pushOffset: offsets)
+                       ev: (m["ev"] as? Double) ?? Fit.exposureEV, pushOffset: offsets,
+                       greyCode: (m["grey_code"] as? Double) ?? 0.48)
         cache[id] = t
         return t
     }
@@ -140,11 +143,11 @@ enum FilmLab {
     }
 
     private static let densityKernel = CIColorKernel(source: """
-    kernel vec4 xaDensity(__sample c, __sample bc, __sample bt, float kc, float kt, float gam, vec3 off, vec3 dmin, vec3 dmax, vec3 timing, float pre, vec3 toe, float lift) {
+    kernel vec4 xaDensity(__sample c, __sample bc, __sample bt, float kc, float kt, float gam, vec3 off, vec3 dmin, vec3 dmax, vec3 timing, float pre, vec3 toe, float lift, float grey) {
         vec3 code = c.rgb + kc * (c.rgb - bc.rgb) + kt * (c.rgb - bt.rgb);
         // Thin negative (an underexposed part of the frame, two stops down and more): the lab
         // scanner lifts it, and it comes up muddy and off-color, in the stock's own way.
-        float thin = 1.0 - smoothstep(0.16, 0.44, (code.r + code.g + code.b) / 3.0);
+        float thin = 1.0 - smoothstep(grey - 0.28, grey - 0.06, (code.r + code.g + code.b) / 3.0);
         code = code + thin * (toe + vec3(lift));
         vec3 D = code * (dmax - dmin) + dmin;
         D = max(D, vec3(0.0)) * gam + min(D, vec3(0.0)) + off;
@@ -275,7 +278,7 @@ enum FilmLab {
                                                       t.pushOffset[push] ?? CIVector(x: 0, y: 0, z: 0), t.dmin, t.dmax,
                                                       timing(shot?.recipe), Float(max(0, shot?.recipe.preflash ?? 0) * 0.02),
                                                       shot == nil ? CIVector(x: 0, y: 0, z: 0) : stock.toe,
-                                                      Float(shot == nil ? 0 : (shot?.recipe.scan == .lab ? 0.09 : 0.05))]) {
+                                                      Float(shot == nil ? 0 : (shot?.recipe.scan == .lab ? 0.09 : 0.05)), Float(t.greyCode)]) {
             img = d
         }
         trace?("developed", img)
