@@ -179,6 +179,7 @@ enum Darkroom {
         var shot = FilmShot(recipe: r, flashFired: flashFired, seed: Int(date.timeIntervalSince1970 * 1000))
         // A leak is a surprise on the print, never in the finder.
         if preview { shot.recipe.leak = 0 }
+        if r.labAuto > 0 { shot.lab = LabAuto.correction(img, strength: r.labAuto, preview: preview) }
         let sim = FilmCatalog.sim(s.stack.simID)
         if let sim, !sim.isNeutral {
             img = SimEngine.apply(sim, to: img, preview: preview, push: s.stack.push, seed: preview ? nil : shot.seed, shot: shot)

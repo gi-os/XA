@@ -1,6 +1,7 @@
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import Foundation
+import QuartzCore
 
 /// The film format: how big the negative is, which sets how big grain, halation and the couplers'
 /// reach are on the picture (spektrafilm's film_format_mm), and the frame's shape.
@@ -79,6 +80,9 @@ struct FilmRecipe: Codable, Equatable {
     var xaFinder = true
     /// Fill the finder's surround from the ultra-wide (a second camera running). Experimental.
     var ultraWide = false
+    /// The lab's auto-correction, as a minilab operator prints a roll: a dull or dim frame is
+    /// printed up and a grey, cold one balanced and warmed, the way film never looks sad.
+    var labAuto: Double = 0.7
 
     init() {}
 
@@ -100,6 +104,7 @@ struct FilmRecipe: Codable, Equatable {
         glare = try c.decodeIfPresent(Double.self, forKey: .glare) ?? d.glare
         xaFinder = try c.decodeIfPresent(Bool.self, forKey: .xaFinder) ?? d.xaFinder
         ultraWide = try c.decodeIfPresent(Bool.self, forKey: .ultraWide) ?? d.ultraWide
+        labAuto = try c.decodeIfPresent(Double.self, forKey: .labAuto) ?? d.labAuto
     }
 }
 
@@ -108,6 +113,74 @@ struct FilmShot {
     var recipe = FilmRecipe()
     var flashFired = false
     var seed = 0
+    /// The lab's correction for this frame (exposure and colour as light gains), from LabAuto.
+    var lab: CIVector?
+}
+
+/// A minilab's auto-correction (a Frontier's or Noritsu's scanner and printer): it reads the
+/// frame and prints it to a normal density and a neutral-but-warm balance. Film shot on a grey
+/// day comes back bright and pleasant because the lab does this, not because the film sees
+/// more; a phone picture taken under cloud, put through the film as it is, comes out dim, flat
+/// and blue. Partial, as labs are: real night stays night and a sunset keeps its colour.
+enum LabAuto {
+    private static let context = CIContext(options: [.workingColorSpace: NSNull(), .cacheIntermediates: false])
+    private static let lock = NSLock()
+    private static var cached = CIVector(x: 1, y: 1, z: 1)
+    private static var cachedAt: CFTimeInterval = 0
+
+    /// Gains for the linear frame `img`. The viewfinder reads a few times a second and eases.
+    static func correction(_ img: CIImage, strength: Double, preview: Bool) -> CIVector {
+        let s = CGFloat(max(0, min(1, strength)))
+        guard s > 0 else { return CIVector(x: 1, y: 1, z: 1) }
+        if preview {
+            lock.lock(); let c = cached, at = cachedAt; lock.unlock()
+            if CACurrentMediaTime() - at < 0.3 { return c }
+        }
+        guard let a = average(img) else { return CIVector(x: 1, y: 1, z: 1) }
+        var v = gains(a, s)
+        if preview {
+            lock.lock()
+            let c = cachedAt == 0 ? v : cached
+            v = CIVector(x: c.x * 0.5 + v.x * 0.5, y: c.y * 0.5 + v.y * 0.5, z: c.z * 0.5 + v.z * 0.5)
+            cached = v; cachedAt = CACurrentMediaTime()
+            lock.unlock()
+        }
+        return v
+    }
+
+    /// The gains from the frame's average (encoded sRGB, as a scanner meters).
+    static func gains(_ a: [CGFloat], _ s: CGFloat) -> CIVector {
+        func lin(_ x: CGFloat) -> CGFloat { x <= 0.04045 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
+        let r = max(lin(a[0]), 1e-4), g = max(lin(a[1]), 1e-4), b = max(lin(a[2]), 1e-4)
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        // Density: two thirds of the way to a normal print, and film's habit of being printed
+        // from a well-exposed negative (a third of a stop up).
+        let stops = max(-0.8, min(1.2, log2(0.16 / y) * 0.65 * s)) + 0.33 * s
+        let k = pow(2, stops)
+        // Balance: about half of the cast taken out…
+        func bal(_ c: CGFloat) -> CGFloat { max(0.8, min(1.25, pow(y / c, 0.45 * s))) }
+        var gr = bal(r), gg = bal(g), gb = bal(b)
+        // …and a cold frame (cloud, shade) printed a little warm, as the operators did.
+        let cool = max(0, min(1, (b / r - 1) * 2))
+        gr *= 1 + 0.05 * s * cool
+        gb *= 1 - 0.06 * s * cool
+        return CIVector(x: k * gr, y: k * gg, z: k * gb)
+    }
+
+    private static func average(_ img: CIImage) -> [CGFloat]? {
+        let e = img.extent
+        guard e.width > 1, e.height > 1, e.width.isFinite else { return nil }
+        let k = 64 / max(e.width, e.height)
+        let small = img.transformed(by: CGAffineTransform(scaleX: k, y: k)).applyingFilter("CILinearToSRGBToneCurve")
+        let f = CIFilter.areaAverage()
+        f.inputImage = small
+        f.extent = small.extent
+        guard let out = f.outputImage else { return nil }
+        var px = [Float](repeating: 0, count: 4)
+        context.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        guard px.allSatisfy({ $0.isFinite }) else { return nil }
+        return px.prefix(3).map { CGFloat(max(0, min(1, $0))) }
+    }
 }
 
 /// The camera: light effects on the scene before it reaches the film.

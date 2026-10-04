@@ -42,6 +42,8 @@ final class CameraModel: NSObject, ObservableObject {
     /// The take so far: which tape from which second.
     @Published private(set) var segments: [TakeSegment] = []
     @Published var mode: CaptureMode = .digi { didSet { modeChanged(oldValue) } }
+    /// A QR code PRO is looking at (its text), while it is in view.
+    @Published var qrCode: String?
     @Published var stack = Stack(simID: "nocturne") { didSet { stackChanged() } }
     @Published private(set) var authorized: Bool?
     @Published private(set) var front = false
@@ -156,6 +158,10 @@ final class CameraModel: NSObject, ObservableObject {
     private var patch = PatchSpring()
     private var lastLens: Float = -1
     private var lastKick: CFTimeInterval = 0
+    private var lastFrameAt: CFTimeInterval = 0
+    private let qrOutput = AVCaptureMetadataOutput()
+    private var qrSeen: CFTimeInterval = 0
+    private var lowPower = false
     private var finderLight: CGFloat = 1
     // FILM's ultra-wide: the second camera behind the finder's surround.
     private let uwOutput = AVCaptureVideoDataOutput()
@@ -278,6 +284,7 @@ final class CameraModel: NSObject, ObservableObject {
         publishPhotoSize(m)
         sessionQueue.async {
             self.applyProOnQueue(m)
+            self.updateQR(m)
             if m == .video { self.addAudioIfNeeded() }
         }
         preparePhotos()
@@ -334,6 +341,10 @@ final class CameraModel: NSObject, ObservableObject {
         videoOutput.alwaysDiscardsLateVideoFrames = true
         videoOutput.setSampleBufferDelegate(self, queue: frameQueue)
         if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
+        if session.canAddOutput(qrOutput) {
+            session.addOutput(qrOutput)
+            qrOutput.setMetadataObjectsDelegate(self, queue: .main)
+        }
         photoOutput.maxPhotoQualityPrioritization = .quality
         if photoOutput.isAppleProRAWSupported { photoOutput.isAppleProRAWEnabled = settings.digiZero }
         applyCapturePolicy(flash: settings.flash != .off)
@@ -345,6 +356,7 @@ final class CameraModel: NSObject, ObservableObject {
         applyRotation()
         session.startRunning()
         applyProOnQueue(m)
+        updateQR(m)
         if m == .booth { switchCamera(toFront: true) }
         DispatchQueue.main.async { self.preparePhotos() }
     }
@@ -1143,9 +1155,9 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         if output === uwOutput {
             // Every other ultra-wide frame, small and copied out so the camera gets its buffer back.
             uwCount += 1
-            guard uwCount % 2 == 0, let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+            guard uwCount % 3 == 0, let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
             let raw = CIImage(cvPixelBuffer: pb)
-            let k: CGFloat = 640 / max(raw.extent.width, raw.extent.height, 1)
+            let k: CGFloat = 480 / max(raw.extent.width, raw.extent.height, 1)
             let small = raw.transformed(by: CGAffineTransform(scaleX: k, y: k))
             if let cg = Looks.context.createCGImage(small, from: small.extent.integral) {
                 let img = CIImage(cgImage: cg)
@@ -1154,11 +1166,25 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             return
         }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        // Power: the developed modes (a whole film lab per frame) run at film's 24 frames a second
+        // and a lighter size; on Low Power Mode or a hot phone, 15 and lighter still.
+        let mNow = frameState().0
+        if frameCount % 60 == 0 {
+            let p = ProcessInfo.processInfo
+            lowPower = p.isLowPowerModeEnabled || p.thermalState == .serious || p.thermalState == .critical
+        }
+        if mNow.developed && mNow != .video {
+            let now = CACurrentMediaTime()
+            let gap = lowPower ? 1.0 / 15.5 : 1.0 / 24.5
+            if now - lastFrameAt < gap { frameCount += 1; return }
+            lastFrameAt = now
+        }
         // Cleaned at the door: a sensor pixel below the legal video range decodes to NaN, and every
         // blur and resize downstream would spread it into a black square.
         let raw = Self.upright(Sanitize.apply(CIImage(cvPixelBuffer: pb), floor: 0), mirror: frontFlag)
         let e = raw.extent
-        let k: CGFloat = min(1, 1080 / max(e.width, 1))
+        let width: CGFloat = !mNow.developed || mNow == .video ? 1080 : (lowPower ? 640 : 810)
+        let k: CGFloat = min(1, width / max(e.width, 1))
         let src = raw.transformed(by: CGAffineTransform(scaleX: k, y: k))
         let (m, dev) = frameState()
         frameCount += 1
@@ -1464,7 +1490,7 @@ extension CameraModel {
     func updateMotion() {
         if mode == .film {
             guard motion.isDeviceMotionAvailable, !motion.isDeviceMotionActive else { return }
-            motion.deviceMotionUpdateInterval = 1.0 / 30
+            motion.deviceMotionUpdateInterval = 1.0 / 24
             motion.startDeviceMotionUpdates()
         } else if motion.isDeviceMotionActive {
             motion.stopDeviceMotionUpdates()
@@ -1628,4 +1654,26 @@ final class FinderMotion: ObservableObject {
     @Published var sway: CGSize = .zero
     /// How brightly the scene lights the bright frame, 0.14…1.
     @Published var light: CGFloat = 1
+}
+
+/// PRO reads QR codes, like the system camera: the code's text, shown while it is in view.
+extension CameraModel: AVCaptureMetadataOutputObjectsDelegate {
+    /// Only PRO looks for codes; the other modes pay nothing for it.
+    func updateQR(_ m: CaptureMode) {
+        guard qrOutput.availableMetadataObjectTypes.contains(.qr) else { return }
+        qrOutput.metadataObjectTypes = m == .pro ? [.qr] : []
+        if m != .pro { DispatchQueue.main.async { self.qrCode = nil } }
+    }
+
+    func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput objects: [AVMetadataObject], from connection: AVCaptureConnection) {
+        guard mode == .pro,
+              let code = objects.compactMap({ ($0 as? AVMetadataMachineReadableCodeObject)?.stringValue }).first,
+              !code.isEmpty else { return }
+        qrSeen = CACurrentMediaTime()
+        if qrCode != code { qrCode = code }
+        // gone a couple of seconds after it leaves the frame
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            if CACurrentMediaTime() - self.qrSeen >= 2.4 { self.qrCode = nil }
+        }
+    }
 }

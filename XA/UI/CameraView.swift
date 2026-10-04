@@ -216,6 +216,12 @@ struct CameraView: View {
                     .overlay(alignment: .top) {
                         if camera.mode == .digi { DigiOSD(camera: camera).allowsHitTesting(false).transition(.opacity) }
                     }
+                    .overlay(alignment: .bottom) {
+                        if camera.mode == .pro, let code = camera.qrCode {
+                            QRChip(code: code).padding(.bottom, 14).transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
+                    .animation(.snappy, value: camera.qrCode)
                     .overlay { ShutterBlinkView(camera: camera, settings: settings) }
             }
         }
@@ -796,5 +802,37 @@ private struct ShutterBlinkView: View {
             else if camera.flash && style == .black { Color.black }
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// A QR code in PRO's view: tap to open a link, or copy anything else.
+private struct QRChip: View {
+    let code: String
+    @State private var copied = false
+    private var url: URL? {
+        guard let u = URL(string: code.trimmingCharacters(in: .whitespacesAndNewlines)), let s = u.scheme?.lowercased(),
+              ["http", "https", "mailto", "tel", "sms", "facetime", "maps"].contains(s) || UIApplication.shared.canOpenURL(u) else { return nil }
+        return u
+    }
+    var body: some View {
+        Button {
+            if let url { UIApplication.shared.open(url) } else {
+                UIPasteboard.general.string = code
+                copied = true
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "qrcode").font(.system(size: 14, weight: .semibold))
+                Text(copied ? "Copied" : (url?.host ?? code))
+                    .font(.system(size: 14, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                Text(url != nil ? "Open" : "Copy").font(.system(size: 14, weight: .bold)).foregroundStyle(XA.orange)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .background(.black.opacity(0.72), in: Capsule())
+            .frame(maxWidth: 300)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(url != nil ? "Open \(code)" : "Copy \(code)")
     }
 }

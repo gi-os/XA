@@ -150,6 +150,7 @@ struct CustomizeView: View {
                 .font(.system(size: 12)).foregroundStyle(XA.faint)
             Text("LAB").font(XA.display(11)).foregroundStyle(XA.faint).padding(.top, 4)
             Segmented(items: [(FilmScan.lab, "Lab scan"), (.full, "Full size")], selection: $settings.filmRecipe.scan)
+            FlatSlider(label: "Lab auto-correct", value: $settings.filmRecipe.labAuto, format: { "\(Int(($0 * 100).rounded()))" })
             FlatSlider(label: "Print warmth", value: $settings.filmRecipe.warmth, range: -1...1, format: { String(format: "%+d", Int(($0 * 100).rounded())) })
             FlatSlider(label: "Print tint", value: $settings.filmRecipe.tint, range: -1...1, format: { String(format: "%+d", Int(($0 * 100).rounded())) })
             FlatSlider(label: "Preflash", value: $settings.filmRecipe.preflash, format: { "\(Int(($0 * 100).rounded()))" })

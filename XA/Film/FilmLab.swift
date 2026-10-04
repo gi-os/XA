@@ -231,6 +231,8 @@ enum FilmLab {
         trace?("input", img)
         // The camera: lens, flash, mist and leaks, as light on the scene before the film.
         if let shot { img = FilmCamera.apply(img, shot, um: um) }
+        // The lab's correction: printed to a normal density and balance (see LabAuto).
+        if let c = shot?.lab { img = scale(img, c.x, c.y, c.z) }
         let scene = img
         img = scale(img, gain, gain, gain)
         let r = shot?.recipe
@@ -253,7 +255,7 @@ enum FilmLab {
         var source = scale(scene, gain, gain, gain)
         if r != nil, let k = boostKernel, let b = k.apply(extent: full, arguments: [scene, 1.5, 0.3]) { source = scale(b, gain, gain, gain) }
         var bounced = scale(blur(source, Fit.halationUM), 4.0 / 7, 4.0 / 7, 4.0 / 7)
-        if r != nil {
+        if r != nil && !preview {
             for (k, w) in [(2.0, 2.0 / 7), (3.0, 1.0 / 7)] {
                 bounced = addLight(bounced, scale(blur(source, Fit.halationUM * CGFloat(k.squareRoot())), w, w, w))
             }
