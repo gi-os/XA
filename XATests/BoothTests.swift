@@ -28,11 +28,12 @@ final class BoothTests: XCTestCase {
         }
     }
 
-    func testBoothDevelopsFullSize() {
+    func testBoothDevelopsAtPrintSize() {
         var d = DevelopSettings()
         d.booth = .glow
         let (out, alpha) = Darkroom.develop(grey(4032, 3024), d, date: Date(), preview: false)
-        XCTAssertEqual(out.extent.size, CGSize(width: 4032, height: 3024))
+        XCTAssertEqual(max(out.extent.width, out.extent.height), 2400, accuracy: 1)
+        XCTAssertEqual(out.extent.width / out.extent.height, 4032.0 / 3024, accuracy: 0.01)
         XCTAssertFalse(alpha)
     }
 
