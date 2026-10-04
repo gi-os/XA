@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="848" viewBox="0 0 640 424" >
+<defs>
+<clipPath id="dl-face"><rect width="640" height="400" rx="4"></rect></clipPath>
+<linearGradient id="dl-metal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6f6f4"></stop><stop offset=".48" stop-color="#b4b8bd"></stop><stop offset=".56" stop-color="#8a8f95"></stop><stop offset="1" stop-color="#e4e6e8"></stop></linearGradient>
+<filter id="dl-grain" x="0" y="0" width="1" height="1"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" stitchTiles="stitch" result="n"></feTurbulence><feColorMatrix in="n" type="matrix" values=".33 .33 .33 0 0 .33 .33 .33 0 0 .33 .33 .33 0 0 0 0 0 0 1"></feColorMatrix></filter>
+<filter id="dl-lift" x="-15%" y="-35%" width="130%" height="170%"><feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity=".3"></feDropShadow></filter>
+<radialGradient id="dl-moon" cx=".38" cy=".3" r=".8"><stop offset="0" stop-color="#a9a9a7"></stop><stop offset=".7" stop-color="#7d7d7b"></stop><stop offset="1" stop-color="#5f5f5e"></stop></radialGradient>
+</defs>
+<g clip-path="url(#dl-face)">
+<rect width="640" height="400" fill="#121213"></rect>
+<g><path d="M-60 0L0 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M-38 0L22 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M-16 0L44 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M6 0L66 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M28 0L88 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M50 0L110 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M72 0L132 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M94 0L154 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M116 0L176 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M138 0L198 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M160 0L220 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M182 0L242 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M204 0L264 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M226 0L286 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M248 0L308 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M270 0L330 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M292 0L352 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M314 0L374 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M336 0L396 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M358 0L418 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M380 0L440 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M402 0L462 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M424 0L484 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M446 0L506 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M468 0L528 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M490 0L550 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M512 0L572 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M534 0L594 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M556 0L616 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M578 0L638 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M600 0L660 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M622 0L682 92" stroke="#3b3b3e" stroke-width="1.6"></path><path d="M644 0L704 92" stroke="#3b3b3e" stroke-width="1.6"></path></g>
+<rect x="0" y="92" width="640" height="2" fill="#2a2a2d"></rect>
+<circle cx="472" cy="190" r="166" fill="url(#dl-moon)"></circle>
+<circle cx="472" cy="190" r="166" fill="none" stroke="#c9c9c9" stroke-width="1" opacity=".35"></circle>
+<rect x="264" y="148" width="346" height="96" rx="48" fill="#121213"></rect>
+<rect x="257" y="141" width="360" height="110" rx="55" fill="none" stroke="#e8e6e1" stroke-width="2.5"></rect>
+<text x="437" y="214" text-anchor="middle" font-size="54" fill="#f2f0eb" style="font-family: Archivo, sans-serif; font-weight: 800; font-variation-settings: 'wdth' 100; letter-spacing: 1px;">DELANCEY</text>
+<path d="M26 134L34.4 104H84.4L76 134Z" fill="#f2f0eb"></path><text x="55.2" y="126.8" text-anchor="middle" font-size="23.4" fill="#121213" style="font-family: Archivo, sans-serif; font-weight: 800; font-style: italic; font-variation-settings: 'wdth' 110;">XA</text>
+<text x="94" y="133" font-size="22" fill="#f2f0eb" style="font-family: Archivo, sans-serif; font-weight: 800; font-variation-settings: 'wdth' 112; letter-spacing: 2px;">PAN · NIGHT</text>
+<g transform="translate(24 330) scale(0.7290) translate(-24 -330)">
+<text x="24" y="330" font-size="124" fill="#f2f0eb" style="font-family: Archivo, sans-serif; font-weight: 800; font-variation-settings: 'wdth' 100;">3200</text>
+</g>
+<text x="612" y="318" text-anchor="end" font-size="34" fill="#f2f0eb" style="font-family: Archivo, sans-serif; font-weight: 800; font-variation-settings: 'wdth' 100;">36</text>
+<text x="612" y="336" text-anchor="end" font-size="14" fill="#f2f0eb" style="font-family: Archivo, sans-serif; font-weight: 700; font-variation-settings: 'wdth' 100; letter-spacing: 2px;">EXP</text>
+<rect x="0" y="352" width="640" height="2" fill="#b0302a"></rect>
+<rect width="640" height="400" fill="#000" filter="url(#dl-grain)" opacity=".09" style="mix-blend-mode: overlay;"></rect>
+<g transform="translate(470 52) rotate(6)">
+<g style="opacity: 0; transition: opacity 180ms ease-out;">
+<path d="M-125 -29H125L119.5 -21.5L125 -14L120 -6.5L125 1L119.5 8.5L125 16L120.5 23L125 29H-125L-120 22L-125 15L-119.5 7.5L-125 0L-120.5 -7L-125 -14.5L-119.5 -22Z" fill="#a9d6f2" fill-opacity=".94" filter="url(#dl-lift)"></path>
+<text x="-108" y="11" font-size="34" fill="#17140f" style="font-family: 'Permanent Marker', cursive;">PULL −0</text>
+<text x="110" y="10" text-anchor="end" font-size="17" fill="#17140f" fill-opacity=".85" style="font-family: 'Permanent Marker', cursive;">EI 3200</text>
+</g>
+</g>
+</g>
+<rect x="0" y="401" width="640" height="23" rx="3" fill="#0e0e10"></rect>
+<rect x="3" y="403.5" width="103" height="8.5" rx="1.5" fill="url(#dl-metal)"></rect>
+<rect x="109" y="403.5" width="103" height="8.5" rx="1.5" fill="url(#dl-metal)"></rect>
+<rect x="215" y="403.5" width="103" height="8.5" rx="1.5" fill="url(#dl-metal)"></rect>
+<rect x="321" y="403.5" width="103" height="8.5" rx="1.5" fill="url(#dl-metal)"></rect>
+<rect x="427" y="403.5" width="103" height="8.5" rx="1.5" fill="url(#dl-metal)"></rect>
+<rect x="533" y="403.5" width="103" height="8.5" rx="1.5" fill="#26262b"></rect>
+<rect x="3" y="413.5" width="103" height="8.5" rx="1.5" fill="url(#dl-metal)"></rect>
+<rect x="109" y="413.5" width="103" height="8.5" rx="1.5" fill="#26262b"></rect>
+<rect x="215" y="413.5" width="103" height="8.5" rx="1.5" fill="#26262b"></rect>
+<rect x="321" y="413.5" width="103" height="8.5" rx="1.5" fill="url(#dl-metal)"></rect>
+<rect x="427" y="413.5" width="103" height="8.5" rx="1.5" fill="url(#dl-metal)"></rect>
+<rect x="533" y="413.5" width="103" height="8.5" rx="1.5" fill="url(#dl-metal)"></rect>
+</svg>

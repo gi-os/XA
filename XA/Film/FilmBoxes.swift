@@ -772,9 +772,9 @@ struct StockBox: View {
         case "prospect200": return (500, 112, 10)
         case "canal500t": return (470, 112, -9)
         case "orchard400": return (498, 40, 8)
-        case "delancey3200": return (124, 60, -8)
-        case "essexp3200": return (150, 232, -9)
-        case "bleecker400": return (530, 220, 8)
+        case "delancey3200": return (470, 52, 6)
+        case "essexp3200": return (452, 38, 5)
+        case "bleecker400": return (158, 304, -4)
         default: return (522, 92, 8)
         }
     }

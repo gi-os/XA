@@ -1,26 +1,46 @@
-"""Render the black-and-white stock boxes, one face per speed (box_<id>_<ei>.jpg), like render.py.
-  python render_bw.py <fonts dir> <out dir>"""
-import io, sys, resvg_py
+"""Gio's black-and-white boxes (tools/boxes/bw/*.svg, Oct 2026), one face per speed:
+box_<id>_<ei>.jpg, 640x400 at 1.5x. The tape and DX strip are drawn by the app, so the SVG's
+hidden tape and its DX strip are left off; the big number is re-set for each speed.
+
+  python render_bw.py <archivo instances dir> <out dir>
+
+Archivo is a variable font and resvg ignores font-variation-settings, so each weight/width the
+faces use is a static instance (fontTools varLib.instancer) named ArchW<wght>w<wdth>[i]."""
+import io, math, re, sys, resvg_py
 from PIL import Image, ImageFont
-from faces_bw import F
 FONTS, OUT = sys.argv[1], sys.argv[2]
 ISO = [12, 16, 20, 25, 32, 40, 50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800,
        1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 8000, 10000, 12800]
-# where each face's big number sits: x, y, size, room, font file, letter spacing
-FIT = {'delancey3200': (248, 318, 150, 372, 'Anton-400.ttf', 2),
-       'essexp3200': (348, 306, 140, 236, 'BebasNeue-400.ttf', 2),
-       'bleecker400': (174, 338, 168, 330, 'DMSerifDisplay-400.ttf', 0)}
-def nearest(v): return min(ISO, key=lambda i: abs(__import__('math').log2(i / v)))
-for sid, (rated, body) in F.items():
-    x, y, size, room, font, ls = FIT[sid]
-    f = ImageFont.truetype(f'{FONTS}/{font}', size)
+# file, id, rated, big number's text as drawn, and the room it may take (px on the 640 face)
+FACES = [('bleecker-400.svg', 'bleecker400', 400, '>400</text>', 340),
+         ('delancey-3200.svg', 'delancey3200', 3200, '>3200</text>', 520),
+         ('essex-p3200.svg', 'essexp3200', 3200, '>3200</text>', 440)]
+def nearest(v): return min(ISO, key=lambda i: abs(math.log2(i / v)))
+def fonts(s):
+    def fix(m):
+        st = m.group(0)
+        w = re.search(r'font-weight: (\d+)', st); d = re.search(r"'wdth' (\d+)", st)
+        it = 'i' if 'italic' in st else ''
+        fam = f"Arch{w.group(1) if w else 400}w{d.group(1) if d else 100}{it}"
+        st = st.replace('font-family: Archivo, sans-serif', f"font-family: '{fam}'")
+        return re.sub(r'font-weight: \d+;|font-style: italic;', '', st)
+    return re.sub(r'style="[^"]*Archivo[^"]*"', fix, s)
+for fn, sid, rated, big, room in FACES:
+    src = open(f'{sys.path[0]}/bw/{fn}').read()
+    src = re.sub(r'<svg [^>]*>', '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 640 400">', src, 1)
+    src = re.sub(r'<g style="opacity: 0;.*?</g>', '', src, flags=re.S)                  # the hidden tape
+    src = re.sub(r'<rect x="(\d+)" y="40[13](\.5)?".*?>(</rect>)?', '', src)            # the DX strip
+    src = fonts(src)
+    tag = re.search(r'<text[^>]*' + re.escape(big), src).group(0)
+    x = float(re.search(r' x="([\d.]+)"', tag).group(1)); y = float(re.search(r' y="([\d.]+)"', tag).group(1))
+    size = float(re.search(r'font-size="([\d.]+)"', tag).group(1))
+    fam = re.search(r"font-family: '([^']+)'", tag).group(1)
+    f = ImageFont.truetype(f'{FONTS}/{fam}.ttf', int(size))
     for p in range(-2, 3):
         ei = nearest(rated * 2 ** p)
-        w = f.getlength(str(ei)) + ls * (len(str(ei)) - 1)
-        k = min(1, room / w)
-        num = body.replace(f'<text x="{x}" y="{y}"', f'<text transform="translate({x} {y}) scale({k:.4f}) translate({-x} {-y})" x="{x}" y="{y}"', 1)
-        svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400" width="960" height="600">'
-               + num.replace('{ei}', str(ei)) + '</svg>')
+        k = min(1, room / f.getlength(str(ei)))
+        t = tag.replace(big, f'>{ei}</text>').replace('<text ', f'<text transform="translate({x} {y}) scale({k:.4f}) translate({-x} {-y})" ', 1)
+        svg = src.replace(tag, t)
         png = bytes(resvg_py.svg_to_bytes(svg_string=svg, font_dirs=[FONTS], skip_system_fonts=True))
         Image.open(io.BytesIO(png)).convert('RGB').save(f'{OUT}/box_{sid}_{ei}.jpg', quality=86, optimize=True)
         print(sid, ei, round(k, 2))
