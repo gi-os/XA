@@ -1479,6 +1479,8 @@ extension CameraModel {
         } else {
             pick = ok.filter { $0.formatDescription.dimensions.width >= 640 }.min { $0.formatDescription.dimensions.width < $1.formatDescription.dimensions.width } ?? ok.first
         }
+        // Never at the photo's expense: the main camera must still take full-size (12MP) pictures.
+        if photo, (pick?.supportedMaxPhotoDimensions.map(px).max() ?? 0) < 11_900_000 { return false }
         guard let pick, (try? d.lockForConfiguration()) != nil else { return false }
         d.activeFormat = pick
         d.unlockForConfiguration()
