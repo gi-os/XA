@@ -182,7 +182,15 @@ struct CameraView: View {
                 Viewfinder(camera: camera)
                     .aspectRatio(finderAspect, contentMode: .fit)
                     .overlay { if settings.grid && camera.mode == .pro { GridLines() } }
-                    .overlay { FocusBracket(camera: camera) }
+                    .overlay {
+                        if camera.mode == .film {
+                            // A rangefinder's finder: bright-line corners for the format, a soft
+                            // focus patch where focus is aimed.
+                            BrightLines(format: settings.filmRecipe.format, camera: camera)
+                        } else {
+                            FocusBracket(camera: camera)
+                        }
+                    }
                     // DIGI prints its settings across the top of the picture as plain text, like the
                     // camera did, clear of the date back in the bottom corner.
                     .overlay(alignment: .top) {
@@ -753,5 +761,63 @@ private struct Unfold: ViewModifier {
         content
             .scaleEffect(x: 1, y: max(k, 0.001), anchor: .top)
             .opacity(Double(min(1, k * 3)))
+    }
+}
+
+/// Bright-line frame: four warm, see-through corners showing the format, the way a
+/// rangefinder's finder lights them, and its focus patch.
+private struct BrightLines: View {
+    let format: FilmFormat
+    @ObservedObject var camera: CameraModel
+    @State private var lit = false
+    private let line = Color(red: 0.95, green: 0.87, blue: 0.84)
+
+    var body: some View {
+        GeometryReader { g in
+            let f = format.frame(in: CGRect(origin: .zero, size: g.size))
+            let r = f.insetBy(dx: f.width * 0.035, dy: f.width * 0.035)
+            ZStack {
+                FrameCorners(arm: r.width * 0.13)
+                    .stroke(line.opacity(0.72), style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                    .frame(width: r.width, height: r.height)
+                    .position(x: r.midX, y: r.midY)
+                    .shadow(color: line.opacity(0.55), radius: 2.5)
+                    .animation(.snappy(duration: 0.3), value: format)
+                let p = camera.focusPoint ?? CGPoint(x: 0.5, y: 0.5)
+                let d = min(g.size.width, g.size.height) * 0.11
+                Circle()
+                    .fill(RadialGradient(colors: [line.opacity(lit ? 0.42 : 0.2), line.opacity(0)], center: .center, startRadius: 0, endRadius: d / 2))
+                    .frame(width: d, height: d)
+                    .position(x: p.x * g.size.width, y: p.y * g.size.height)
+                    .animation(.snappy, value: p)
+            }
+        }
+        .allowsHitTesting(false)
+        .onChange(of: camera.focusPoint) { _, _ in glow() }
+        .onChange(of: camera.focusLocked) { _, _ in glow() }
+    }
+
+    private func glow() {
+        withAnimation(.easeOut(duration: 0.15)) { lit = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { withAnimation(.easeIn(duration: 0.4)) { lit = false } }
+    }
+}
+
+/// Four L-shaped corners with a little bend at each end, as on bright-line glass.
+private struct FrameCorners: Shape {
+    let arm: CGFloat
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        let a = min(arm, r.width / 2, r.height / 2)
+        let bend = a * 0.12
+        for (c, dx, dy) in [(CGPoint(x: r.minX, y: r.minY), 1.0, 1.0), (CGPoint(x: r.maxX, y: r.minY), -1.0, 1.0),
+                            (CGPoint(x: r.minX, y: r.maxY), 1.0, -1.0), (CGPoint(x: r.maxX, y: r.maxY), -1.0, -1.0)] {
+            p.move(to: CGPoint(x: c.x + dx * a, y: c.y + dy * bend))
+            p.addLine(to: CGPoint(x: c.x + dx * a, y: c.y))
+            p.addLine(to: CGPoint(x: c.x, y: c.y))
+            p.addLine(to: CGPoint(x: c.x, y: c.y + dy * a))
+            p.addLine(to: CGPoint(x: c.x + dx * bend, y: c.y + dy * a))
+        }
+        return p
     }
 }
