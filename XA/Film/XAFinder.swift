@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import CoreImage
 import CoreImage.CIFilterBuiltins
 
@@ -106,18 +107,21 @@ enum XAFinder {
             // pixels stretched out (that streaks).
             let m = mapped.extent
             let cover = max(e.width / src.width, e.height / src.height) * 1.15
+            // blurred at an eighth of the size and scaled back up: the same softness for far less work
+            let d: CGFloat = 8
+            let smallRect = CGRect(x: -e.width / d / 2, y: -e.height / d / 2, width: e.width / d, height: e.height / d)
             let fill = img
                 .transformed(by: CGAffineTransform(translationX: -src.midX, y: -src.midY))
-                .transformed(by: CGAffineTransform(scaleX: cover, y: cover))
-                .transformed(by: CGAffineTransform(translationX: e.midX, y: e.midY))
+                .transformed(by: CGAffineTransform(scaleX: cover / d, y: cover / d))
                 .clampedToExtent()
-                .applyingGaussianBlur(sigma: Double(short * 0.03))
+                .applyingGaussianBlur(sigma: Double(short * 0.03 / d))
+                .cropped(to: smallRect.insetBy(dx: -2, dy: -2))
+                .samplingLinear()
+                .transformed(by: CGAffineTransform(scaleX: d, y: d))
+                .transformed(by: CGAffineTransform(translationX: e.midX, y: e.midY))
                 .cropped(to: e)
             let edge = short * 0.04
-            let keep = CIImage(color: .white).cropped(to: m.insetBy(dx: edge, dy: edge))
-                .composited(over: CIImage(color: .black).cropped(to: e.insetBy(dx: -edge * 3, dy: -edge * 3)))
-                .applyingGaussianBlur(sigma: Double(edge * 0.6))
-                .cropped(to: e)
+            let keep = softRect(m.insetBy(dx: edge, dy: edge), in: e, sigma: edge * 0.6)
             let soft = mapped.applyingGaussianBlur(sigma: Double(short * 0.006)).cropped(to: m)
             let blend = CIFilter.blendWithMask()
             blend.inputImage = soft
@@ -128,10 +132,7 @@ enum XAFinder {
                 .cropped(to: e)
         }
         let feather = short * 0.025
-        let mask = CIImage(color: .white).cropped(to: t.insetBy(dx: feather * 0.6, dy: feather * 0.6))
-            .composited(over: CIImage(color: .black).cropped(to: e.insetBy(dx: -feather * 3, dy: -feather * 3)))
-            .applyingGaussianBlur(sigma: Double(feather * 0.5))
-            .cropped(to: e)
+        let mask = softRect(t.insetBy(dx: feather * 0.6, dy: feather * 0.6), in: e, sigma: feather * 0.5)
         let b = CIFilter.blendWithMask()
         b.inputImage = mapped.cropped(to: e)
         b.backgroundImage = around
@@ -178,10 +179,7 @@ enum XAFinder {
                 "inputBVector": CIVector(x: 0, y: 0, z: 0.9, w: 0)])
             .cropped(to: pr)
         let soft = short * 0.008
-        let pmask = CIImage(color: .white).cropped(to: pr.insetBy(dx: soft, dy: soft))
-            .composited(over: CIImage(color: .black).cropped(to: pr.insetBy(dx: -soft * 4, dy: -soft * 4)))
-            .applyingGaussianBlur(sigma: Double(soft))
-            .cropped(to: pr)
+        let pmask = softRect(pr.insetBy(dx: soft, dy: soft), in: pr, sigma: soft)
         let pb = CIFilter.blendWithMask()
         pb.inputImage = warm
         pb.backgroundImage = out.cropped(to: pr)
@@ -208,6 +206,39 @@ enum XAFinder {
         var px = [Float](repeating: 0, count: 4)
         meter.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
         return px.allSatisfy { $0.isFinite } ? px : nil
+    }
+
+    // MARK: masks
+
+    private static let maskLock = NSLock()
+    private static var masks: [String: CIImage] = [:]
+    private static let maskContext = CIContext(options: [.workingColorSpace: NSNull()])
+
+    /// A white rectangle with soft edges on black, the size of `area`. They are the same frame
+    /// after frame, so each is drawn once (small, then scaled up) and kept.
+    static func softRect(_ r: CGRect, in area: CGRect, sigma: CGFloat) -> CIImage {
+        func q(_ v: CGFloat) -> Int { Int((v / 2).rounded()) }
+        let key = "\(q(r.minX)),\(q(r.minY)),\(q(r.width)),\(q(r.height))|\(q(area.minX)),\(q(area.minY)),\(q(area.width)),\(q(area.height))|\(q(sigma))"
+        maskLock.lock()
+        if let hit = masks[key] { maskLock.unlock(); return hit }
+        maskLock.unlock()
+        let d: CGFloat = 4
+        let a = CGRect(x: area.minX / d, y: area.minY / d, width: area.width / d, height: area.height / d).integral
+        let small = CIImage(color: .white).cropped(to: CGRect(x: r.minX / d, y: r.minY / d, width: r.width / d, height: r.height / d))
+            .composited(over: CIImage(color: .black).cropped(to: a.insetBy(dx: -sigma, dy: -sigma)))
+            .applyingGaussianBlur(sigma: Double(sigma / d))
+            .cropped(to: a)
+        guard let cg = maskContext.createCGImage(small, from: a) else { return small }
+        let made = CIImage(cgImage: cg)
+            .transformed(by: CGAffineTransform(translationX: a.minX, y: a.minY))
+            .samplingLinear()
+            .transformed(by: CGAffineTransform(scaleX: d, y: d))
+            .cropped(to: area)
+        maskLock.lock()
+        if masks.count > 24 { masks.removeAll() }
+        masks[key] = made
+        maskLock.unlock()
+        return made
     }
 
     // MARK: the needle

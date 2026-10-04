@@ -9,7 +9,8 @@ import SwiftUI
 struct XAFinderView: View {
     @ObservedObject var camera: CameraModel
     let format: FilmFormat
-    private let cream = Color(red: 0.957, green: 0.925, blue: 0.835)
+    fileprivate static let cream = Color(red: 0.957, green: 0.925, blue: 0.835)
+    private var cream: Color { Self.cream }
     /// Arriving: the finder starts too big for the screen and steps back to fit.
     @State private var arrived = false
 
@@ -20,7 +21,8 @@ struct XAFinderView: View {
                 // markings sit on top of it, so the scale stays readable
                 // It moves with the markings (it is the same piece of the camera), with black beyond
                 // its edges so a quick swing never shows past it.
-                ZStack {
+                SwayLayer(motion: camera.finderMotion) {
+                  ZStack {
                     RadialGradient(stops: [.init(color: .clear, location: 0.62),
                                            .init(color: .black.opacity(0.5), location: 0.84),
                                            .init(color: .black.opacity(0.95), location: 1)],
@@ -28,21 +30,20 @@ struct XAFinderView: View {
                     Rectangle().stroke(Color.black, lineWidth: min(g.size.width, g.size.height) * 0.1)
                         .blur(radius: min(g.size.width, g.size.height) * 0.05)
                     Rectangle().stroke(Color.black, lineWidth: 80).padding(-40)
+                  }
                 }
-                .offset(camera.finderSway)
-                .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.8), value: camera.finderSway)
                 // the finder, in its own landscape space, turned with the body
-                ZStack(alignment: .topLeading) {
-                    Canvas { ctx, size in draw(&ctx, size) }
+                SwayLayer(motion: camera.finderMotion) {
+                  ZStack(alignment: .topLeading) {
+                    // drawn once for a size and format, not on every update
+                    Markings(format: format, size: CGSize(width: g.size.height, height: g.size.width)).equatable()
                     needle(CGSize(width: g.size.height, height: g.size.width))
+                  }
                 }
                 .frame(width: g.size.height, height: g.size.width)
                 .scaleEffect(arrived ? 1 : 1.9)
                 .rotationEffect(.degrees(90))
                 .opacity(arrived ? 0.68 : 0)
-                // the markings lag the camera's turn a touch, like glass nearer the eye
-                .offset(camera.finderSway)
-                .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.8), value: camera.finderSway)
                 .position(x: g.size.width / 2, y: g.size.height / 2)
             }
             .opacity(arrived ? 1 : 0.0001)
@@ -58,7 +59,7 @@ struct XAFinderView: View {
 
     // MARK: geometry, in the landscape space (width = the viewfinder's height)
 
-    private struct Geo {
+    fileprivate struct Geo {
         let S, t, off, gap, R: CGFloat
         let fr: CGRect
         let top, bot, right, midx, midy: CGFloat
@@ -66,7 +67,7 @@ struct XAFinderView: View {
         func Y(_ r: CGFloat) -> CGFloat { top + (bot - top) * r }
     }
 
-    private func geo(_ size: CGSize) -> Geo {
+    fileprivate static func geo(_ size: CGSize, format: FilmFormat) -> Geo {
         let u = size.height / XAFinder.LH
         let lf = XAFinder.landscapeFrame(format, long: size.width / max(u, 1))
         let fr = CGRect(x: lf.minX * u, y: lf.minY * u, width: lf.width * u, height: lf.height * u)
@@ -83,8 +84,8 @@ struct XAFinderView: View {
 
     // MARK: drawing
 
-    private func draw(_ ctx: inout GraphicsContext, _ size: CGSize) {
-        let g = geo(size)
+    fileprivate static func draw(_ ctx: inout GraphicsContext, _ size: CGSize, format: FilmFormat) {
+        let g = geo(size, format: format)
         let k: CGFloat = 0.45
         // right side: two strokes with round ends, pulled back half a bar so every gap is equal
         var right = Path()
@@ -174,7 +175,7 @@ struct XAFinderView: View {
 
     /// Stripes running top-left to bottom-right, as thick as the gaps between them, phased so a
     /// dark gap sits against the bar's diagonal cut.
-    private func hatch(_ g: Geo) -> Path {
+    fileprivate static func hatch(_ g: Geo) -> Path {
         var p = Path()
         let P = g.t * 1.24
         let step = P * 2.squareRoot()               // spacing of x − y between stripes
@@ -196,7 +197,7 @@ struct XAFinderView: View {
 
     /// The meter needle: points at the speed the camera is using, swinging and settling like the XA's.
     private func needle(_ size: CGSize) -> some View {
-        let g = geo(size)
+        let g = Self.geo(size, format: format)
         let at = XAFinder.needle(camera.meterShutter)
         return Capsule()
             .fill(Color(white: 0.05))
@@ -205,5 +206,26 @@ struct XAFinderView: View {
             .rotationEffect(.degrees(-9), anchor: .leading)
             .position(x: g.sx - g.sw * 0.55 + g.sw * 0.475, y: g.Y(at))
             .animation(.interpolatingSpring(stiffness: 120, damping: 9), value: at)
+    }
+}
+
+/// The finder's markings: an Equatable view, so it is drawn once per size and format.
+private struct Markings: View, Equatable {
+    let format: FilmFormat
+    let size: CGSize
+    var body: some View {
+        Canvas { ctx, sz in XAFinderView.draw(&ctx, sz, format: format) }
+            .frame(width: size.width, height: size.height)
+    }
+}
+
+/// Offsets its content by the finder's sway; only this re-evaluates when the phone moves.
+private struct SwayLayer<Content: View>: View {
+    @ObservedObject var motion: FinderMotion
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        content()
+            .offset(motion.sway)
+            .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.8), value: motion.sway)
     }
 }

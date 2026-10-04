@@ -94,6 +94,8 @@ struct CameraView: View {
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
         } else if camera.mode.usesFilm && !filmOpen {
             FannedFilm(stack: camera.stack) { withAnimation(.snappy) { filmOpen = true } }
+                // turned with the phone, it sits centred in the corner instead of leaning off it
+                .frame(width: 80, height: 52, alignment: abs(tilt.angle) > 1 ? .center : .trailing)
                 .rotationEffect(.degrees(tilt.angle))
                 .animation(.spring(response: 0.35, dampingFraction: 0.8), value: tilt.angle)
                 .modifier(SwipeToStep(step: { camera.stack.push = 0; camera.stepSim($0) },

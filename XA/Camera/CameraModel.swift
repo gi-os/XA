@@ -166,8 +166,11 @@ final class CameraModel: NSObject, ObservableObject {
     /// The viewfinder's landscape length (see XAFinder.long), set by the view.
     private var _finderLong: CGFloat = 4
     /// How far the finder's markings have swung with the camera's motion; they settle back.
-    @Published private(set) var finderSway: CGSize = .zero
+    /// How far the finder's markings have swung with the camera's motion. Its own object, so the
+    /// 30 updates a second move only the finder, not every view that watches the camera.
+    let finderMotion = FinderMotion()
     private var sway: CGSize = .zero
+    private var lastSway: CGSize = .zero
     /// When FILM's finder started arriving (it steps back into place over 0.75 s), and whether
     /// the patch has dropped in yet.
     private var _introStart: CFTimeInterval = 0
@@ -1250,7 +1253,10 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                     sway = CGSize(width: sway.width * 0.84, height: sway.height * 0.84)
                 }
                 let sw = CGSize(width: max(-14, min(14, sway.width)), height: max(-14, min(14, sway.height)))
-                DispatchQueue.main.async { self.finderSway = sw }
+                if abs(sw.width - lastSway.width) > 0.25 || abs(sw.height - lastSway.height) > 0.25 {
+                    lastSway = sw
+                    DispatchQueue.main.async { self.finderMotion.sway = sw }
+                }
                 lock.lock(); let uw = _uw; let ratio = _uwRatio; var gain = _uwGain; let flong = _finderLong; lock.unlock()
                 if let uw, frameCount % 12 == 0, let g = XAFinder.matchGain(main: shown, wide: uw, ratio: ratio) {
                     // The ultra-wide sees colour and exposure its own way: matched to the main camera, slowly.
@@ -1578,4 +1584,9 @@ extension CameraModel {
         lock.lock(); _introStart = CACurrentMediaTime(); lock.unlock()
         introPatchDone = false
     }
+}
+
+/// The finder's swing with the camera's motion, observed only by the finder.
+final class FinderMotion: ObservableObject {
+    @Published var sway: CGSize = .zero
 }
