@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 @main
 struct XAApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     var body: some Scene {
         WindowGroup { RootView() }
     }

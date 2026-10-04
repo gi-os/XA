@@ -71,10 +71,12 @@ targets:
           - SpaceMono-700.ttf
           - Unbounded-800.ttf
           - Yellowtail-400.ttf
-        # The camera stays upright like the system camera: the screen never turns, the
-        # picture and the film box do (RotationCoordinator and DeviceTilt read the motion).
+        # The camera stays upright like the system camera (AppDelegate holds it portrait); only
+        # the photo viewer turns with the phone. See XA/App/Orientation.swift.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gios.xa

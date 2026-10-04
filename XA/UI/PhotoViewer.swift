@@ -52,6 +52,9 @@ struct PhotoViewer: View {
         }
         .onChange(of: current) { _, _ in prepareFile() }
         .onAppear(perform: prepareFile)
+        // Turn the phone to see a landscape picture big; the camera underneath stays upright.
+        .onAppear { Orientation.allow(.allButUpsideDown) }
+        .onDisappear { Orientation.allow(.portrait) }
         .onChange(of: library.assets.count) { _, _ in
             if asset == nil { if let first = library.assets.first { current = first.localIdentifier } else { dismiss() } }
         }
