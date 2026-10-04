@@ -214,10 +214,12 @@ struct CameraView: View {
                             FocusBracket(camera: camera)
                         }
                     }
-                    // DIGI prints its settings across the top of the picture as plain text, like the
-                    // camera did, clear of the date back in the bottom corner.
-                    .overlay(alignment: .top) {
-                        if camera.mode == .digi { DigiOSD(camera: camera).allowsHitTesting(false).transition(.opacity) }
+                    // DIGI's screen junk, like a 2005 pocket digicam's: every piece of it live.
+                    .overlay {
+                        if camera.mode == .digi {
+                            if settings.digiOSD { DigicamOSD(camera: camera, settings: settings).allowsHitTesting(false).transition(.opacity) }
+                            else { VStack { DigiOSD(camera: camera); Spacer() }.allowsHitTesting(false).transition(.opacity) }
+                        }
                     }
                     .overlay(alignment: .bottom) {
                         if camera.mode == .pro, let code = camera.qrCode {
@@ -734,7 +736,7 @@ extension Notification.Name {
 
 
 /// DIGI's settings printed on the finder: aperture, shutter and ISO as the camera reports them.
-private struct DigiOSD: View {
+struct DigiOSD: View {
     @ObservedObject var camera: CameraModel
     var body: some View {
         HStack {

@@ -11,7 +11,7 @@ struct RGBA8: Codable, Equatable, Hashable {
 }
 
 enum DateStyle: String, CaseIterable, Codable, Identifiable {
-    case quartz, dots, camcorder, lcd, stamp, marker, edge
+    case quartz, dots, camcorder, lcd, stamp, marker, edge, digicam
     var id: String { rawValue }
     var title: String { rawValue.uppercased() }
     var note: String {
@@ -23,6 +23,7 @@ enum DateStyle: String, CaseIterable, Codable, Identifiable {
         case .stamp: return "Red ink, crooked"
         case .marker: return "Marker on white tape"
         case .edge: return "Film edge print"
+        case .digicam: return "2005 pocket digicam · red pixels"
         }
     }
 }
@@ -97,6 +98,7 @@ enum DateBack {
         case .stamp: return Ink(lamp: RGBA8(216, 65, 47, 215), halo: RGBA8(216, 65, 47, 0))
         case .marker: return Ink(lamp: RGBA8(26, 26, 26, 235), halo: RGBA8(247, 243, 232, 240))
         case .edge: return Ink(lamp: RGBA8(255, 138, 43, 230), halo: RGBA8(255, 110, 20, 60))
+        case .digicam: return Ink(lamp: RGBA8(204, 64, 44, 245), halo: RGBA8(190, 52, 36, 70))
         }
     }
 
@@ -122,11 +124,12 @@ enum DateBack {
             case .stamp: s = "\(d) \(months[max(0, min(11, m - 1))]) \(y)"
             case .marker: s = "\(months[max(0, min(11, m - 1))].lowercased()) \(d) '" + String(format: "%02d", yy)
             case .edge: s = String(format: "%02d·%02d·%02d", yy, m, d)
+            case .digicam: s = "\(months[max(0, min(11, m - 1))]) " + String(format: "%2d", d) + " \(y)"
             }
         }
         if time {
             let h = c.hour ?? 0, mi = c.minute ?? 0
-            if style == .camcorder && format == .own {
+            if (style == .camcorder || style == .digicam) && format == .own {
                 let h12 = h % 12 == 0 ? 12 : h % 12
                 s += String(format: " %d:%02d %@", h12, mi, h < 12 ? "AM" : "PM")
             } else {
@@ -156,6 +159,43 @@ enum DateBack {
         "/": ["00001", "00010", "00010", "00100", "01000", "01000", "10000"],
     ]
 
+    /// A 2005 pocket digicam's date: square pixels, upright, 5×7, with the letters its months need.
+    static let pixels: [Character: [String]] = [
+        "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+        "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+        "2": ["01110", "10001", "00001", "00110", "01000", "10000", "11111"],
+        "3": ["11110", "00001", "00001", "01110", "00001", "00001", "11110"],
+        "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+        "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+        "6": ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
+        "7": ["11111", "00001", "00010", "00100", "00100", "00100", "00100"],
+        "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+        "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
+        "A": ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+        "B": ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+        "C": ["01110", "10001", "10000", "10000", "10000", "10001", "01110"],
+        "D": ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+        "E": ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+        "F": ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
+        "G": ["01110", "10001", "10000", "10111", "10001", "10001", "01111"],
+        "J": ["00111", "00010", "00010", "00010", "00010", "10010", "01100"],
+        "L": ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+        "M": ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
+        "N": ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
+        "O": ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+        "P": ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
+        "R": ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+        "S": ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+        "T": ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+        "U": ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
+        "V": ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
+        "Y": ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
+        ":": ["00000", "01100", "01100", "00000", "01100", "01100", "00000"],
+        "/": ["00001", "00010", "00010", "00100", "01000", "01000", "10000"],
+        ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
+        "'": ["00100", "00100", "01000", "00000", "00000", "00000", "00000"],
+    ]
+
     /// Which of the seven segments each digit lights: `a` top, clockwise `b c d e f`, `g` middle.
     static let segments: [Character: String] = [
         "0": "abcdef", "1": "bc", "2": "abdeg", "3": "abcdg", "4": "bcfg",
@@ -172,7 +212,7 @@ enum DateBack {
 
         var advance: CGFloat {
             switch style {
-            case .dots: return height / 7 * 6
+            case .dots, .digicam: return height / 7 * 6
             case .quartz: return height * 0.55 * 1.34
             default: return 0
             }
@@ -191,6 +231,7 @@ enum DateBack {
 
         func width(of ch: Character) -> CGFloat {
             if style == .dots && DateBack.glyphs[ch] != nil { return advance }
+            if style == .digicam { return advance }
             if style == .quartz && (DateBack.segments[ch] != nil || ch == "'" || ch == " " || ch == "." || ch == ":") { return advance }
             if style == .dots && ch == " " { return advance }
             let s = String(ch) as NSString
@@ -205,10 +246,28 @@ enum DateBack {
 
         func draw(_ ch: Character, in ctx: CGContext) {
             if style == .dots, let rows = DateBack.glyphs[ch] { drawDots(rows, ctx); return }
+            if style == .digicam { if let rows = DateBack.pixels[ch] { drawPixels(rows, ctx) }; return }
             if style == .quartz, ch == " " { return }
             if style == .dots, ch == " " { return }
             if style == .quartz, DateBack.segments[ch] != nil || ch == "'" || ch == "." || ch == ":" { drawQuartz(ch, ctx); return }
             drawType(ch, ctx)
+        }
+
+        /// Square pixels, upright, a soft edge from the camera's own JPEG round each.
+        private func drawPixels(_ rows: [String], _ ctx: CGContext) {
+            let cell: CGFloat = height / 7
+            let top: CGFloat = -7 * cell
+            for (fill, spill) in [(ink.halo, cell * 0.16), (ink.lamp, CGFloat(0))] {
+                ctx.setFillColor(fill.cg)
+                for (r, bits) in rows.enumerated() {
+                    for (c, b) in bits.enumerated() where b == "1" {
+                        let rect = CGRect(x: CGFloat(c) * cell - spill, y: top + CGFloat(r) * cell - spill,
+                                          width: cell * 1.02 + spill * 2, height: cell * 1.02 + spill * 2)
+                        ctx.addPath(CGPath(roundedRect: rect, cornerWidth: cell * 0.12, cornerHeight: cell * 0.12, transform: nil))
+                    }
+                }
+                ctx.fillPath()
+            }
         }
 
         private func drawDots(_ rows: [String], _ ctx: CGContext) {
@@ -361,6 +420,7 @@ enum DateBack {
         let short = min(size.width, size.height), long = max(size.width, size.height)
         switch style {
         case .dots: return max(1.5, short / 175 * scale) * 7
+        case .digicam: return max(1.5, short / 150 * scale) * 7
         case .quartz: return max(0.7, long / 720 * scale) * 13
         default: return long / 34 * scale * 0.72
         }
@@ -413,6 +473,9 @@ enum DateBack {
             let cell = h / 7
             let over: CGFloat = 6 * cell * slant
             origin = CGPoint(x: size.width - cell * 8 - w - over, y: size.height - cell * 8)
+        case .digicam:
+            let cell = h / 7
+            origin = CGPoint(x: size.width - cell * 7 - w, y: size.height - cell * 7)
         case .quartz:
             let unit = h / 13
             origin = CGPoint(x: size.width - unit * 16 - w - h * 0.11, y: size.height - unit * 16)

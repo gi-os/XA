@@ -50,6 +50,8 @@ final class AppSettings: ObservableObject {
     @Published var sounds: Bool { didSet { d.set(sounds, forKey: "sounds") } }
     @Published var showRollButton: Bool { didSet { d.set(showRollButton, forKey: "showRollButton") } }
     @Published var showFlipButton: Bool { didSet { d.set(showFlipButton, forKey: "showFlipButton") } }
+    /// DIGI's screen junk: battery, size, shots left, histogram, zoom bar, clock, like a 2005 digicam.
+    @Published var digiOSD: Bool { didSet { d.set(digiOSD, forKey: "digiOSD") } }
     /// BOOTH: the skin setting and the sticker sheet's layout.
     @Published var boothSkin: BoothSkin { didSet { d.set(boothSkin.rawValue, forKey: "boothSkin") } }
     /// The first shot's frame; the other three take the next ones.
@@ -78,6 +80,7 @@ final class AppSettings: ObservableObject {
         afArea = AFArea(rawValue: d.string(forKey: "afArea") ?? "") ?? .auto
         showRollButton = d.object(forKey: "showRollButton") as? Bool ?? true
         showFlipButton = d.object(forKey: "showFlipButton") as? Bool ?? true
+        digiOSD = d.object(forKey: "digiOSD") as? Bool ?? true
         flash = FlashSetting(rawValue: d.string(forKey: "flash") ?? "") ?? .off
         sounds = d.object(forKey: "sounds") as? Bool ?? true
         boothSkin = BoothSkin(rawValue: d.string(forKey: "boothSkin") ?? "") ?? .doll

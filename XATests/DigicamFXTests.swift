@@ -65,11 +65,29 @@ final class DigicamFXTests: XCTestCase {
     func testDefaultRecipeIsHowXAShoots() {
         let r = DigiRecipe()
         XCTAssertEqual(r.jpegQuality, 0.42, accuracy: 0.001)
-        XCTAssertEqual(r.onCount, 4)
+        XCTAssertEqual(r.onCount, 8)
         var off = r
         for k in DigiRecipe.Key.allCases { off[k].on = false }
         XCTAssertEqual(off.onCount, 0)
         XCTAssertEqual(off[.jpeg].level, 0)
+    }
+
+    func testTheCCDDeepensASkyAndClipsHard() {
+        let sky = CIImage(color: CIColor(red: 0.35, green: 0.6, blue: 0.9)).cropped(to: CGRect(x: 0, y: 0, width: 16, height: 16))
+        let hot = CIImage(color: CIColor(red: 0.95, green: 0.95, blue: 0.95)).cropped(to: CGRect(x: 0, y: 0, width: 16, height: 16))
+        let ctx = CIContext()
+        func px(_ i: CIImage) -> [Float] {
+            var p = [Float](repeating: 0, count: 4)
+            ctx.render(i, toBitmap: &p, rowBytes: 16, bounds: CGRect(x: 8, y: 8, width: 1, height: 1), format: .RGBAf, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+            return p
+        }
+        let s = px(DigicamFX.ccd(sky, amount: 1))
+        XCTAssertLessThan(s[0], 0.33)                 // less red in the sky: richer
+        XCTAssertGreaterThan(s[2] - s[0], 0.9 - 0.35) // more blue over red than it came in with
+        XCTAssertGreaterThan(px(DigicamFX.ccd(hot, amount: 1))[1], 0.985)   // near-white clips
+        let img = CIImage(color: CIColor(red: 0.5, green: 0.4, blue: 0.3)).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 48))
+        XCTAssertEqual(DigicamFX.fringe(img, amount: 1).extent, img.extent)
+        XCTAssertEqual(DigicamFX.sharpen(img, amount: 1).extent, img.extent)
     }
 
     func testRecipeOffLeavesThePhotoAlone() {

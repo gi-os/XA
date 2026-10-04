@@ -127,7 +127,12 @@ enum Darkroom {
         let sim = FilmCatalog.sim(s.stack.simID)
         if let sim, !sim.isNeutral {
             img = SimEngine.apply(sim, to: img, preview: preview, push: s.stack.push, seed: preview ? nil : Int(date.timeIntervalSince1970 * 1000) % 100_000)
-        } else if !s.film { img = Digicam.tone(img) }
+        } else if !s.film {
+            img = Digicam.tone(img)
+            // The camera's own color (the CCD), in the viewfinder too: only with no sim loaded,
+            // where the picture is the camera's.
+            if s.recipe.ccd.level > 0 { img = DigicamFX.ccd(img, amount: s.recipe.ccd.level) }
+        }
         // FILM stops here: the stock is the whole look, at full size, with the date back if it is on.
         if s.film { return (stamp(img, s, date: date, dateShift: dateShift, mono: sim?.mono ?? false), false) }
         if s.stack.look != .none {

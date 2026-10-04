@@ -10,10 +10,13 @@ struct DigiRecipe: Codable, Equatable {
         var level: Double { on ? min(1, max(0, amount)) : 0 }
     }
     enum Key: String, CaseIterable, Identifiable, Codable {
-        case flash, night, jpeg, lens, smear, grain, leak
+        case ccd, sharpen, fringe, flash, night, jpeg, lens, smear, grain, leak
         var id: String { rawValue }
         var title: String {
             switch self {
+            case .ccd: return "CCD COLOR"
+            case .sharpen: return "EDGE CRUNCH"
+            case .fringe: return "COLOR FRINGE"
             case .flash: return "FLASH LOOK"
             case .night: return "NIGHT SMEAR"
             case .jpeg: return "JPEG CRUNCH"
@@ -25,6 +28,9 @@ struct DigiRecipe: Codable, Equatable {
         }
         var detail: String {
             switch self {
+            case .ccd: return "A 2005 pocket Sony's color: deep cyan-blue skies, reds a touch hot, punchy contrast and highlights that clip hard. Also in the viewfinder."
+            case .sharpen: return "The camera's own sharpening: crunchy edges with a thin halo."
+            case .fringe: return "Red and blue edges toward the corners, from a tiny zoom lens."
             case .flash: return "Hot faces, warm whites, green shadows. Only when the flash fires."
             case .night: return "Low light goes waxy with faint color blotches."
             case .jpeg: return "Blocks in flat areas, smeared color."
@@ -36,17 +42,23 @@ struct DigiRecipe: Codable, Equatable {
         }
     }
 
+    var ccd = Part(on: true, amount: 0.6)
+    var sharpen = Part(on: true, amount: 0.5)
+    var fringe = Part(on: true, amount: 0.4)
     var flash = Part(on: true, amount: 0.5)
     var night = Part(on: true, amount: 0.5)
     var jpeg = Part(on: true, amount: 0.5)
     var lens = Part(on: true, amount: 0.5)
-    var smear = Part(on: false, amount: 0.5)
+    var smear = Part(on: true, amount: 0.4)
     var grain = Part(on: false, amount: 0.4)
     var leak = Part(on: false, amount: 0.5)
 
     subscript(_ k: Key) -> Part {
         get {
             switch k {
+            case .ccd: return ccd
+            case .sharpen: return sharpen
+            case .fringe: return fringe
             case .flash: return flash
             case .night: return night
             case .jpeg: return jpeg
@@ -58,6 +70,9 @@ struct DigiRecipe: Codable, Equatable {
         }
         set {
             switch k {
+            case .ccd: ccd = newValue
+            case .sharpen: sharpen = newValue
+            case .fringe: fringe = newValue
             case .flash: flash = newValue
             case .night: night = newValue
             case .jpeg: jpeg = newValue
@@ -68,6 +83,25 @@ struct DigiRecipe: Codable, Equatable {
             }
         }
     }
+
+    init() {}
+
+    // Recipes saved before a part existed still load, with that part at its default.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = DigiRecipe()
+        ccd = try c.decodeIfPresent(Part.self, forKey: .ccd) ?? d.ccd
+        sharpen = try c.decodeIfPresent(Part.self, forKey: .sharpen) ?? d.sharpen
+        fringe = try c.decodeIfPresent(Part.self, forKey: .fringe) ?? d.fringe
+        flash = try c.decodeIfPresent(Part.self, forKey: .flash) ?? d.flash
+        night = try c.decodeIfPresent(Part.self, forKey: .night) ?? d.night
+        jpeg = try c.decodeIfPresent(Part.self, forKey: .jpeg) ?? d.jpeg
+        lens = try c.decodeIfPresent(Part.self, forKey: .lens) ?? d.lens
+        smear = try c.decodeIfPresent(Part.self, forKey: .smear) ?? d.smear
+        grain = try c.decodeIfPresent(Part.self, forKey: .grain) ?? d.grain
+        leak = try c.decodeIfPresent(Part.self, forKey: .leak) ?? d.leak
+    }
+    private enum CodingKeys: String, CodingKey { case ccd, sharpen, fringe, flash, night, jpeg, lens, smear, grain, leak }
 
     var onCount: Int { Key.allCases.filter { self[$0].on }.count }
 

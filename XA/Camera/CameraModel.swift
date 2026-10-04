@@ -1258,6 +1258,11 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                 let d = dev.exposureDuration.seconds, iso = dev.iso
                 DispatchQueue.main.async { self.meterShutter = d; self.meterISO = iso }
             }
+            // DIGI's screen shows a histogram too (a few times a second is plenty).
+            if m == .digi && frameCount % 10 == 0 {
+                let s: CGFloat = 160 / max(src.extent.width, 1)
+                updateHistogram(src.transformed(by: CGAffineTransform(scaleX: s, y: s)))
+            }
             let t = turn
             let upright = Self.rotated(src, clockwise: t)
             var dev = dev

@@ -99,6 +99,7 @@ targets:
       - path: XA/UI/Theme.swift
       - path: XA/UI/StackRow.swift
       - path: XA/UI/CameraView.swift
+      - path: XA/UI/DigicamOSD.swift
       - path: XA/UI/LCD.swift
       - path: XA/UI/XAFinderView.swift
       - path: XA/UI/Collar.swift

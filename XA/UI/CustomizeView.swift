@@ -96,6 +96,9 @@ struct CustomizeView: View {
                     row("Your recipe", "\(settings.recipe.onCount) on", accent: true)
                 }
                 Toggle("Instant review", isOn: $settings.instantReview).tint(XA.orange).font(.system(size: 15))
+                Toggle("Screen info", isOn: $settings.digiOSD).tint(XA.orange).font(.system(size: 15))
+                Text("The 2005 digicam's screen: battery, photo size, shots left, flash, histogram, zoom bar, the next file number and the clock, all live. Off: just the exposure. Default on.")
+                    .font(.system(size: 12)).foregroundStyle(XA.faint)
                 if !camera.lastTiming.isEmpty {
                     Text("Last shot: \(camera.lastTiming)").font(.system(size: 12, design: .monospaced)).foregroundStyle(XA.faint)
                 }

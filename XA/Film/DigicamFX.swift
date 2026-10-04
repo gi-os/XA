@@ -44,7 +44,9 @@ enum DigicamFX {
         if c.night > 0 && r.night.level > 0 { out = night(out, amount: min(0.7, c.night * r.night.level * 2)) }
         if r.smear.level > 0 { out = smear(out, amount: r.smear.level) }
         if !pixel {
+            if r.fringe.level > 0 { out = fringe(out, amount: r.fringe.level) }
             if r.lens.level > 0 { out = lens(out, amount: r.lens.level) }
+            if r.sharpen.level > 0 { out = sharpen(out, amount: r.sharpen.level) }
             if r.jpeg.level > 0 { out = jpeg(out, quality: r.jpegQuality) }
         }
         if r.leak.level > 0 { out = leak(out, amount: r.leak.level, seed: seed) }
@@ -162,5 +164,108 @@ enum DigicamFX {
         CGImageDestinationAddImage(dest, cg, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
         guard CGImageDestinationFinalize(dest), let back = CIImage(data: data as Data) else { return img }
         return back.transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY))
+    }
+}
+
+// MARK: a 2005 pocket Sony
+
+extension DigicamFX {
+    /// The CCD's color, as its camera rendered it: skies deep and leaning cyan, reds a little
+    /// hot, the rest modest; an S-curve with highlights that clip hard instead of rolling off.
+    /// One cube, cheap enough for the viewfinder.
+    static func ccd(_ img: CIImage, amount: Double) -> CIImage {
+        let e = img.extent
+        let a = min(1, max(0, amount))
+        guard a > 0 else { return img }
+        let cube = CIFilter.colorCubeWithColorSpace()
+        cube.inputImage = img
+        cube.cubeDimension = Float(ccdCubeSize)
+        cube.cubeData = ccdCube
+        if let cs = CGColorSpace(name: CGColorSpace.sRGB) { cube.colorSpace = cs }
+        let out = (cube.outputImage ?? img).cropped(to: e)
+        guard a < 0.999 else { return out }
+        let mix = CIFilter.dissolveTransition(); mix.inputImage = img; mix.targetImage = out; mix.time = Float(a)
+        return (mix.outputImage ?? out).cropped(to: e)
+    }
+
+    static let ccdCubeSize = 32
+    static let ccdCube: Data = {
+        let n = ccdCubeSize
+        var d = [Float](repeating: 0, count: n * n * n * 4)
+        func hsv(_ r: Float, _ g: Float, _ b: Float) -> (Float, Float, Float) {
+            let mx = max(r, g, b), mn = min(r, g, b), c = mx - mn
+            var h: Float = 0
+            if c > 1e-5 {
+                if mx == r { h = ((g - b) / c).truncatingRemainder(dividingBy: 6) }
+                else if mx == g { h = (b - r) / c + 2 } else { h = (r - g) / c + 4 }
+                h *= 60; if h < 0 { h += 360 }
+            }
+            return (h, mx > 0 ? c / mx : 0, mx)
+        }
+        func rgb(_ h: Float, _ s: Float, _ v: Float) -> (Float, Float, Float) {
+            let c = v * s, x = c * (1 - abs((h / 60).truncatingRemainder(dividingBy: 2) - 1)), m = v - c
+            let (r, g, b): (Float, Float, Float)
+            switch h { case ..<60: (r, g, b) = (c, x, 0); case ..<120: (r, g, b) = (x, c, 0); case ..<180: (r, g, b) = (0, c, x)
+                       case ..<240: (r, g, b) = (0, x, c); case ..<300: (r, g, b) = (x, 0, c); default: (r, g, b) = (c, 0, x) }
+            return (r + m, g + m, b + m)
+        }
+        func bell(_ h: Float, _ c: Float, _ w: Float) -> Float { var dh = abs(h - c); if dh > 180 { dh = 360 - dh }; return max(0, 1 - dh / w) }
+        var i = 0
+        for bi in 0..<n { for gi in 0..<n { for ri in 0..<n {
+            let r0 = Float(ri) / Float(n - 1), g0 = Float(gi) / Float(n - 1), b0 = Float(bi) / Float(n - 1)
+            var (h, s, v) = hsv(r0, g0, b0)
+            // skies: toward a deep cyan-blue, richer and a little darker
+            let sky = bell(h, 212, 45) * min(1, s * 3)
+            h += (204 - h) * 0.35 * sky
+            s = min(1, s * (1 + 0.32 * sky))
+            v *= 1 - 0.07 * sky
+            // reds a touch hot
+            let red = bell(h, 2, 28) * min(1, s * 3)
+            s = min(1, s * (1 + 0.16 * red))
+            // greens a little muted, as the reviews found the saturation modest
+            let green = bell(h, 110, 50)
+            s *= 1 - 0.08 * green
+            var (r, g, b) = rgb(max(0, min(359.9, h < 0 ? h + 360 : h)), s, v)
+            // contrast, then a hard clip: 6% over runs straight out to white
+            func curve(_ x: Float) -> Float { let y = x + 0.5 * x * (1 - x) * (x - 0.42); return min(1, max(0, y * 1.06 - 0.012)) }
+            r = curve(r); g = curve(g); b = curve(b)
+            d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 1
+            i += 4
+        } } }
+        return d.withUnsafeBufferPointer { Data(buffer: $0) }
+    }()
+
+    /// The camera's sharpening: an unsharp mask a couple of pixels wide at its 5 MP, so edges
+    /// get a thin bright and dark halo.
+    static func sharpen(_ img: CIImage, amount: Double) -> CIImage {
+        let e = img.extent
+        let px = max(e.width, e.height) / 2592
+        let us = CIFilter.unsharpMask()
+        us.inputImage = img.clampedToExtent()
+        us.radius = Float(max(0.8, 1.6 * px))
+        us.intensity = Float(0.9 * min(1, amount))
+        return (us.outputImage ?? img).cropped(to: e)
+    }
+
+    /// Lateral color: red a hair bigger than green, blue a hair smaller, so edges toward the
+    /// corners grow red and blue fringes.
+    static func fringe(_ img: CIImage, amount: Double) -> CIImage {
+        let e = img.extent
+        let k = CGFloat(0.0016 * min(1, amount))
+        func scaled(_ s: CGFloat) -> CIImage {
+            img.clampedToExtent()
+                .transformed(by: CGAffineTransform(translationX: -e.midX, y: -e.midY))
+                .transformed(by: CGAffineTransform(scaleX: s, y: s))
+                .transformed(by: CGAffineTransform(translationX: e.midX, y: e.midY)).cropped(to: e)
+        }
+        func only(_ i: CIImage, _ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> CIImage {
+            i.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: r, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: g, z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: b, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1)]).cropped(to: e)
+        }
+        let red = only(scaled(1 + k), 1, 0, 0), green = only(img, 0, 1, 0), blue = only(scaled(1 - k), 0, 0, 1)
+        let rg = CIFilter.additionCompositing(); rg.inputImage = red; rg.backgroundImage = green
+        let rgb = CIFilter.additionCompositing(); rgb.inputImage = blue; rgb.backgroundImage = rg.outputImage
+        return (rgb.outputImage ?? img).cropped(to: e).settingAlphaOne(in: e)
     }
 }
