@@ -17,6 +17,11 @@ struct FilmStock: Equatable, Hashable, Identifiable {
     let grain: Double
     /// Halation strength, 1 = the fitted default.
     let halation: Double
+    /// What an underexposed frame turns once the lab has lifted it: density added to each record
+    /// of the negative where it is thin. More on the green record prints green; less on the blue
+    /// takes away the print paper's own blue. Fuji stocks go green to cyan, Kodak consumer stocks
+    /// green to olive, Portra and Ektar hold on longer.
+    var toe = CIVector(x: 0, y: 0.05, z: -0.03)
 
     /// The speed you shoot at, pushed or pulled `push` stops, as a film speed on the 1/3 scale.
     func ei(_ push: Int) -> Int { FilmStock.nearestISO(Double(rated) * pow(2, Double(push))) }
@@ -38,15 +43,25 @@ struct FilmStock: Equatable, Hashable, Identifiable {
     static let pushRange = -2...2
 
     static let all: [FilmStock] = [
-        FilmStock(id: "bowery400", name: "Bowery", rated: 400, suffix: "", grain: 0.010, halation: 1),
-        FilmStock(id: "bowery800", name: "Bowery", rated: 800, suffix: "", grain: 0.013, halation: 1),
-        FilmStock(id: "coney200", name: "Coney", rated: 200, suffix: "", grain: 0.010, halation: 1),
-        FilmStock(id: "chelsea100", name: "Chelsea", rated: 100, suffix: "", grain: 0.006, halation: 0.9),
-        FilmStock(id: "prospect200", name: "Prospect", rated: 200, suffix: "", grain: 0.010, halation: 1),
-        FilmStock(id: "canal500t", name: "Canal", rated: 500, suffix: "T", grain: 0.012, halation: 1.5),
-        FilmStock(id: "orchard400", name: "Orchard", rated: 400, suffix: "", grain: 0.011, halation: 1),
+        // Grain is RMS density at a lab scan's pixel, spread out the way the stocks are known for:
+        // Ektar the finest, Portra fine, consumer 200 and 400 visibly grainy, 500T and 1600 coarse.
+        FilmStock(id: "bowery400", name: "Bowery", rated: 400, suffix: "", grain: 0.010, halation: 1,
+                  toe: CIVector(x: 0, y: 0.04, z: -0.03)),
+        FilmStock(id: "bowery800", name: "Bowery", rated: 800, suffix: "", grain: 0.015, halation: 1,
+                  toe: CIVector(x: 0, y: 0.05, z: -0.03)),
+        FilmStock(id: "coney200", name: "Coney", rated: 200, suffix: "", grain: 0.013, halation: 1,
+                  toe: CIVector(x: 0.01, y: 0.08, z: -0.06)),
+        FilmStock(id: "chelsea100", name: "Chelsea", rated: 100, suffix: "", grain: 0.006, halation: 0.9,
+                  toe: CIVector(x: 0, y: 0.03, z: -0.01)),
+        FilmStock(id: "prospect200", name: "Prospect", rated: 200, suffix: "", grain: 0.013, halation: 1,
+                  toe: CIVector(x: -0.04, y: 0.09, z: -0.02)),
+        FilmStock(id: "canal500t", name: "Canal", rated: 500, suffix: "T", grain: 0.017, halation: 1.5,
+                  toe: CIVector(x: -0.04, y: 0.05, z: 0)),
+        FilmStock(id: "orchard400", name: "Orchard", rated: 400, suffix: "", grain: 0.015, halation: 1,
+                  toe: CIVector(x: -0.03, y: 0.1, z: -0.03)),
         // Natura 1600 (Superia 1600 in Japan's box), read from Fujifilm's datasheet: tools/filmsim/natura.
-        FilmStock(id: "ludlow1600", name: "Ludlow", rated: 1600, suffix: "", grain: 0.017, halation: 1.1),
+        FilmStock(id: "ludlow1600", name: "Ludlow", rated: 1600, suffix: "", grain: 0.023, halation: 1.1,
+                  toe: CIVector(x: -0.03, y: 0.07, z: -0.02)),
     ]
     static func stock(_ id: String?) -> FilmStock? { all.first { $0.id == id } }
 }
@@ -125,8 +140,12 @@ enum FilmLab {
     }
 
     private static let densityKernel = CIColorKernel(source: """
-    kernel vec4 xaDensity(__sample c, __sample bc, __sample bt, float kc, float kt, float gam, vec3 off, vec3 dmin, vec3 dmax, vec3 timing, float pre) {
+    kernel vec4 xaDensity(__sample c, __sample bc, __sample bt, float kc, float kt, float gam, vec3 off, vec3 dmin, vec3 dmax, vec3 timing, float pre, vec3 toe, float lift) {
         vec3 code = c.rgb + kc * (c.rgb - bc.rgb) + kt * (c.rgb - bt.rgb);
+        // Thin negative (an underexposed part of the frame, two stops down and more): the lab
+        // scanner lifts it, and it comes up muddy and off-color, in the stock's own way.
+        float thin = 1.0 - smoothstep(0.16, 0.44, (code.r + code.g + code.b) / 3.0);
+        code = code + thin * (toe + vec3(lift));
         vec3 D = code * (dmax - dmin) + dmin;
         D = max(D, vec3(0.0)) * gam + min(D, vec3(0.0)) + off;
         // The lab's printing: color timing is filter density in each printing light, the same as
@@ -254,13 +273,18 @@ enum FilmLab {
            let d = k.apply(extent: full, arguments: [img, blur(img, Fit.couplerUM), blur(img, Fit.couplerTailUM),
                                                       Fit.couplerK, Fit.couplerTailK, gamma,
                                                       t.pushOffset[push] ?? CIVector(x: 0, y: 0, z: 0), t.dmin, t.dmax,
-                                                      timing(shot?.recipe), Float(max(0, shot?.recipe.preflash ?? 0) * 0.02)]) {
+                                                      timing(shot?.recipe), Float(max(0, shot?.recipe.preflash ?? 0) * 0.02),
+                                                      shot == nil ? CIVector(x: 0, y: 0, z: 0) : stock.toe,
+                                                      Float(shot == nil ? 0 : (shot?.recipe.scan == .lab ? 0.09 : 0.05))]) {
             img = d
         }
         trace?("developed", img)
         img = blur(img, Fit.dyeBlurUM)
         if let g = grainKernel, let rnd = CIFilter.randomGenerator().outputImage {
-            let clump = max(0.35, Fit.grainClumpUM / um / 2.355)
+            // Clumps as a scanner sees them (the dye clouds merge into grains of about 14 µm), and
+            // the strength a pixel of that size shows: a smaller pixel averages over fewer grains.
+            let clump = max(0.6, 2 * Fit.grainClumpUM / um / 2.355)
+            let aperture = 1.8 * min(1.6, max(0.4, 12 / um))
             let shift = CGFloat(seed % 9973) * 37
             func noise(_ dx: CGFloat, _ dy: CGFloat, _ sigma: CGFloat) -> CIImage {
                 rnd.transformed(by: CGAffineTransform(translationX: dx, y: dy)).cropped(to: full)
@@ -271,7 +295,7 @@ enum FilmLab {
             let c = noise(shift * 0.6 + 9000, -shift - 7000, clump * 4)
             // Uniform noise has a spread of 0.289; a blur of `clump` pixels averages it down.
             func norm(_ s: CGFloat) -> CGFloat { max(1, 2 * s * sqrt(.pi)) / 0.2887 }
-            let rms = Float(stock.grain * (r?.grain ?? 1) * max(0.5, 1 + 0.3 * Double(push)))
+            let rms = Float(stock.grain * aperture * (r?.grain ?? 1) * max(0.5, 1 + 0.3 * Double(push)))
             let norms = CIVector(x: norm(clump), y: norm(clump * 2), z: norm(clump * 4))
             if let out = g.apply(extent: full, arguments: [img, a, b, c, rms, Fit.grainChroma, Fit.grainTop, norms, t.dmin, t.dmax]) {
                 img = out

@@ -7,6 +7,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
+    # Frozen while testing: TestFlight reviews only the first build of a version, so every build
+    # keeps this number and only the build number (the CI run number) goes up.
     MARKETING_VERSION: "0.15.3"
     CURRENT_PROJECT_VERSION: "1"
     TARGETED_DEVICE_FAMILY: "1"

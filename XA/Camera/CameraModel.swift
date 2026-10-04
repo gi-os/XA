@@ -975,7 +975,7 @@ final class CameraModel: NSObject, ObservableObject {
                 // FILM keeps everything: HEIC at a high quality. DIGI saves the crunch you chose.
                 let full = shot.develop.film || shot.develop.booth != nil
                 type = full ? .heic : (alpha ? .png : .jpeg)
-                out = Encoder.encode(cg, type: type, quality: full ? 0.92 : CGFloat(shot.crunch), properties: props)
+                out = Encoder.encode(cg, type: type, quality: full ? 0.95 : CGFloat(shot.crunch), properties: props)
                 if let b = shot.booth {
                     let small = Self.downsized(cg, longEdge: 1400)
                     DispatchQueue.main.async { self.boothCollect(b.session, b.index, small, date: shot.date) }
