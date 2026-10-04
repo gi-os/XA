@@ -106,12 +106,8 @@ enum FilmPreview {
         res.withUnsafeMutableBytes { raw in
             context.render(out, toBitmap: raw.baseAddress!, rowBytes: n * 16, bounds: CGRect(x: 0, y: 0, width: n, height: n * n), format: .RGBAf, colorSpace: nil)
         }
-        // CIImage rows run bottom-up: the lattice was laid out top-down, so read it back the same way.
-        var cube = [Float](repeating: 1, count: n * n * n * 4)
-        for row in 0..<(n * n) {
-            let src = (n * n - 1 - row) * n * 4, dst = row * n * 4
-            for j in 0..<(n * 4) { cube[dst + j] = res[src + j].isFinite ? res[src + j] : 0 }
-        }
+        // Bitmap in and bitmap out keep the same row order, so the entries come back where they went.
+        var cube = res.map { $0.isFinite ? $0 : 0 }
         for i in stride(from: 3, to: cube.count, by: 4) { cube[i] = 1 }
         return cube.withUnsafeBufferPointer { Data(buffer: $0) }
     }
