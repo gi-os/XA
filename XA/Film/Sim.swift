@@ -82,6 +82,7 @@ struct Sim: Codable, Equatable, Identifiable, Hashable {
     static let stocks: [Sim] = FilmStock.all.map { st in
         var s = Sim(id: st.id, name: st.name, iso: "\(st.rated)\(st.suffix)", exposures: 36)
         s.stock = st.id
+        s.mono = st.mono
         return s
     }
 

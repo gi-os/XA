@@ -22,6 +22,8 @@ struct FilmStock: Equatable, Hashable, Identifiable {
     /// takes away the print paper's own blue. Fuji stocks go green to cyan, Kodak consumer stocks
     /// green to olive, Portra and Ektar hold on longer.
     var toe = CIVector(x: 0, y: 0.05, z: -0.03)
+    /// Black and white: one silver layer, so grain and glow have no colour and the print is neutral.
+    var mono = false
 
     /// The speed you shoot at, pushed or pulled `push` stops, as a film speed on the 1/3 scale.
     func ei(_ push: Int) -> Int { FilmStock.nearestISO(Double(rated) * pow(2, Double(push))) }
@@ -62,6 +64,16 @@ struct FilmStock: Equatable, Hashable, Identifiable {
         // Natura 1600 (Superia 1600 in Japan's box), read from Fujifilm's datasheet: tools/filmsim/natura.
         FilmStock(id: "ludlow1600", name: "Ludlow", rated: 1600, suffix: "", grain: 0.023, halation: 1.1,
                   toe: CIVector(x: 0.03, y: 0.1, z: -0.07)),
+        // Black and white (tools/filmsim/bw): curves shaped like the published ones.
+        // Tri-X 400: classic, punchy, visible grain.
+        FilmStock(id: "bleecker400", name: "Bleecker", rated: 400, suffix: "", grain: 0.021, halation: 0.35,
+                  toe: CIVector(x: 0, y: 0, z: 0), mono: true),
+        // Delta 3200: big smooth grain, soft, a slower film pushed.
+        FilmStock(id: "delancey3200", name: "Delancey", rated: 3200, suffix: "", grain: 0.034, halation: 0.35,
+                  toe: CIVector(x: 0, y: 0, z: 0), mono: true),
+        // T-MAX P3200: crisp, contrasty, finer and sharper grain.
+        FilmStock(id: "essexp3200", name: "Essex", rated: 3200, suffix: "P", grain: 0.026, halation: 0.3,
+                  toe: CIVector(x: 0, y: 0, z: 0), mono: true),
     ]
     static func stock(_ id: String?) -> FilmStock? { all.first { $0.id == id } }
 }
@@ -262,7 +274,9 @@ enum FilmLab {
         } else {
             bounced = blur(source, Fit.halationUM)
         }
-        let halo = scale(bounced, Fit.halationR * h, Fit.halationG * h, 0)
+        // Black-and-white film has an anti-halation backing and no red layer: a faint grey glow.
+        let halo = stock.mono ? scale(bounced, Fit.halationR * h * 0.4, Fit.halationR * h * 0.4, Fit.halationR * h * 0.4)
+                              : scale(bounced, Fit.halationR * h, Fit.halationG * h, 0)
         if let k = addLightKernel, let lit = k.apply(extent: full, arguments: [img, halo]) { img = lit }
         trace?("halation", img)
         // Into the tables' code space: sRGB-encoded, 0…1.
@@ -280,7 +294,7 @@ enum FilmLab {
                                                       t.pushOffset[push] ?? CIVector(x: 0, y: 0, z: 0), t.dmin, t.dmax,
                                                       timing(shot?.recipe), Float(max(0, shot?.recipe.preflash ?? 0) * 0.02),
                                                       shot == nil ? CIVector(x: 0, y: 0, z: 0) : stock.toe,
-                                                      Float(shot == nil ? 0 : (shot?.recipe.scan == .lab ? 0.09 : 0.05)), Float(t.greyCode)]) {
+                                                      Float(shot == nil || stock.mono ? 0 : (shot?.recipe.scan == .lab ? 0.09 : 0.05)), Float(t.greyCode)]) {
             img = d
         }
         trace?("developed", img)
@@ -302,7 +316,15 @@ enum FilmLab {
             func norm(_ s: CGFloat) -> CGFloat { max(1, 2 * s * sqrt(.pi)) / 0.2887 }
             let rms = Float(stock.grain * aperture * (r?.grain ?? 1) * max(0.5, 1 + 0.3 * Double(push)))
             let norms = CIVector(x: norm(clump), y: norm(clump * 2), z: norm(clump * 4))
-            if let out = g.apply(extent: full, arguments: [img, a, b, c, rms, Fit.grainChroma, Fit.grainTop, norms, t.dmin, t.dmax]) {
+            if stock.mono {
+                // one silver layer: the same grain in every channel (a mono frame of the noise)
+                let m = { (i: CIImage) in i.applyingFilter("CIColorMatrix", parameters: [
+                    "inputRVector": CIVector(x: 0.33, y: 0.33, z: 0.34, w: 0), "inputGVector": CIVector(x: 0.33, y: 0.33, z: 0.34, w: 0),
+                    "inputBVector": CIVector(x: 0.33, y: 0.33, z: 0.34, w: 0), "inputAVector": CIVector(x: 0.33, y: 0.33, z: 0.34, w: 0)]).cropped(to: full) }
+                if let out = g.apply(extent: full, arguments: [img, m(a), m(b), m(c), rms, Float(0), Fit.grainTop, CIVector(x: norms.x * 1.73, y: norms.y * 1.73, z: norms.z * 1.73), t.dmin, t.dmax]) {
+                    img = out
+                }
+            } else if let out = g.apply(extent: full, arguments: [img, a, b, c, rms, Fit.grainChroma, Fit.grainTop, norms, t.dmin, t.dmax]) {
                 img = out
             }
         }
@@ -310,6 +332,12 @@ enum FilmLab {
                                                              "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1)])
         trace?("grained", img)
         img = cube(img, t.print, t.size, full)
+        if stock.mono {
+            // a neutral silver print
+            img = img.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: 0.3, y: 0.59, z: 0.11, w: 0), "inputGVector": CIVector(x: 0.3, y: 0.59, z: 0.11, w: 0),
+                "inputBVector": CIVector(x: 0.3, y: 0.59, z: 0.11, w: 0)]).cropped(to: full)
+        }
         trace?("print", img)
         img = img.applyingFilter("CISRGBToneCurveToLinear")
         // Flare on the print: a little of its light lifts its deepest blacks.

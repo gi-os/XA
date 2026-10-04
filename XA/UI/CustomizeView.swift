@@ -160,7 +160,7 @@ struct CustomizeView: View {
                 .onChange(of: settings.digiZero) { _, _ in camera.zeroChanged() }
             Text("FILM saves full size with none of DIGI's digicam processing. From RAW it also skips the iPhone's own (Smart HDR, tone mapping, sharpening), so the stock is the only look. Slower to save.")
                 .font(.system(size: 12)).foregroundStyle(XA.faint)
-            Text("The film stocks (Bowery, Coney, Chelsea, Prospect, Canal, Orchard, Ludlow) are developed through tables baked with spektrafilm, Andrea Volpato's spectral simulation of film from published datasheets, with grain, halation and coupler effects fitted to it. Film modeling powered by spektrafilm (github.com/andreavolpato/spektrafilm); tables CC BY-SA 4.0. Swipe a stock's box up to push it a stop, down to pull.")
+            Text("The film stocks (Bowery, Coney, Chelsea, Prospect, Canal, Orchard, Ludlow) are developed through tables baked with spektrafilm, Andrea Volpato's spectral simulation of film from published datasheets, with grain, halation and coupler effects fitted to it. The black-and-white stocks (Bleecker, Delancey, Essex) use XA's own tables, shaped like the published curves. Film modeling powered by spektrafilm (github.com/andreavolpato/spektrafilm); tables CC BY-SA 4.0. Swipe a stock's box up to push it a stop, down to pull.")
                 .font(.system(size: 12)).foregroundStyle(XA.dim)
             }
         }

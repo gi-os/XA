@@ -355,12 +355,13 @@ struct FilmStrip: View {
                 HStack(spacing: 10) {
                     switch row {
                     case 0:
-                        ForEach(FilmCatalog.sims(for: camera.mode)) { s in
-                            let on = FilmCatalog.sim(camera.stack.simID)?.id == s.id
-                            tile(.sim(on ? (camera.stack.shownSim ?? s) : s), on: on) {
-                                if !on { camera.stack.push = 0 }
-                                camera.stack.simID = s.id
-                            }
+                        let all = FilmCatalog.sims(for: camera.mode)
+                        let favs = camera.favorites.compactMap { id in all.first { $0.id == id } }
+                        let rest = all.filter { !camera.favorites.contains($0.id) }
+                        let groups = [favs, rest.filter { !$0.mono }, rest.filter { $0.mono }].filter { !$0.isEmpty }
+                        ForEach(groups.indices, id: \.self) { g in
+                            if g > 0 { Rectangle().fill(Color.white.opacity(0.18)).frame(width: 1, height: 40).padding(.horizontal, 2) }
+                            ForEach(groups[g]) { s in simTile(s) }
                         }
                     case 1:
                         ForEach(Look.allCases.filter { $0 != .none }) { l in
@@ -386,6 +387,21 @@ struct FilmStrip: View {
         case 1: if camera.stack.look != .none { proxy.scrollTo("look-\(camera.stack.look.rawValue)", anchor: .center) }
         default: if camera.stack.shape != .none { proxy.scrollTo("shape-\(camera.stack.shape.rawValue)", anchor: .center) }
         }
+    }
+
+    /// A film's box in the row: tap to load, long-press to star it.
+    private func simTile(_ s: Sim) -> some View {
+        let on = FilmCatalog.sim(camera.stack.simID)?.id == s.id
+        let fav = camera.isFavorite(s.id)
+        return tile(.sim(on ? (camera.stack.shownSim ?? s) : s), on: on) {
+            if !on { camera.stack.push = 0 }
+            camera.stack.simID = s.id
+        }
+        .rotationEffect(.degrees(fav ? -2 : 0))
+        .overlay(alignment: .topTrailing) { if fav { FavoriteStar().offset(x: 6, y: -6) } }
+        .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+            withAnimation(.snappy) { camera.toggleFavorite(s.id) }
+        })
     }
 
     private func tile(_ item: FilmItem, on: Bool, _ action: @escaping () -> Void) -> some View {
@@ -835,5 +851,18 @@ private struct QRChip: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(url != nil ? "Open \(code)" : "Copy \(code)")
+    }
+}
+
+/// The orange star on a favourite film's box.
+struct FavoriteStar: View {
+    var body: some View {
+        Image(systemName: "star.fill")
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(XA.orange)
+            .frame(width: 18, height: 18)
+            .background(Color.black.opacity(0.75), in: Circle())
+            .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+            .accessibilityLabel("Favorite")
     }
 }

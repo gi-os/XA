@@ -158,4 +158,22 @@ final class FilmLabTests: XCTestCase {
         XCTAssertEqual(old?.lens, 0.2)
         XCTAssertEqual(old?.grain, 1)
     }
+
+    /// Black and white: a coloured scene prints as neutral grey, and the stars stay apart per mode.
+    func testBlackAndWhiteStocksPrintNeutral() {
+        let lin = CGColorSpace(name: CGColorSpace.linearSRGB)!
+        let red = CIImage(color: CIColor(red: 0.5, green: 0.1, blue: 0.05, alpha: 1, colorSpace: lin)!)
+            .cropped(to: CGRect(x: 0, y: 0, width: 96, height: 72))
+        let ctx = CIContext(options: [.workingColorSpace: lin])
+        let mono = FilmStock.all.filter { $0.mono }
+        XCTAssertEqual(Set(mono.map(\.id)), ["bleecker400", "delancey3200", "essexp3200"])
+        for st in mono {
+            let out = FilmLab.develop(red, stock: st, push: 0, preview: false, seed: 5, shot: FilmShot(recipe: FilmRecipe(), seed: 5))
+            var px = [Float](repeating: 0, count: 4)
+            ctx.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 48, y: 36, width: 1, height: 1), format: .RGBAf, colorSpace: lin)
+            XCTAssertEqual(px[0], px[1], accuracy: 0.004, st.id)
+            XCTAssertEqual(px[1], px[2], accuracy: 0.004, st.id)
+            XCTAssertTrue(FilmCatalog.sim(st.id)?.mono == true, st.id)
+        }
+    }
 }

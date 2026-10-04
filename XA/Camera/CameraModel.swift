@@ -42,6 +42,8 @@ final class CameraModel: NSObject, ObservableObject {
     /// The take so far: which tape from which second.
     @Published private(set) var segments: [TakeSegment] = []
     @Published var mode: CaptureMode = .digi { didSet { modeChanged(oldValue) } }
+    /// Starred films for this mode (FILM's stocks and DIGI's sims are kept apart), in the order starred.
+    @Published private(set) var favorites: [String] = []
     /// A QR code PRO is looking at (its text), while it is in view.
     @Published var qrCode: String?
     @Published var stack = Stack(simID: "nocturne") { didSet { stackChanged() } }
@@ -267,6 +269,7 @@ final class CameraModel: NSObject, ObservableObject {
             // BOOTH turns the camera round to face you, and back when you leave.
             if old == .booth { cancelBooth(); setFront(false) }
             updateMotion()
+            loadFavorites()
             updateUltraWide()
             if mode == .film { beginFinderIntro() }
             if old == .film && settings.filmRecipe.xaFinder {
@@ -302,6 +305,7 @@ final class CameraModel: NSObject, ObservableObject {
 
     func start() {
         updateMotion()
+        loadFavorites()
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized: authorized = true; sessionQueue.async { self.configure() }
         case .notDetermined:
@@ -777,8 +781,23 @@ final class CameraModel: NSObject, ObservableObject {
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
+    private var favoritesKey: String { mode == .film ? "favorites.film" : "favorites.digi" }
+    func loadFavorites() {
+        let valid = Set(FilmCatalog.sims(for: mode).map { $0.id })
+        favorites = (UserDefaults.standard.stringArray(forKey: favoritesKey) ?? []).filter { valid.contains($0) }
+    }
+    func isFavorite(_ id: String) -> Bool { favorites.contains(id) }
+    /// Star or unstar a film (long-press its box).
+    func toggleFavorite(_ id: String) {
+        if let i = favorites.firstIndex(of: id) { favorites.remove(at: i) } else { favorites.append(id) }
+        UserDefaults.standard.set(favorites, forKey: favoritesKey)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    /// Swiping the corner box: through the favorites when there are any, else every film.
     func stepSim(_ by: Int) {
-        let ids: [String] = FilmCatalog.sims(for: mode).map { $0.id }
+        let all: [String] = FilmCatalog.sims(for: mode).map { $0.id }
+        let ids = favorites.count >= 2 ? favorites : all
         let loaded = FilmCatalog.sim(stack.simID)?.id
         let i = ids.firstIndex(where: { $0 == loaded }) ?? 0
         let n = ids.count

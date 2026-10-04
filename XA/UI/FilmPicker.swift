@@ -15,15 +15,15 @@ struct FilmPicker: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     stackBar
-                    SectionLabel(text: camera.mode == .film ? "STOCKS · PICK ONE" : "SIMS · PICK ONE").padding(.top, 6)
+                    let all = FilmCatalog.sims(for: camera.mode)
+                    let favs = camera.favorites.compactMap { id in all.first { $0.id == id } }
+                    if !favs.isEmpty {
+                        SectionLabel(text: "FAVORITES").padding(.top, 6)
+                        LazyVGrid(columns: cols, spacing: 12) { ForEach(favs) { s in simCard(s) } }
+                    }
+                    SectionLabel(text: camera.mode == .film ? "COLOR STOCKS · PICK ONE" : "SIMS · PICK ONE").padding(.top, 6)
                     LazyVGrid(columns: cols, spacing: 12) {
-                        ForEach(FilmCatalog.sims(for: camera.mode)) { s in
-                            card(.sim(s), on: FilmCatalog.sim(camera.stack.simID)?.id == s.id) { camera.stack.simID = s.id; applySaved(s) }
-                                .contextMenu {
-                                    Button("Edit") { editing = s }
-                                    if !s.isPreset { Button("Delete", role: .destructive) { delete(s) } }
-                                }
-                        }
+                        ForEach(all.filter { camera.mode != .film || !$0.mono }) { s in simCard(s) }
                         if camera.mode != .film {
                         Button { editing = newSim() } label: {
                             VStack(alignment: .leading, spacing: 5) {
@@ -35,6 +35,10 @@ struct FilmPicker: View {
                         }
                         .buttonStyle(.plain)
                         }
+                    }
+                    if camera.mode == .film {
+                        SectionLabel(text: "BLACK & WHITE").padding(.top, 8)
+                        LazyVGrid(columns: cols, spacing: 12) { ForEach(all.filter { $0.mono }) { s in simCard(s) } }
                     }
                     if camera.mode != .film {
                     SectionLabel(text: "LOOKS · PICK ONE OR NONE").padding(.top, 8)
@@ -52,7 +56,7 @@ struct FilmPicker: View {
                     Text("Long-press a sim to edit it. Instant sims print their own frame, so they replace the shape.")
                         .font(.system(size: 12)).foregroundStyle(XA.faint).padding(.top, 8)
                     } else {
-                    Text("FILM shoots only the stocks, at full size. Swipe a stock's box up to push it a stop, down to pull.")
+                    Text("FILM shoots only the stocks, at full size. Swipe a stock's box up to push it a stop, down to pull. Long-press a box to star it: the corner box then swipes through your favorites.")
                         .font(.system(size: 12)).foregroundStyle(XA.faint).padding(.top, 8)
                     }
                 }
@@ -89,6 +93,18 @@ struct FilmPicker: View {
             Button("Save") { saveStack() }.font(XA.display(13)).foregroundStyle(XA.orange).buttonStyle(.plain)
         }
         .padding(.horizontal, 10).padding(.vertical, 10).background(XA.fill)
+    }
+
+    private func simCard(_ s: Sim) -> some View {
+        card(.sim(s), on: FilmCatalog.sim(camera.stack.simID)?.id == s.id) { camera.stack.simID = s.id; applySaved(s) }
+            .overlay(alignment: .topLeading) { if camera.isFavorite(s.id) { FavoriteStar().offset(x: 68, y: -7) } }
+            .contextMenu {
+                Button(camera.isFavorite(s.id) ? "Unstar" : "Star", systemImage: camera.isFavorite(s.id) ? "star.slash" : "star") {
+                    camera.toggleFavorite(s.id)
+                }
+                Button("Edit") { editing = s }
+                if !s.isPreset { Button("Delete", role: .destructive) { delete(s) } }
+            }
     }
 
     private func card(_ item: FilmItem, on: Bool, _ action: @escaping () -> Void) -> some View {
