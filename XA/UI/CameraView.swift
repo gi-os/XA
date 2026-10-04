@@ -809,14 +809,15 @@ private struct ShutterBlinkView: View {
 private struct QRChip: View {
     let code: String
     @State private var copied = false
+    @Environment(\.openURL) private var openURL
     private var url: URL? {
         guard let u = URL(string: code.trimmingCharacters(in: .whitespacesAndNewlines)), let s = u.scheme?.lowercased(),
-              ["http", "https", "mailto", "tel", "sms", "facetime", "maps"].contains(s) || UIApplication.shared.canOpenURL(u) else { return nil }
+              ["http", "https", "mailto", "tel", "sms", "facetime", "maps", "spotify", "itms-apps", "shortcuts"].contains(s) else { return nil }
         return u
     }
     var body: some View {
         Button {
-            if let url { UIApplication.shared.open(url) } else {
+            if let url { openURL(url) } else {
                 UIPasteboard.general.string = code
                 copied = true
             }
