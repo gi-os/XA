@@ -73,8 +73,10 @@ targets:
           - Yellowtail-400.ttf
         # The camera stays upright like the system camera (AppDelegate holds it portrait); only
         # the photo viewer turns with the phone. See XA/App/Orientation.swift.
+        # App Store Connect refuses an upload without all four (iPad multitasking rules).
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
     settings:
