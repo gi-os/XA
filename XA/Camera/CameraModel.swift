@@ -140,6 +140,20 @@ final class CameraModel: NSObject, ObservableObject {
     // FILM's finder: how far the rangefinder's second image sits off, and what drives it.
     private let motion = CMMotionManager()
     private var patchShift: CGFloat = 0
+    /// A damped spring for the patch's second image: position, velocity, stiffness, damping.
+    private struct PatchSpring {
+        var pos: CGFloat = 0, vel: CGFloat = 0, k: CGFloat = 70, zeta: CGFloat = 0.5
+        mutating func step(_ dt: CGFloat) {
+            let c = 2 * zeta * k.squareRoot()
+            for _ in 0..<2 {
+                let a = -k * pos - c * vel
+                vel += a * dt / 2
+                pos += vel * dt / 2
+            }
+            pos = max(-1.2, min(1.2, pos))
+        }
+    }
+    private var patch = PatchSpring()
     private var lastLens: Float = -1
     // FILM's ultra-wide: the second camera behind the finder's surround.
     private let uwOutput = AVCaptureVideoDataOutput()
@@ -149,6 +163,11 @@ final class CameraModel: NSObject, ObservableObject {
     private var _uwRatio: CGFloat = 2
     private var _uwGain = CIVector(x: 1, y: 1, z: 1)
     private var uwCount = 0
+    /// The viewfinder's landscape length (see XAFinder.long), set by the view.
+    private var _finderLong: CGFloat = 4
+    /// How far the finder's markings have swung with the camera's motion; they settle back.
+    @Published private(set) var finderSway: CGSize = .zero
+    private var sway: CGSize = .zero
     private let eyeQueue = DispatchQueue(label: "xa.eyes", qos: .userInitiated)
     private var proDims = CMVideoDimensions(width: 4032, height: 3024)
 
@@ -607,7 +626,9 @@ final class CameraModel: NSObject, ObservableObject {
         if settings.sounds && mode != .video { CameraSounds.shared.play(.focus) }
         let continuous = settings.afMode == .continuous
         let front = self.front
-        sessionQueue.async { self.aim(viewPoint, front: front, continuous: continuous) }
+        // In the XA finder the picture sits inside the frame: aim where the tap lands on it.
+        let target = (mode == .film && settings.filmRecipe.xaFinder) ? (finderToPicture(viewPoint) ?? viewPoint) : viewPoint
+        sessionQueue.async { self.aim(target, front: front, continuous: continuous) }
     }
 
     private func aim(_ viewPoint: CGPoint, front: Bool, continuous: Bool) {
@@ -1186,25 +1207,51 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             }
             var shown = t == 0 ? developed : Self.rotated(developed, clockwise: 360 - t)
             if m == .film && dev.filmRecipe.xaFinder {
-                // The rangefinder patch slips when the camera moves or focus hunts, then settles.
-                var drive: CGFloat = 0
+                // The rangefinder patch: its second image slips off when the camera moves or the
+                // distance changes, then comes back the way a hand turns a focus ring: a big change
+                // swings back slowly and overshoots, a small one snaps, and no two are the same.
+                var motionDrive: CGFloat = 0
                 if let r = motion.deviceMotion?.rotationRate {
-                    drive += CGFloat(min(1, (r.x * r.x + r.y * r.y + r.z * r.z).squareRoot() * 0.6))
+                    motionDrive = CGFloat(min(1, (r.x * r.x + r.y * r.y + r.z * r.z).squareRoot() * 0.5))
                 }
+                var depth: CGFloat = 0
+                var hunting = false
                 if let d = device {
                     let lp = d.lensPosition
-                    if lastLens >= 0 { drive += CGFloat(min(1, abs(lp - lastLens) * 30)) }
+                    if lastLens >= 0 { depth = CGFloat(lp - lastLens) * 30 }
                     lastLens = lp
-                    if d.isAdjustingFocus { drive = max(drive, 0.35) }
+                    hunting = d.isAdjustingFocus
                 }
-                patchShift = max(patchShift * 0.86, min(1, drive))
-                lock.lock(); let uw = _uw; let ratio = _uwRatio; var gain = _uwGain; lock.unlock()
+                let kick = min(1, max(motionDrive, abs(depth)))
+                if kick > 0.12 && kick > abs(patch.pos) * 0.9 {
+                    let sign: CGFloat = depth != 0 ? (depth > 0 ? 1 : -1) : (Bool.random() ? 1 : -1)
+                    patch.pos = sign * kick
+                    patch.vel = 0
+                    // further to turn: a slower, looser hand; a nudge: quick and tight
+                    patch.k = 95 - 60 * kick + CGFloat.random(in: -10...10)
+                    patch.zeta = CGFloat.random(in: 0.28...0.75) + (kick < 0.3 ? 0.15 : 0)
+                }
+                if hunting {
+                    // still turning the ring: the image wanders a little instead of settling
+                    patch.vel += CGFloat.random(in: -0.6...0.6)
+                }
+                patch.step(1.0 / 30)
+                patchShift = patch.pos
+                // The markings sit on glass nearer the eye: they lag the camera's turn a little.
+                if let r = motion.deviceMotion?.rotationRate {
+                    sway = CGSize(width: sway.width * 0.84 + CGFloat(r.y) * 2.2, height: sway.height * 0.84 + CGFloat(r.x) * 2.2)
+                } else {
+                    sway = CGSize(width: sway.width * 0.84, height: sway.height * 0.84)
+                }
+                let sw = CGSize(width: max(-14, min(14, sway.width)), height: max(-14, min(14, sway.height)))
+                DispatchQueue.main.async { self.finderSway = sw }
+                lock.lock(); let uw = _uw; let ratio = _uwRatio; var gain = _uwGain; let flong = _finderLong; lock.unlock()
                 if let uw, frameCount % 12 == 0, let g = XAFinder.matchGain(main: shown, wide: uw, ratio: ratio) {
                     // The ultra-wide sees colour and exposure its own way: matched to the main camera, slowly.
                     gain = CIVector(x: gain.x * 0.75 + g.x * 0.25, y: gain.y * 0.75 + g.y * 0.25, z: gain.z * 0.75 + g.z * 0.25)
                     lock.lock(); _uwGain = gain; lock.unlock()
                 }
-                shown = XAFinder.compose(shown, format: dev.filmRecipe.format, shift: patchShift, wide: uw, ratio: ratio, gain: gain)
+                shown = XAFinder.compose(shown, format: dev.filmRecipe.format, shift: patchShift, long: flong, wide: uw, ratio: ratio, gain: gain)
             }
             img = shown
         }
@@ -1485,5 +1532,26 @@ extension CameraModel {
         d.activeFormat = pick
         d.unlockForConfiguration()
         return true
+    }
+}
+
+extension CameraModel {
+    /// The FILM finder's shape, from the view: its height over its width.
+    func setFinderShape(_ hOverW: CGFloat) {
+        let l = XAFinder.long(hOverW)
+        lock.lock(); _finderLong = l; lock.unlock()
+    }
+
+    /// A point on the XA finder (normalised to the finder) → the same point on the camera's
+    /// picture (normalised), or nil when it falls outside the frame.
+    func finderToPicture(_ p: CGPoint) -> CGPoint? {
+        lock.lock(); let l = _finderLong; lock.unlock()
+        let f = settings.filmRecipe.format
+        let n = XAFinder.frame(f, long: l)
+        guard n.contains(p) else { return nil }
+        let local = CGPoint(x: (p.x - n.minX) / n.width, y: (p.y - n.minY) / n.height)
+        // the format's crop inside the picture (3:4 portrait), normalised
+        let c = f.frame(in: CGRect(x: 0, y: 0, width: 3, height: 4))
+        return CGPoint(x: (c.minX + local.x * c.width) / 3, y: (c.minY + local.y * c.height) / 4)
     }
 }

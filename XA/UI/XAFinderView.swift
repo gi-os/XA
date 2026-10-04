@@ -22,6 +22,9 @@ struct XAFinderView: View {
                 .frame(width: g.size.height, height: g.size.width)
                 .rotationEffect(.degrees(90))
                 .opacity(0.68)
+                // the markings lag the camera's turn a touch, like glass nearer the eye
+                .offset(camera.finderSway)
+                .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.8), value: camera.finderSway)
                 .position(x: g.size.width / 2, y: g.size.height / 2)
                 // the eyepiece: everything falls off into black at the edges, most in the corners
                 RadialGradient(stops: [.init(color: .clear, location: 0.62),
@@ -46,8 +49,8 @@ struct XAFinderView: View {
     }
 
     private func geo(_ size: CGSize) -> Geo {
-        let u = size.width / XAFinder.LW
-        let lf = XAFinder.landscapeFrame(format)
+        let u = size.height / XAFinder.LH
+        let lf = XAFinder.landscapeFrame(format, long: size.width / max(u, 1))
         let fr = CGRect(x: lf.minX * u, y: lf.minY * u, width: lf.width * u, height: lf.height * u)
         let S = size.height
         let t = S * 0.022, off = t * 1.3, gap = S * 0.075, R = S * 0.075

@@ -42,6 +42,7 @@ struct CustomizeView: View {
                                 .font(.system(size: 12)).foregroundStyle(XA.faint)
                         }
                     }
+                    group("APP ICON") { IconPicker() }
                     group("OPENS IN") {
                         Segmented(items: [(OpenIn.last, "Last"), (.digi, "DIGI"), (.film, "FILM"), (.pro, "PRO")], selection: $settings.openIn)
                     }
@@ -181,5 +182,47 @@ struct CustomizeView: View {
             Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(XA.faint)
         }
         .padding(.vertical, 6)
+    }
+}
+
+/// The app's icon: the original or one of the alternates.
+private struct IconPicker: View {
+    private static let icons: [(name: String?, preview: String, title: String)] = [
+        (nil, "IconPreview-Original", "Original"),
+        ("AppIcon-Lens", "IconPreview-Lens", "Lens"),
+        ("AppIcon-LensCrop", "IconPreview-LensCrop", "Lens, close"),
+        ("AppIcon-LensCover", "IconPreview-LensCover", "Lens cover"),
+        ("AppIcon-Navy", "IconPreview-Navy", "Professional"),
+        ("AppIcon-Bowery", "IconPreview-Bowery", "Bowery 800"),
+        ("AppIcon-Coney", "IconPreview-Coney", "Coney 200"),
+        ("AppIcon-Ludlow", "IconPreview-Ludlow", "Ludlow 1600"),
+    ]
+    @State private var current = UIApplication.shared.alternateIconName
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 14) {
+                ForEach(Self.icons, id: \.preview) { icon in
+                    let on = current == icon.name
+                    Button {
+                        guard UIApplication.shared.supportsAlternateIcons, !on else { return }
+                        UIApplication.shared.setAlternateIconName(icon.name) { error in
+                            if error == nil { DispatchQueue.main.async { current = icon.name } }
+                        }
+                    } label: {
+                        VStack(spacing: 6) {
+                            Image(icon.preview).resizable().frame(width: 60, height: 60)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(on ? XA.orange : .clear, lineWidth: 2.5).padding(-4))
+                            Text(icon.title).font(.system(size: 11)).foregroundStyle(on ? .white : XA.dim).lineLimit(1)
+                        }
+                        .frame(width: 72)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(icon.title) icon")
+                }
+            }
+            .padding(.vertical, 6).padding(.horizontal, 4)
+        }
     }
 }

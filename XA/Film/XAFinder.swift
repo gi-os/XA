@@ -6,54 +6,62 @@ import CoreImage.CIFilterBuiltins
 /// the rangefinder patch in the middle. It is part of the body, so with the phone upright it
 /// lies turned a quarter, as the XA's does when you hold the camera on its side.
 ///
-/// Geometry is worked out in the finder's own landscape space (4 wide, 3 high, the scale on the
-/// left), then turned a quarter clockwise into the portrait viewfinder (3 wide, 4 high).
+/// Geometry is worked out in the finder's own landscape space (`long` wide, 3 high, the scale on
+/// the left), then turned a quarter clockwise into the portrait viewfinder (3 wide, `long` high).
+/// `long` follows the viewfinder's shape: 4 for 3:4, more when the finder runs up to the top of
+/// the screen. The frame is centred, so the rangefinder patch sits in the middle of the finder.
 enum XAFinder {
-    /// The finder's landscape space.
-    static let LW: CGFloat = 4, LH: CGFloat = 3
-    static let scaleColumn: CGFloat = 0.48, rightMargin: CGFloat = 0.2, topMargin: CGFloat = 0.27
+    static let LH: CGFloat = 3
+    static let sideMargin: CGFloat = 0.48, topMargin: CGFloat = 0.27
+
+    /// The landscape length for a viewfinder of this shape (height over width).
+    static func long(_ hOverW: CGFloat) -> CGFloat { max(3.2, LH * hOverW) }
 
     /// The bright frame in landscape finder space, for a format.
-    static func landscapeFrame(_ f: FilmFormat) -> CGRect {
-        let aw = LW - scaleColumn - rightMargin, ah = LH - 2 * topMargin
+    static func landscapeFrame(_ f: FilmFormat, long LW: CGFloat = 4) -> CGRect {
+        let aw = LW - 2 * sideMargin, ah = LH - 2 * topMargin
         let a = 1 / f.aspect                       // long over short
         var fw = min(aw, ah * a)
         var fh = fw / a
         if fh > ah { fh = ah; fw = fh * a }
-        return CGRect(x: scaleColumn + (aw - fw) / 2, y: topMargin + (ah - fh) / 2, width: fw, height: fh)
+        return CGRect(x: (LW - fw) / 2, y: (LH - fh) / 2, width: fw, height: fh)
     }
 
     /// Landscape finder space → the portrait viewfinder, normalised 0…1 with the origin top left.
-    static func toPortrait(_ r: CGRect) -> CGRect {
+    static func toPortrait(_ r: CGRect, long LW: CGFloat = 4) -> CGRect {
         CGRect(x: (LH - r.maxY) / LH, y: r.minY / LW, width: r.height / LH, height: r.width / LW)
     }
 
     /// Where the photo lands in the viewfinder, normalised, origin top left.
-    static func frame(_ f: FilmFormat) -> CGRect { toPortrait(landscapeFrame(f)) }
+    static func frame(_ f: FilmFormat, long: CGFloat = 4) -> CGRect { toPortrait(landscapeFrame(f, long: long), long: long) }
 
     /// The viewfinder picture: the main camera, cropped to the format, sitting exactly in the
     /// bright frame; around it the same scene carried on, softly blurred (until the ultra-wide
     /// feeds it), and feathered so the hand-over is hard to see. `img` is the frame as the screen
     /// shows it (portrait); the result has the same extent.
     /// The rangefinder patch in landscape finder space: centred in the frame.
-    static func landscapePatch(_ f: FilmFormat) -> CGRect {
-        let fr = landscapeFrame(f)
+    static func landscapePatch(_ f: FilmFormat, long: CGFloat = 4) -> CGRect {
+        let fr = landscapeFrame(f, long: long)
         let w: CGFloat = 0.39, h: CGFloat = 0.315
         return CGRect(x: fr.midX - w / 2, y: fr.midY - h / 2, width: w, height: h)
     }
-    static func patch(_ f: FilmFormat) -> CGRect { toPortrait(landscapePatch(f)) }
+    static func patch(_ f: FilmFormat, long: CGFloat = 4) -> CGRect { toPortrait(landscapePatch(f, long: long), long: long) }
 
     /// `shift` (0…1) is how far the rangefinder's second image sits off the first: it jumps when
     /// the camera moves or focus is hunting, and settles back to 0 as focus lands.
     /// `wide` is the ultra-wide frame (portrait, any size), `ratio` how much wider it sees than the
     /// main camera, `gain` its colour matched to the main camera. Without it the surround is the
     /// main picture carried on.
-    static func compose(_ img: CIImage, format: FilmFormat, shift: CGFloat = 0,
+    /// The result has the viewfinder's own shape: as wide as `img`, `long`/3 times as tall.
+    static func compose(_ img: CIImage, format: FilmFormat, shift: CGFloat = 0, long: CGFloat = 4,
                         wide: CIImage? = nil, ratio: CGFloat = 2, gain: CIVector = CIVector(x: 1, y: 1, z: 1)) -> CIImage {
-        let e = img.extent
-        guard e.width > 8, e.height > 8 else { return img }
-        let crop = format.frame(in: e)
-        let n = frame(format)
+        let src = img.extent
+        guard src.width > 8, src.height > 8 else { return img }
+        let crop = format.frame(in: src)
+        // the canvas: the viewfinder's shape, centred on the picture
+        let ch = src.width * long / LH
+        let e = CGRect(x: src.minX, y: src.midY - ch / 2, width: src.width, height: ch)
+        let n = frame(format, long: long)
         // Core Image's origin is bottom left.
         let t = CGRect(x: e.minX + n.minX * e.width, y: e.minY + (1 - n.maxY) * e.height,
                        width: n.width * e.width, height: n.height * e.height)
@@ -67,11 +75,11 @@ enum XAFinder {
         if let wide, wide.extent.width > 8 {
             // The ultra-wide, lined up: its middle (1/ratio of it) is what the main camera sees.
             let w = wide.extent
-            let su = e.width / (w.width / ratio)
+            let su = src.width / (w.width / ratio)
             let onScreen = wide
                 .transformed(by: CGAffineTransform(translationX: -w.midX, y: -w.midY))
                 .transformed(by: CGAffineTransform(scaleX: su, y: su))
-                .transformed(by: CGAffineTransform(translationX: e.midX, y: e.midY))
+                .transformed(by: CGAffineTransform(translationX: src.midX, y: src.midY))
             around = onScreen
                 .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
                 .transformed(by: CGAffineTransform(scaleX: k, y: k))
@@ -100,11 +108,19 @@ enum XAFinder {
         b.backgroundImage = around
         b.maskImage = mask
         var out = (b.outputImage ?? around).cropped(to: e)
+        // Toward the speed scale (the top while the finder lies turned) the scene sinks a little
+        // further into the dark, so the end of the surround never shows against a bright wall.
+        let g = CIFilter.linearGradient()
+        g.point0 = CGPoint(x: e.midX, y: e.maxY)
+        g.point1 = CGPoint(x: e.midX, y: t.maxY + feather)
+        g.color0 = CIColor(red: 0, green: 0, blue: 0, alpha: 0.55)
+        g.color1 = CIColor(red: 0, green: 0, blue: 0, alpha: 0)
+        if let shade = g.outputImage?.cropped(to: e) { out = shade.composited(over: out).cropped(to: e) }
 
         // The rangefinder patch: a brighter, warmer window in the middle with the second image
         // laid over the first, offset along the finder's long side (the screen's up and down
         // while the finder lies turned) until focus brings the two together.
-        let pn = patch(format)
+        let pn = patch(format, long: long)
         let pr = CGRect(x: e.minX + pn.minX * e.width, y: e.minY + (1 - pn.maxY) * e.height,
                         width: pn.width * e.width, height: pn.height * e.height)
         let offset = shift * short * 0.05

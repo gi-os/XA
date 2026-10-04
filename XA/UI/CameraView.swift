@@ -169,7 +169,25 @@ struct CameraView: View {
     /// The finder is the same 3:4 window in every mode; FILM shows its format with frame lines.
     private var finderAspect: CGFloat { 3 / 4 }
 
+    /// FILM through the XA finder: the finder takes all the room above the screen strip.
+    private var xaFinder: Bool { camera.mode == .film && settings.filmRecipe.xaFinder }
+
     @ViewBuilder private var viewfinder: some View {
+        if xaFinder && camera.authorized != false {
+            Viewfinder(camera: camera)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay { XAFinderView(camera: camera, format: settings.filmRecipe.format) }
+                .background(GeometryReader { g in
+                    Color.black
+                        .onAppear { camera.setFinderShape(g.size.height / max(g.size.width, 1)) }
+                        .onChange(of: g.size) { _, s in camera.setFinderShape(s.height / max(s.width, 1)) }
+                })
+        } else {
+            standardFinder
+        }
+    }
+
+    @ViewBuilder private var standardFinder: some View {
         ZStack {
             Color.black
             if camera.authorized == false {
