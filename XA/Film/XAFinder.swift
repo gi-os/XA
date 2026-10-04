@@ -31,7 +31,7 @@ enum XAFinder {
 
     /// Landscape finder space → the portrait viewfinder, normalised 0…1 with the origin top left.
     static func toPortrait(_ r: CGRect, long LW: CGFloat = 4) -> CGRect {
-        CGRect(x: (LH - r.maxY) / LH, y: r.minY / LW, width: r.height / LH, height: r.width / LW)
+        CGRect(x: (LH - r.maxY) / LH, y: r.minX / LW, width: r.height / LH, height: r.width / LW)
     }
 
     /// Where the photo lands in the viewfinder, normalised, origin top left.
