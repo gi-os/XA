@@ -1434,7 +1434,7 @@ extension CameraModel {
 extension CameraModel {
     /// Whether FILM should run the ultra-wide behind its finder now.
     private var wantsUltraWide: Bool {
-        mode == .film && settings.filmRecipe.xaFinder && !front && AVCaptureMultiCamSession.isMultiCamSupported
+        mode == .film && settings.filmRecipe.xaFinder && settings.filmRecipe.ultraWide && !settings.digiZero && !front && AVCaptureMultiCamSession.isMultiCamSupported
             && AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back) != nil
     }
 

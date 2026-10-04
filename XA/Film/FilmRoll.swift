@@ -77,6 +77,8 @@ struct FilmRecipe: Codable, Equatable {
     var glare: Double = 1
     /// Look through the XA's finder (bright frame, speed scale, rangefinder patch), or a plain one.
     var xaFinder = true
+    /// Fill the finder's surround from the ultra-wide (a second camera running). Experimental.
+    var ultraWide = false
 
     init() {}
 
@@ -97,6 +99,7 @@ struct FilmRecipe: Codable, Equatable {
         grain = try c.decodeIfPresent(Double.self, forKey: .grain) ?? d.grain
         glare = try c.decodeIfPresent(Double.self, forKey: .glare) ?? d.glare
         xaFinder = try c.decodeIfPresent(Bool.self, forKey: .xaFinder) ?? d.xaFinder
+        ultraWide = try c.decodeIfPresent(Bool.self, forKey: .ultraWide) ?? d.ultraWide
     }
 }
 

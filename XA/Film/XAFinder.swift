@@ -12,19 +12,20 @@ import CoreImage.CIFilterBuiltins
 /// the screen. The frame is centred, so the rangefinder patch sits in the middle of the finder.
 enum XAFinder {
     static let LH: CGFloat = 3
-    static let sideMargin: CGFloat = 0.48, topMargin: CGFloat = 0.27
+    /// Room for the speed scale on one side, just enough for the bars elsewhere: the frame is as big as the screen allows.
+    static let scaleMargin: CGFloat = 0.40, farMargin: CGFloat = 0.16, topMargin: CGFloat = 0.14
 
     /// The landscape length for a viewfinder of this shape (height over width).
     static func long(_ hOverW: CGFloat) -> CGFloat { max(3.2, LH * hOverW) }
 
     /// The bright frame in landscape finder space, for a format.
     static func landscapeFrame(_ f: FilmFormat, long LW: CGFloat = 4) -> CGRect {
-        let aw = LW - 2 * sideMargin, ah = LH - 2 * topMargin
+        let aw = LW - scaleMargin - farMargin, ah = LH - 2 * topMargin
         let a = 1 / f.aspect                       // long over short
         var fw = min(aw, ah * a)
         var fh = fw / a
         if fh > ah { fh = ah; fw = fh * a }
-        return CGRect(x: (LW - fw) / 2, y: (LH - fh) / 2, width: fw, height: fh)
+        return CGRect(x: scaleMargin + (aw - fw) / 2, y: (LH - fh) / 2, width: fw, height: fh)
     }
 
     /// Landscape finder space → the portrait viewfinder, normalised 0…1 with the origin top left.
