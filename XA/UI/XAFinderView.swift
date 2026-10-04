@@ -195,16 +195,21 @@ struct XAFinderView: View {
         return p
     }
 
-    /// The meter needle: points at the speed the camera is using, swinging and settling like the XA's.
+    /// The meter needle: a long arm pivoted outside the finder (beyond the top of the screen,
+    /// as on the XA), swinging so its tip points at the speed the camera is using.
     private func needle(_ size: CGSize) -> some View {
         let g = Self.geo(size, format: format)
         let at = XAFinder.needle(camera.meterShutter)
+        let pivot = CGPoint(x: -g.S * 1.5, y: g.Y(0.46))
+        let tip = CGPoint(x: g.sx + g.sw * 0.4, y: g.Y(at))
+        let L = hypot(tip.x - pivot.x, (g.Y(0.86) - g.Y(0.06)) / 4)   // about right across the swing
+        let angle = Angle(radians: atan2(tip.y - pivot.y, tip.x - pivot.x))
         return Capsule()
             .fill(Color(white: 0.05))
             .shadow(color: .black.opacity(0.7), radius: g.S * 0.012)
-            .frame(width: g.sw * 0.95, height: g.S * 0.012)
-            .rotationEffect(.degrees(-9), anchor: .leading)
-            .position(x: g.sx - g.sw * 0.55 + g.sw * 0.475, y: g.Y(at))
+            .frame(width: L, height: g.S * 0.012)
+            .rotationEffect(angle, anchor: .leading)
+            .position(x: pivot.x + L / 2, y: pivot.y)
             .animation(.interpolatingSpring(stiffness: 120, damping: 9), value: at)
     }
 }
