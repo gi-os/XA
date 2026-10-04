@@ -29,6 +29,32 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
         if authorized { reload() }
     }
 
+    /// Pictures that couldn't be saved yet (no Photos access at the time), kept in the app.
+    static var pendingFolder: URL? {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return nil }
+        let dir = docs.appendingPathComponent("Pending", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private var flushing: Set<URL> = []
+
+    /// Saves whatever is waiting, oldest first, and removes each once Photos has it.
+    func flushPending() {
+        let s = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard s == .authorized || s == .limited, let dir = Self.pendingFolder,
+              let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
+        for url in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where !flushing.contains(url) {
+            guard let data = try? Data(contentsOf: url) else { continue }
+            let type = UTType(filenameExtension: url.pathExtension) ?? .jpeg
+            flushing.insert(url)
+            save(data: data, type: type) { ok in
+                if ok { try? FileManager.default.removeItem(at: url) }
+                self.flushing.remove(url)
+            }
+        }
+    }
+
     func refresh() { apply(PHPhotoLibrary.authorizationStatus(for: .readWrite)) }
 
     func requestAccess() {

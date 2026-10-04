@@ -53,6 +53,9 @@ struct RootView: View {
         .onAppear {
             CameraSounds.shared.prepare()
             camera.library = library
+            // A picture Photos wouldn't take waits here and goes in the next time it can.
+            camera.fallbackFolder = Library.pendingFolder
+            library.flushPending()
             camera.onStackChange = { pushContext() }
             camera.start()
             pushContext()
@@ -60,7 +63,7 @@ struct RootView: View {
         }
         .onChange(of: phase) { _, p in
             // Back from Settings with Photos access changed: the roll picks it up.
-            if p == .active { camera.resume(); library.refresh() }
+            if p == .active { camera.resume(); library.refresh(); library.flushPending() }
             else if p == .background {
                 camera.stop()
                 // Coming back always lands on the camera: roll, viewer, pickers and settings close.
