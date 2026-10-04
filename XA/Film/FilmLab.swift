@@ -317,11 +317,10 @@ enum FilmLab {
             let rms = Float(stock.grain * aperture * (r?.grain ?? 1) * max(0.5, 1 + 0.3 * Double(push)))
             let norms = CIVector(x: norm(clump), y: norm(clump * 2), z: norm(clump * 4))
             if stock.mono {
-                // one silver layer: the same grain in every channel (a mono frame of the noise)
-                let m = { (i: CIImage) in i.applyingFilter("CIColorMatrix", parameters: [
-                    "inputRVector": CIVector(x: 0.33, y: 0.33, z: 0.34, w: 0), "inputGVector": CIVector(x: 0.33, y: 0.33, z: 0.34, w: 0),
-                    "inputBVector": CIVector(x: 0.33, y: 0.33, z: 0.34, w: 0), "inputAVector": CIVector(x: 0.33, y: 0.33, z: 0.34, w: 0)]).cropped(to: full) }
-                if let out = g.apply(extent: full, arguments: [img, m(a), m(b), m(c), rms, Float(0), Fit.grainTop, CIVector(x: norms.x * 1.73, y: norms.y * 1.73, z: norms.z * 1.73), t.dmin, t.dmax]) {
+                // one silver layer: no colour in the grain (red and green share one noise; the
+                // print is then made neutral). The noise is used raw: a colour matrix would
+                // un-premultiply the generator's random alpha and bias the grain.
+                if let out = g.apply(extent: full, arguments: [img, a, b, c, rms, Float(0), Fit.grainTop, norms, t.dmin, t.dmax]) {
                     img = out
                 }
             } else if let out = g.apply(extent: full, arguments: [img, a, b, c, rms, Fit.grainChroma, Fit.grainTop, norms, t.dmin, t.dmax]) {
