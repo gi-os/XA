@@ -30,7 +30,21 @@ struct ContactSheet: View {
             }.onEnded { v in
                 if v.translation.height > 110 || v.predictedEndTranslation.height > 260 { onClose?() } else { onDrag?(0) }
             })
-            if !library.authorized {
+            if library.denied {
+                // Photos access was turned down: the pictures are in Photos, the roll can't see them.
+                Spacer()
+                VStack(spacing: 14) {
+                    Text("Your pictures are in the Photos app.").font(XA.display(16))
+                    Text("To see them here too, let XA see your photos.").font(.system(size: 14)).foregroundStyle(XA.dim)
+                    Button("Open Settings") {
+                        if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) }
+                    }
+                    .font(XA.display(16)).padding(.horizontal, 18).padding(.vertical, 12)
+                    .background(XA.orange).foregroundStyle(.black)
+                }
+                .multilineTextAlignment(.center).padding(.horizontal, 24)
+                Spacer()
+            } else if !library.authorized {
                 Spacer()
                 Button("Show my XA pictures") { library.requestAccess() }
                     .font(XA.display(16)).padding(.horizontal, 18).padding(.vertical, 12)

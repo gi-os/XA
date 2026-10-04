@@ -59,7 +59,8 @@ struct RootView: View {
             syncThumb()
         }
         .onChange(of: phase) { _, p in
-            if p == .active { camera.resume() }
+            // Back from Settings with Photos access changed: the roll picks it up.
+            if p == .active { camera.resume(); library.refresh() }
             else if p == .background {
                 camera.stop()
                 // Coming back always lands on the camera: roll, viewer, pickers and settings close.

@@ -10,22 +10,41 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     static let title = "XA"
     @Published private(set) var assets: [PHAsset] = []
     @Published private(set) var authorized = false
+    /// Photos access was refused: XA can still add pictures, but not show them.
+    @Published private(set) var denied = false
     private let images = PHCachingImageManager()
+    private var registered = false
 
     override init() {
         super.init()
-        let s = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        authorized = s == .authorized || s == .limited
-        if authorized { PHPhotoLibrary.shared().register(self); reload() }
+        apply(PHPhotoLibrary.authorizationStatus(for: .readWrite))
     }
+
+    /// Full and limited access both show the roll: with limited access iOS still lets XA see
+    /// every picture it made itself.
+    private func apply(_ s: PHAuthorizationStatus) {
+        authorized = s == .authorized || s == .limited
+        denied = s == .denied || s == .restricted
+        if authorized && !registered { registered = true; PHPhotoLibrary.shared().register(self) }
+        if authorized { reload() }
+    }
+
+    func refresh() { apply(PHPhotoLibrary.authorizationStatus(for: .readWrite)) }
 
     func requestAccess() {
         PHPhotoLibrary.requestAuthorization(for: .readWrite) { s in
-            DispatchQueue.main.async {
-                self.authorized = s == .authorized || s == .limited
-                if self.authorized { PHPhotoLibrary.shared().register(self); self.reload() }
-            }
+            DispatchQueue.main.async { self.apply(s) }
         }
+    }
+
+    /// Every picture XA has saved, by its Photos id: the roll finds them even when the album
+    /// can't be made or seen (limited access).
+    private static let idsKey = "xaAssetIDs"
+    private var savedIDs: [String] { UserDefaults.standard.stringArray(forKey: Self.idsKey) ?? [] }
+    private func remember(_ id: String) {
+        var ids = savedIDs
+        ids.append(id)
+        UserDefaults.standard.set(ids, forKey: Self.idsKey)
     }
 
     private func album() -> PHAssetCollection? {
@@ -35,12 +54,18 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     }
 
     func reload() {
-        guard let a = album() else { assets = []; return }
-        let o = PHFetchOptions()
-        o.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        let r = PHAsset.fetchAssets(in: a, options: o)
+        guard authorized else { assets = []; return }
+        var seen = Set<String>()
         var list: [PHAsset] = []
-        r.enumerateObjects { asset, _, _ in list.append(asset) }
+        func take(_ r: PHFetchResult<PHAsset>) {
+            r.enumerateObjects { asset, _, _ in
+                if seen.insert(asset.localIdentifier).inserted { list.append(asset) }
+            }
+        }
+        if let a = album() { take(PHAsset.fetchAssets(in: a, options: nil)) }
+        let ids = savedIDs
+        if !ids.isEmpty { take(PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)) }
+        list.sort { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
         assets = list
     }
 
@@ -76,27 +101,67 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
         return out
     }
 
+    /// Saves in two steps: first the picture itself, which works with any access (full, limited
+    /// or add-only), then into the XA album, which needs full access. A failed album step never
+    /// loses the picture.
     func save(data: Data, type: UTType, completion: ((Bool) -> Void)? = nil) {
         let write = {
-            let existing = self.album()
+            var id: String?
             PHPhotoLibrary.shared().performChanges({
                 let req = PHAssetCreationRequest.forAsset()
                 let o = PHAssetResourceCreationOptions()
                 o.uniformTypeIdentifier = type.identifier
                 req.addResource(with: .photo, data: data, options: o)
-                guard let ph = req.placeholderForCreatedAsset else { return }
-                if let existing {
-                    PHAssetCollectionChangeRequest(for: existing)?.addAssets([ph] as NSArray)
-                } else {
-                    PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: Self.title).addAssets([ph] as NSArray)
+                id = req.placeholderForCreatedAsset?.localIdentifier
+            }, completionHandler: { ok, _ in
+                DispatchQueue.main.async {
+                    guard ok else { completion?(false); return }
+                    if let id { self.remember(id); self.file(id) }
+                    self.reload()
+                    completion?(true)
                 }
+            })
+        }
+        switch PHPhotoLibrary.authorizationStatus(for: .readWrite) {
+        case .notDetermined:
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { s in
+                DispatchQueue.main.async {
+                    self.apply(s)
+                    if s == .authorized || s == .limited { write() } else { self.saveAddOnly(data, type, completion) }
+                }
+            }
+        case .denied, .restricted:
+            saveAddOnly(data, type, completion)
+        default:
+            write()
+        }
+    }
+
+    /// Into the XA album, when Photos lets XA see albums.
+    private func file(_ id: String) {
+        guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized,
+              let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject else { return }
+        let existing = album()
+        PHPhotoLibrary.shared().performChanges({
+            if let existing {
+                PHAssetCollectionChangeRequest(for: existing)?.addAssets([asset] as NSArray)
+            } else {
+                PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: Self.title).addAssets([asset] as NSArray)
+            }
+        }, completionHandler: nil)
+    }
+
+    /// Without read access, XA can still add the picture to Photos (it just can't show it).
+    private func saveAddOnly(_ data: Data, _ type: UTType, _ completion: ((Bool) -> Void)?) {
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { s in
+            guard s == .authorized || s == .limited else { DispatchQueue.main.async { completion?(false) }; return }
+            PHPhotoLibrary.shared().performChanges({
+                let req = PHAssetCreationRequest.forAsset()
+                let o = PHAssetResourceCreationOptions()
+                o.uniformTypeIdentifier = type.identifier
+                req.addResource(with: .photo, data: data, options: o)
             }, completionHandler: { ok, _ in DispatchQueue.main.async { completion?(ok) } })
         }
-        if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .notDetermined {
-            PHPhotoLibrary.requestAuthorization(for: .readWrite) { _ in
-                DispatchQueue.main.async { self.authorized = true; PHPhotoLibrary.shared().register(self); write() }
-            }
-        } else { write() }
     }
 
     /// Shaped pictures are PNGs with empty pixels; Photos' own thumbnails flatten them, so they
