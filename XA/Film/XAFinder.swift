@@ -158,7 +158,8 @@ enum XAFinder {
         // further into the dark, so the end of the surround never shows against a bright wall.
         let g = CIFilter.linearGradient()
         g.point0 = CGPoint(x: e.midX, y: e.maxY)
-        g.point1 = CGPoint(x: e.midX, y: t.maxY + feather)
+        // it starts past the speed scale's numbers, so the picture under the markings stays clear
+        g.point1 = CGPoint(x: e.midX, y: min(e.maxY - 1, t.maxY + e.width * 0.19))
         g.color0 = CIColor(red: 0, green: 0, blue: 0, alpha: 0.3)
         g.color1 = CIColor(red: 0, green: 0, blue: 0, alpha: 0)
         if let shade = g.outputImage?.cropped(to: e) { out = shade.composited(over: out).cropped(to: e) }

@@ -9,6 +9,7 @@ import SwiftUI
 struct XAFinderView: View {
     @ObservedObject var camera: CameraModel
     let format: FilmFormat
+    var leaving = false
     fileprivate static let cream = Color(red: 0.957, green: 0.925, blue: 0.835)
     private var cream: Color { Self.cream }
     /// Arriving: the finder starts too big for the screen and steps back to fit.
@@ -23,8 +24,8 @@ struct XAFinderView: View {
                 // its edges so a quick swing never shows past it.
                 SwayLayer(motion: camera.finderMotion) {
                   ZStack {
-                    RadialGradient(stops: [.init(color: .clear, location: 0.62),
-                                           .init(color: .black.opacity(0.5), location: 0.84),
+                    RadialGradient(stops: [.init(color: .clear, location: 0.8),
+                                           .init(color: .black.opacity(0.5), location: 0.92),
                                            .init(color: .black.opacity(0.95), location: 1)],
                                    center: .center, startRadius: 0, endRadius: hypot(g.size.width, g.size.height) / 2)
                     Rectangle().stroke(Color.black, lineWidth: min(g.size.width, g.size.height) * 0.1)
@@ -52,6 +53,11 @@ struct XAFinderView: View {
             .onAppear {
                 arrived = false
                 withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.75)) { arrived = true }
+            }
+            .onChange(of: leaving) { _, l in
+                // stepping back out: the markings grow past the screen and fade, the arrival reversed
+                withAnimation(l ? .timingCurve(0.6, 0, 0.9, 0.4, duration: CameraModel.outroLength)
+                                : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.75)) { arrived = !l }
             }
         }
         .clipped()

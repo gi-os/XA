@@ -177,6 +177,10 @@ final class CameraModel: NSObject, ObservableObject {
     /// When FILM's finder started arriving (it steps back into place over 0.75 s), and whether
     /// the patch has dropped in yet.
     private var _introStart: CFTimeInterval = 0
+    private var _outroStart: CFTimeInterval = -10
+    static let outroLength: Double = 0.45
+    /// Leaving FILM: the XA finder stays up a moment to step back out.
+    @Published var leavingFilm = false
     private var introPatchDone = true
     private let eyeQueue = DispatchQueue(label: "xa.eyes", qos: .userInitiated)
     private var proDims = CMVideoDimensions(width: 4032, height: 3024)
@@ -259,6 +263,13 @@ final class CameraModel: NSObject, ObservableObject {
             updateMotion()
             updateUltraWide()
             if mode == .film { beginFinderIntro() }
+            if old == .film && settings.filmRecipe.xaFinder {
+                lock.lock(); _outroStart = CACurrentMediaTime(); lock.unlock()
+                leavingFilm = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.outroLength) { [weak self] in
+                    if self?.mode != .film { self?.leavingFilm = false }
+                }
+            } else if mode == .film { leavingFilm = false }
             if mode == .booth { setFront(true) }
         }
         syncFrameSettings()
@@ -1294,13 +1305,21 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             }
             img = shown
         }
+        // Leaving FILM: the XA finder plays its arrival backwards, the frame growing back out to the
+        // whole picture as the surround fades, before the next mode's finder takes over.
+        lock.lock(); let outroStart = _outroStart; let outroLong = _finderLong; lock.unlock()
+        let since = CGFloat(CACurrentMediaTime() - outroStart) / CGFloat(Self.outroLength)
+        var outFrame = img
+        if m != .film && since >= 0 && since < 1 {
+            outFrame = XAFinder.compose(img, format: dev.filmRecipe.format, long: outroLong, intro: 1 - since * since)
+        }
         let pixel = m == .digi && dev.stack.look.pixelWidth != nil
         lock.lock()
         let holding = CACurrentMediaTime() < _reviewUntil
         let drawHeld = holding && !_reviewDrawn
         if drawHeld { _reviewDrawn = true }
         let held = _lastShown
-        if !holding { _lastShown = img }
+        if !holding { _lastShown = outFrame }
         lock.unlock()
         if holding {
             // The shot stays up on the viewfinder, as it was, until the review is over.
@@ -1308,7 +1327,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             return
         }
         // Drawn right here on the frame queue: the main thread can be busy without the viewfinder stuttering.
-        preview?.show(img, pixelated: pixel)
+        preview?.show(outFrame, pixelated: pixel)
     }
 }
 

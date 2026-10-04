@@ -95,7 +95,7 @@ struct CameraView: View {
         } else if camera.mode.usesFilm && !filmOpen {
             FannedFilm(stack: camera.stack) { withAnimation(.snappy) { filmOpen = true } }
                 // turned with the phone, it sits centred in the corner instead of leaning off it
-                .frame(width: 80, height: 80, alignment: .center)
+                .frame(width: 80, height: 52, alignment: .center)
                 .rotationEffect(.degrees(tilt.angle))
                 .animation(.spring(response: 0.35, dampingFraction: 0.8), value: tilt.angle)
                 .modifier(SwipeToStep(step: { camera.stack.push = 0; camera.stepSim($0) },
@@ -172,13 +172,13 @@ struct CameraView: View {
     private var finderAspect: CGFloat { 3 / 4 }
 
     /// FILM through the XA finder: the finder takes all the room above the screen strip.
-    private var xaFinder: Bool { camera.mode == .film && settings.filmRecipe.xaFinder }
+    private var xaFinder: Bool { (camera.mode == .film || camera.leavingFilm) && settings.filmRecipe.xaFinder }
 
     @ViewBuilder private var viewfinder: some View {
         if xaFinder && camera.authorized != false {
             Viewfinder(camera: camera)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay { XAFinderView(camera: camera, format: settings.filmRecipe.format) }
+                .overlay { XAFinderView(camera: camera, format: settings.filmRecipe.format, leaving: camera.leavingFilm) }
                 .background(GeometryReader { g in
                     Color.black
                         .onAppear { camera.setFinderShape(g.size.height / max(g.size.width, 1)) }
