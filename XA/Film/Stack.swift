@@ -183,21 +183,9 @@ enum Darkroom {
         if let sim, !sim.isNeutral {
             img = SimEngine.apply(sim, to: img, preview: preview, push: s.stack.push, seed: preview ? nil : shot.seed, shot: shot)
         }
-        if preview && frame != img.extent {
-            // Bright-line finder: the whole picture stays, what falls outside the format is
-            // shaded, with a thin line on the frame's edge.
-            let e = img.extent
-            let shade = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.5)).cropped(to: e)
-            let line = max(1, min(e.width, e.height) / 360)
-            let outer = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 0.55)).cropped(to: frame.insetBy(dx: -line, dy: -line))
-            let hole = CIImage(color: .white).cropped(to: frame)
-            let lineMask = hole.composited(over: CIImage(color: .black).cropped(to: e))
-            let b = CIFilter.blendWithMask()
-            b.inputImage = CIImage(color: .clear).cropped(to: e)
-            b.backgroundImage = outer.composited(over: shade)
-            b.maskImage = lineMask
-            if let m = b.outputImage { img = m.cropped(to: e).composited(over: img) }
-        }
+        // The finder shows the picture clean; the date is burned in on the frame you take, as on
+        // the XA (CameraModel lays the finder over the viewfinder).
+        if preview { return img }
         return stamp(img, s, date: date, dateShift: dateShift, mono: sim?.mono ?? false)
     }
 

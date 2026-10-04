@@ -65,6 +65,7 @@ targets:
           - Righteous-400.ttf
           - RobotoCondensed-700.ttf
           - SairaExtraCondensed-600.ttf
+          - StardosStencil-700.ttf
           - RussoOne-400.ttf
           - ShareTechMono-400.ttf
           - Silkscreen-400.ttf
@@ -97,6 +98,7 @@ targets:
       - path: XA/UI/StackRow.swift
       - path: XA/UI/CameraView.swift
       - path: XA/UI/LCD.swift
+      - path: XA/UI/XAFinderView.swift
       - path: XA/UI/Collar.swift
       - path: XA/UI/ProPanel.swift
       - path: XA/Resources/Stocks
@@ -138,6 +140,7 @@ targets:
           - Righteous-400.ttf
           - RobotoCondensed-700.ttf
           - SairaExtraCondensed-600.ttf
+          - StardosStencil-700.ttf
           - RussoOne-400.ttf
           - ShareTechMono-400.ttf
           - Silkscreen-400.ttf

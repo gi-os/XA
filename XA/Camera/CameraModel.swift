@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreMotion
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import ImageIO
@@ -135,6 +136,10 @@ final class CameraModel: NSObject, ObservableObject {
     private var boothFrames: [Int: [Int: UIImage]] = [:]
     private var _boothEyes: Booth.Eyes?
     private var eyesBusy = false
+    // FILM's finder: how far the rangefinder's second image sits off, and what drives it.
+    private let motion = CMMotionManager()
+    private var patchShift: CGFloat = 0
+    private var lastLens: Float = -1
     private let eyeQueue = DispatchQueue(label: "xa.eyes", qos: .userInitiated)
     private var proDims = CMVideoDimensions(width: 4032, height: 3024)
 
@@ -213,6 +218,7 @@ final class CameraModel: NSObject, ObservableObject {
             if (old == .film) != (mode == .film) { stack = Self.loadStack(for: mode) }
             // BOOTH turns the camera round to face you, and back when you leave.
             if old == .booth { cancelBooth(); setFront(false) }
+            updateMotion()
             if mode == .booth { setFront(true) }
         }
         syncFrameSettings()
@@ -237,6 +243,7 @@ final class CameraModel: NSObject, ObservableObject {
     // MARK: session
 
     func start() {
+        updateMotion()
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized: authorized = true; sessionQueue.async { self.configure() }
         case .notDetermined:
@@ -1146,6 +1153,21 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                 developed = (f.outputImage ?? developed).cropped(to: developed.extent.union(upright.extent))
             }
             img = t == 0 ? developed : Self.rotated(developed, clockwise: 360 - t)
+            if m == .film {
+                // The rangefinder patch slips when the camera moves or focus hunts, then settles.
+                var drive: CGFloat = 0
+                if let r = motion.deviceMotion?.rotationRate {
+                    drive += CGFloat(min(1, (r.x * r.x + r.y * r.y + r.z * r.z).squareRoot() * 0.6))
+                }
+                if let d = device {
+                    let lp = d.lensPosition
+                    if lastLens >= 0 { drive += CGFloat(min(1, abs(lp - lastLens) * 30)) }
+                    lastLens = lp
+                    if d.isAdjustingFocus { drive = max(drive, 0.35) }
+                }
+                patchShift = max(patchShift * 0.86, min(1, drive))
+                img = XAFinder.compose(img, format: dev.filmRecipe.format, shift: patchShift)
+            }
         }
         let pixel = m == .digi && dev.stack.look.pixelWidth != nil
         lock.lock()
@@ -1287,6 +1309,21 @@ extension CameraModel {
         fmt.scale = 1
         return UIGraphicsImageRenderer(size: size, format: fmt).image { _ in
             UIImage(cgImage: cg).draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+}
+
+// MARK: FILM's finder
+
+extension CameraModel {
+    /// The phone's motion is read only while FILM's finder needs it.
+    func updateMotion() {
+        if mode == .film {
+            guard motion.isDeviceMotionAvailable, !motion.isDeviceMotionActive else { return }
+            motion.deviceMotionUpdateInterval = 1.0 / 30
+            motion.startDeviceMotionUpdates()
+        } else if motion.isDeviceMotionActive {
+            motion.stopDeviceMotionUpdates()
         }
     }
 }

@@ -182,7 +182,14 @@ struct CameraView: View {
                 Viewfinder(camera: camera)
                     .aspectRatio(finderAspect, contentMode: .fit)
                     .overlay { if settings.grid && camera.mode == .pro { GridLines() } }
-                    .overlay { FocusBracket(camera: camera) }
+                    .overlay {
+                        // FILM looks through the XA's finder; the other modes keep the focus bracket
+                        if camera.mode == .film {
+                            XAFinderView(camera: camera, format: settings.filmRecipe.format)
+                        } else {
+                            FocusBracket(camera: camera)
+                        }
+                    }
                     // DIGI prints its settings across the top of the picture as plain text, like the
                     // camera did, clear of the date back in the bottom corner.
                     .overlay(alignment: .top) {
