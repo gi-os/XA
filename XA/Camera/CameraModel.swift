@@ -78,7 +78,8 @@ final class CameraModel: NSObject, ObservableObject {
     @Published var wbIndex: Int = 0 { didSet { if wbIndex != oldValue { applyPro() } } }
     @Published var focusIndex: Int? { didSet { if focusIndex != oldValue { applyPro() } } }
 
-    let session = AVCaptureSession()
+    /// A plain session, or in FILM (with the XA finder) a multi-camera one that also streams the ultra-wide.
+    private(set) var session: AVCaptureSession = AVCaptureSession()
     let settings: AppSettings
     weak var preview: PreviewView?
     var library: Library?
@@ -140,6 +141,14 @@ final class CameraModel: NSObject, ObservableObject {
     private let motion = CMMotionManager()
     private var patchShift: CGFloat = 0
     private var lastLens: Float = -1
+    // FILM's ultra-wide: the second camera behind the finder's surround.
+    private let uwOutput = AVCaptureVideoDataOutput()
+    private var uwInput: AVCaptureDeviceInput?
+    private var multiCam = false
+    private var _uw: CIImage?
+    private var _uwRatio: CGFloat = 2
+    private var _uwGain = CIVector(x: 1, y: 1, z: 1)
+    private var uwCount = 0
     private let eyeQueue = DispatchQueue(label: "xa.eyes", qos: .userInitiated)
     private var proDims = CMVideoDimensions(width: 4032, height: 3024)
 
@@ -219,6 +228,7 @@ final class CameraModel: NSObject, ObservableObject {
             // BOOTH turns the camera round to face you, and back when you leave.
             if old == .booth { cancelBooth(); setFront(false) }
             updateMotion()
+            updateUltraWide()
             if mode == .booth { setFront(true) }
         }
         syncFrameSettings()
@@ -253,6 +263,7 @@ final class CameraModel: NSObject, ObservableObject {
             }
         default: authorized = false
         }
+        updateUltraWide()
     }
 
     func stop() {
@@ -406,6 +417,10 @@ final class CameraModel: NSObject, ObservableObject {
         rotation = rc
         // The viewfinder stays upright for the portrait UI; the photograph turns with the phone.
         let portrait: CGFloat = 90
+        if let c = uwOutput.connection(with: .video) {
+            if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = false }
+            if c.isVideoRotationAngleSupported(portrait) { c.videoRotationAngle = portrait }
+        }
         if let c = videoOutput.connection(with: .video) {
             // The connection never mirrors: with the selfie camera, mirror and turn together came
             // out upside down. XA turns and mirrors the frames itself (see `upright`).
@@ -450,7 +465,11 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     func flip() {
-        sessionQueue.async { self.switchCamera(toFront: !self.frontFlag) }
+        sessionQueue.async {
+            // the selfie camera has no ultra-wide: back to the plain session first
+            if self.multiCam { self.rebuildSession(multi: false) }
+            self.switchCamera(toFront: !self.frontFlag)
+        }
     }
 
     /// Front or back, whichever it isn't already.
@@ -1077,6 +1096,19 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             r?.append(audio: sampleBuffer)
             return
         }
+        if output === uwOutput {
+            // Every other ultra-wide frame, small and copied out so the camera gets its buffer back.
+            uwCount += 1
+            guard uwCount % 2 == 0, let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+            let raw = CIImage(cvPixelBuffer: pb)
+            let k: CGFloat = 640 / max(raw.extent.width, raw.extent.height, 1)
+            let small = raw.transformed(by: CGAffineTransform(scaleX: k, y: k))
+            if let cg = Looks.context.createCGImage(small, from: small.extent.integral) {
+                let img = CIImage(cgImage: cg)
+                lock.lock(); _uw = img; lock.unlock()
+            }
+            return
+        }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         // Cleaned at the door: a sensor pixel below the legal video range decodes to NaN, and every
         // blur and resize downstream would spread it into a black square.
@@ -1166,7 +1198,13 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                     if d.isAdjustingFocus { drive = max(drive, 0.35) }
                 }
                 patchShift = max(patchShift * 0.86, min(1, drive))
-                shown = XAFinder.compose(shown, format: dev.filmRecipe.format, shift: patchShift)
+                lock.lock(); let uw = _uw; let ratio = _uwRatio; var gain = _uwGain; lock.unlock()
+                if let uw, frameCount % 12 == 0, let g = XAFinder.matchGain(main: shown, wide: uw, ratio: ratio) {
+                    // The ultra-wide sees colour and exposure its own way: matched to the main camera, slowly.
+                    gain = CIVector(x: gain.x * 0.75 + g.x * 0.25, y: gain.y * 0.75 + g.y * 0.25, z: gain.z * 0.75 + g.z * 0.25)
+                    lock.lock(); _uwGain = gain; lock.unlock()
+                }
+                shown = XAFinder.compose(shown, format: dev.filmRecipe.format, shift: patchShift, wide: uw, ratio: ratio, gain: gain)
             }
             img = shown
         }
@@ -1326,5 +1364,124 @@ extension CameraModel {
         } else if motion.isDeviceMotionActive {
             motion.stopDeviceMotionUpdates()
         }
+    }
+}
+
+// MARK: FILM's ultra-wide
+
+extension CameraModel {
+    /// Whether FILM should run the ultra-wide behind its finder now.
+    private var wantsUltraWide: Bool {
+        mode == .film && settings.filmRecipe.xaFinder && !front && AVCaptureMultiCamSession.isMultiCamSupported
+            && AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back) != nil
+    }
+
+    /// Bring the ultra-wide in or out to match the mode and the finder setting.
+    func updateUltraWide() {
+        let want = wantsUltraWide
+        sessionQueue.async {
+            guard self.authorized == true || self.input != nil else { return }
+            if want != self.multiCam { self.rebuildSession(multi: want) }
+        }
+    }
+
+    /// On the session queue: take everything off the current session and build the other kind.
+    private func rebuildSession(multi: Bool) {
+        session.stopRunning()
+        detach(session)
+        input = nil; device = nil; uwInput = nil; audioInput = nil
+        lock.lock(); _uw = nil; lock.unlock()
+        multiCam = false
+        if multi && configureMulti() {
+            multiCam = true
+        } else {
+            session = AVCaptureSession()
+            configure()
+        }
+    }
+
+    private func detach(_ s: AVCaptureSession) {
+        s.beginConfiguration()
+        if let ms = s as? AVCaptureMultiCamSession { for c in ms.connections { ms.removeConnection(c) } }
+        for i in s.inputs { s.removeInput(i) }
+        for o in s.outputs { s.removeOutput(o) }
+        if s.supportsControls { for c in s.controls { s.removeControl(c) } }
+        s.commitConfiguration()
+    }
+
+    /// The main camera (photos and the viewfinder) and the ultra-wide (the finder's surround)
+    /// together. False if the phone can't run both at full photo quality; the caller then goes
+    /// back to the plain session.
+    private func configureMulti() -> Bool {
+        guard let wide = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+              let uw = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back),
+              let wIn = try? AVCaptureDeviceInput(device: wide), let uIn = try? AVCaptureDeviceInput(device: uw) else { return false }
+        let ms = AVCaptureMultiCamSession()
+        session = ms
+        ms.beginConfiguration()
+        func fail() -> Bool { ms.commitConfiguration(); detach(ms); return false }
+        guard ms.canAddInput(wIn), ms.canAddInput(uIn) else { return fail() }
+        ms.addInputWithNoConnections(wIn)
+        ms.addInputWithNoConnections(uIn)
+        guard Self.pickMultiFormat(wide, photo: true), Self.pickMultiFormat(uw, photo: false) else { return fail() }
+        videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        videoOutput.alwaysDiscardsLateVideoFrames = true
+        videoOutput.setSampleBufferDelegate(self, queue: frameQueue)
+        uwOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        uwOutput.alwaysDiscardsLateVideoFrames = true
+        uwOutput.setSampleBufferDelegate(self, queue: frameQueue)
+        guard ms.canAddOutput(photoOutput), ms.canAddOutput(videoOutput), ms.canAddOutput(uwOutput) else { return fail() }
+        ms.addOutputWithNoConnections(photoOutput)
+        ms.addOutputWithNoConnections(videoOutput)
+        ms.addOutputWithNoConnections(uwOutput)
+        guard let wPort = wIn.ports(for: .video, sourceDeviceType: wide.deviceType, sourceDevicePosition: .back).first,
+              let uPort = uIn.ports(for: .video, sourceDeviceType: uw.deviceType, sourceDevicePosition: .back).first else { return fail() }
+        let links = [AVCaptureConnection(inputPorts: [wPort], output: videoOutput),
+                     AVCaptureConnection(inputPorts: [wPort], output: photoOutput),
+                     AVCaptureConnection(inputPorts: [uPort], output: uwOutput)]
+        for c in links {
+            guard ms.canAddConnection(c) else { return fail() }
+            ms.addConnection(c)
+        }
+        photoOutput.maxPhotoQualityPrioritization = .quality
+        applyCapturePolicy(flash: settings.flash != .off)
+        device = wide; input = wIn; uwInput = uIn
+        let m = mode
+        setupPhotoOutput(wide, m)
+        ms.commitConfiguration()
+        // Too much for this phone at this quality: drop the ultra-wide rather than the photo.
+        guard ms.hardwareCost <= 1, ms.systemPressureCost <= 1 else { detach(ms); return false }
+        let fovW = Double(wide.activeFormat.videoFieldOfView), fovU = Double(uw.activeFormat.videoFieldOfView)
+        let ratio = tan(fovU / 2 * .pi / 180) / tan(fovW / 2 * .pi / 180)
+        lock.lock(); _uwRatio = CGFloat(ratio.isFinite && ratio > 1 ? ratio : 2); _uwGain = CIVector(x: 1, y: 1, z: 1); lock.unlock()
+        setupLenses(wide)
+        applyRotation()
+        ms.startRunning()
+        applyProOnQueue(m)
+        DispatchQueue.main.async { self.preparePhotos() }
+        return true
+    }
+
+    /// A multi-camera format: for the main camera the one with the biggest photos (a 4:3 picture,
+    /// the viewfinder no wider than 1920); for the ultra-wide the smallest 4:3 one, to keep the cost low.
+    private static func pickMultiFormat(_ d: AVCaptureDevice, photo: Bool) -> Bool {
+        func px(_ x: CMVideoDimensions) -> Int { Int(x.width) * Int(x.height) }
+        let ok = d.formats.filter { f in
+            let v = f.formatDescription.dimensions
+            return f.isMultiCamSupported && abs(Double(v.width) * 3 - Double(v.height) * 4) < 8 && v.width <= 1920
+        }
+        let pick: AVCaptureDevice.Format?
+        if photo {
+            pick = ok.max { a, b in
+                let pa = a.supportedMaxPhotoDimensions.map(px).max() ?? 0, pb = b.supportedMaxPhotoDimensions.map(px).max() ?? 0
+                return pa != pb ? pa < pb : a.formatDescription.dimensions.width < b.formatDescription.dimensions.width
+            }
+        } else {
+            pick = ok.filter { $0.formatDescription.dimensions.width >= 640 }.min { $0.formatDescription.dimensions.width < $1.formatDescription.dimensions.width } ?? ok.first
+        }
+        guard let pick, (try? d.lockForConfiguration()) != nil else { return false }
+        d.activeFormat = pick
+        d.unlockForConfiguration()
+        return true
     }
 }

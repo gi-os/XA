@@ -45,7 +45,11 @@ enum XAFinder {
 
     /// `shift` (0…1) is how far the rangefinder's second image sits off the first: it jumps when
     /// the camera moves or focus is hunting, and settles back to 0 as focus lands.
-    static func compose(_ img: CIImage, format: FilmFormat, shift: CGFloat = 0) -> CIImage {
+    /// `wide` is the ultra-wide frame (portrait, any size), `ratio` how much wider it sees than the
+    /// main camera, `gain` its colour matched to the main camera. Without it the surround is the
+    /// main picture carried on.
+    static func compose(_ img: CIImage, format: FilmFormat, shift: CGFloat = 0,
+                        wide: CIImage? = nil, ratio: CGFloat = 2, gain: CIVector = CIVector(x: 1, y: 1, z: 1)) -> CIImage {
         let e = img.extent
         guard e.width > 8, e.height > 8 else { return img }
         let crop = format.frame(in: e)
@@ -59,10 +63,33 @@ enum XAFinder {
             .transformed(by: CGAffineTransform(scaleX: k, y: k))
             .transformed(by: CGAffineTransform(translationX: t.minX, y: t.minY))
         let short = min(e.width, e.height)
-        let around = mapped.clampedToExtent()
-            .applyingGaussianBlur(sigma: Double(short * 0.006))
-            .applyingFilter("CIExposureAdjust", parameters: ["inputEV": -0.15])
-            .cropped(to: e)
+        let around: CIImage
+        if let wide, wide.extent.width > 8 {
+            // The ultra-wide, lined up: its middle (1/ratio of it) is what the main camera sees.
+            let w = wide.extent
+            let su = e.width / (w.width / ratio)
+            let onScreen = wide
+                .transformed(by: CGAffineTransform(translationX: -w.midX, y: -w.midY))
+                .transformed(by: CGAffineTransform(scaleX: su, y: su))
+                .transformed(by: CGAffineTransform(translationX: e.midX, y: e.midY))
+            around = onScreen
+                .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+                .transformed(by: CGAffineTransform(scaleX: k, y: k))
+                .transformed(by: CGAffineTransform(translationX: t.minX, y: t.minY))
+                .applyingFilter("CIColorMatrix", parameters: [
+                    "inputRVector": CIVector(x: gain.x, y: 0, z: 0, w: 0),
+                    "inputGVector": CIVector(x: 0, y: gain.y, z: 0, w: 0),
+                    "inputBVector": CIVector(x: 0, y: 0, z: gain.z, w: 0)])
+                .clampedToExtent()
+                .applyingGaussianBlur(sigma: Double(short * 0.004))
+                .applyingFilter("CIExposureAdjust", parameters: ["inputEV": -0.1])
+                .cropped(to: e)
+        } else {
+            around = mapped.clampedToExtent()
+                .applyingGaussianBlur(sigma: Double(short * 0.006))
+                .applyingFilter("CIExposureAdjust", parameters: ["inputEV": -0.15])
+                .cropped(to: e)
+        }
         let feather = short * 0.025
         let mask = CIImage(color: .white).cropped(to: t.insetBy(dx: feather * 0.6, dy: feather * 0.6))
             .composited(over: CIImage(color: .black).cropped(to: e.insetBy(dx: -feather * 3, dy: -feather * 3)))
@@ -106,6 +133,26 @@ enum XAFinder {
         pb.maskImage = pmask
         if let p = pb.outputImage { out = p.cropped(to: pr).composited(over: out).cropped(to: e) }
         return out
+    }
+
+    /// Per-channel gain that makes the ultra-wide's middle match the main camera's picture.
+    static func matchGain(main: CIImage, wide: CIImage, ratio: CGFloat) -> CIVector? {
+        let w = wide.extent
+        let mid = CGRect(x: w.midX - w.width / ratio / 2, y: w.midY - w.height / ratio / 2, width: w.width / ratio, height: w.height / ratio)
+        guard let a = average(main, main.extent), let b = average(wide, mid) else { return nil }
+        func g(_ x: Float, _ y: Float) -> CGFloat { CGFloat(min(2, max(0.5, (x + 0.002) / (y + 0.002)))) }
+        return CIVector(x: g(a[0], b[0]), y: g(a[1], b[1]), z: g(a[2], b[2]))
+    }
+
+    private static let meter = CIContext(options: [.workingColorSpace: NSNull()])
+    private static func average(_ img: CIImage, _ r: CGRect) -> [Float]? {
+        let f = CIFilter.areaAverage()
+        f.inputImage = img
+        f.extent = r
+        guard let out = f.outputImage else { return nil }
+        var px = [Float](repeating: 0, count: 4)
+        meter.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        return px.allSatisfy { $0.isFinite } ? px : nil
     }
 
     // MARK: the needle
