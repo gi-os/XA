@@ -138,7 +138,9 @@ enum XAFinder {
         let bar = e.width * 0.0286 * p
         let mask = softRect(t.insetBy(dx: -bar, dy: -bar), in: e, sigma: short * 0.006)
         let b = CIFilter.blendWithMask()
-        b.inputImage = mapped.cropped(to: e)
+        // where the main camera's picture ends (the format can use its full length) the surround
+        // carries on under the bars instead of black
+        b.inputImage = mapped.composited(over: around).cropped(to: e)
         b.backgroundImage = around
         b.maskImage = mask
         var out = (b.outputImage ?? around).cropped(to: e)

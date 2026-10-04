@@ -95,7 +95,7 @@ struct CameraView: View {
         } else if camera.mode.usesFilm && !filmOpen {
             FannedFilm(stack: camera.stack) { withAnimation(.snappy) { filmOpen = true } }
                 // turned with the phone, it sits centred in the corner instead of leaning off it
-                .frame(width: 80, height: 52, alignment: abs(tilt.angle) > 1 ? .center : .trailing)
+                .frame(width: 80, height: 80, alignment: .center)
                 .rotationEffect(.degrees(tilt.angle))
                 .animation(.spring(response: 0.35, dampingFraction: 0.8), value: tilt.angle)
                 .modifier(SwipeToStep(step: { camera.stack.push = 0; camera.stepSim($0) },
@@ -307,13 +307,13 @@ struct FannedFilm: View {
                         Rectangle().fill(XA.fill).frame(width: 62, height: 41).overlay(Text("NO SIM").font(XA.display(9)).foregroundStyle(XA.faint))
                     }
                 }
-                .rotationEffect(.degrees(-4))
                 .shadow(color: .black.opacity(0.6), radius: 5, y: 3)
                 if let second {
                     FilmBox(item: second, width: 34).rotationEffect(.degrees(7)).offset(x: 42, y: 14)
                 }
             }
-            .frame(width: 80, height: 48, alignment: .topLeading)
+            // the box sits square and in the middle, so turning with the phone pivots on its centre
+            .frame(width: second == nil ? 62 : 80, height: 48, alignment: .topLeading)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Film: \(sim?.title ?? "no sim"). Show the film rows")
