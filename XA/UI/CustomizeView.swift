@@ -46,6 +46,9 @@ struct CustomizeView: View {
                     group("OPENS IN") {
                         Segmented(items: [(OpenIn.last, "Last"), (.digi, "DIGI"), (.film, "FILM"), (.pro, "PRO")], selection: $settings.openIn)
                     }
+                    group("SHUTTER BLINK") {
+                        Segmented(items: [(ShutterBlink.off, "Off"), (.white, "White"), (.black, "Black (SLR)")], selection: $settings.blink)
+                    }
                     modeGroups(first: false)
                     group("CAMERA BUTTON") {
                         Text("Make XA the camera: Settings › Camera › Camera Control › Launch Camera › XA. Add the XA control to Control Center or the Lock Screen to open it while locked.")

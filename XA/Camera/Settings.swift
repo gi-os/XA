@@ -5,6 +5,8 @@ enum ProFormat: String, CaseIterable, Codable { case heif, jpeg }
 enum DigiSlide: String, CaseIterable, Codable { case sim, look }
 enum ProSlide: String, CaseIterable, Codable { case exposure, zoom }
 enum OpenIn: String, CaseIterable, Codable { case last, digi, film, pro }
+/// What the viewfinder does as the shutter fires: nothing, a white flash like a phone, or a black blink like an SLR's mirror.
+enum ShutterBlink: String, CaseIterable, Codable { case off, white, black }
 /// The flash. In DIGI a shot the flash lit gets the party-flash look.
 enum FlashSetting: String, CaseIterable, Codable {
     case off, auto, on
@@ -40,6 +42,7 @@ final class AppSettings: ObservableObject {
     @Published var proSlide: ProSlide { didSet { d.set(proSlide.rawValue, forKey: "proSlide") } }
     @Published var openIn: OpenIn { didSet { d.set(openIn.rawValue, forKey: "openIn") } }
     @Published var grid: Bool { didSet { d.set(grid, forKey: "grid") } }
+    @Published var blink: ShutterBlink { didSet { d.set(blink.rawValue, forKey: "blink") } }
     @Published var afMode: AFMode { didSet { d.set(afMode.rawValue, forKey: "afMode") } }
     @Published var afArea: AFArea { didSet { d.set(afArea.rawValue, forKey: "afArea") } }
     @Published var flash: FlashSetting { didSet { d.set(flash.rawValue, forKey: "flash") } }
@@ -70,6 +73,7 @@ final class AppSettings: ObservableObject {
         proSlide = ProSlide(rawValue: d.string(forKey: "proSlide") ?? "") ?? .exposure
         openIn = OpenIn(rawValue: d.string(forKey: "openIn") ?? "") ?? .last
         grid = d.object(forKey: "grid") as? Bool ?? false
+        blink = ShutterBlink(rawValue: d.string(forKey: "blink") ?? "") ?? .white
         afMode = AFMode(rawValue: d.string(forKey: "afMode") ?? "") ?? .single
         afArea = AFArea(rawValue: d.string(forKey: "afArea") ?? "") ?? .auto
         showRollButton = d.object(forKey: "showRollButton") as? Bool ?? true

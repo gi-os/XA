@@ -179,6 +179,7 @@ struct CameraView: View {
             Viewfinder(camera: camera)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay { XAFinderView(camera: camera, format: settings.filmRecipe.format, leaving: camera.leavingFilm) }
+                .overlay { ShutterBlinkView(camera: camera, settings: settings) }
                 .background(GeometryReader { g in
                     Color.black
                         .onAppear { camera.setFinderShape(g.size.height / max(g.size.width, 1)) }
@@ -215,7 +216,7 @@ struct CameraView: View {
                     .overlay(alignment: .top) {
                         if camera.mode == .digi { DigiOSD(camera: camera).allowsHitTesting(false).transition(.opacity) }
                     }
-                    .overlay { if camera.flash { Color.white.opacity(0.7) } }
+                    .overlay { ShutterBlinkView(camera: camera, settings: settings) }
             }
         }
         .aspectRatio(finderAspect, contentMode: .fit)
@@ -780,5 +781,20 @@ private struct Unfold: ViewModifier {
         content
             .scaleEffect(x: 1, y: max(k, 0.001), anchor: .top)
             .opacity(Double(min(1, k * 3)))
+    }
+}
+
+/// The viewfinder's blink as the shutter fires: white like a phone, black like an SLR's mirror
+/// flipping up, or nothing. BOOTH's is its flash, so it is always white.
+private struct ShutterBlinkView: View {
+    @ObservedObject var camera: CameraModel
+    @ObservedObject var settings: AppSettings
+    var body: some View {
+        let style: ShutterBlink = camera.mode == .booth ? .white : settings.blink
+        Group {
+            if camera.flash && style == .white { Color.white.opacity(0.7) }
+            else if camera.flash && style == .black { Color.black }
+        }
+        .allowsHitTesting(false)
     }
 }
