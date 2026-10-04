@@ -1153,7 +1153,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                 developed = (f.outputImage ?? developed).cropped(to: developed.extent.union(upright.extent))
             }
             var shown = t == 0 ? developed : Self.rotated(developed, clockwise: 360 - t)
-            if m == .film {
+            if m == .film && dev.filmRecipe.xaFinder {
                 // The rangefinder patch slips when the camera moves or focus hunts, then settles.
                 var drive: CGFloat = 0
                 if let r = motion.deviceMotion?.rotationRate {

@@ -184,7 +184,7 @@ struct CameraView: View {
                     .overlay { if settings.grid && camera.mode == .pro { GridLines() } }
                     .overlay {
                         // FILM looks through the XA's finder; the other modes keep the focus bracket
-                        if camera.mode == .film {
+                        if camera.mode == .film && settings.filmRecipe.xaFinder {
                             XAFinderView(camera: camera, format: settings.filmRecipe.format)
                         } else {
                             FocusBracket(camera: camera)
