@@ -183,7 +183,14 @@ enum Darkroom {
         if let sim, !sim.isNeutral {
             img = SimEngine.apply(sim, to: img, preview: preview, push: s.stack.push, seed: preview ? nil : shot.seed, shot: shot)
         }
-        // The finder shows the whole picture; the bright-line corners on top mark the format.
+        // The finder shows the whole picture; the bright-line corners on top mark the format, and
+        // the date sits in the format's corner, where it will be on the print.
+        if preview && frame != img.extent {
+            let inside = img.cropped(to: frame).transformed(by: CGAffineTransform(translationX: -frame.minX, y: -frame.minY))
+            let dated = stamp(inside, s, date: date, dateShift: dateShift, mono: sim?.mono ?? false)
+                .transformed(by: CGAffineTransform(translationX: frame.minX, y: frame.minY))
+            return dated.composited(over: img).cropped(to: img.extent)
+        }
         return stamp(img, s, date: date, dateShift: dateShift, mono: sim?.mono ?? false)
     }
 
