@@ -81,7 +81,8 @@ struct XAFinderView: View {
         let S = size.height
         let t = S * 0.022, off = t * 1.3, gap = S * 0.075, R = S * 0.075
         let top = fr.minY - off, bot = fr.maxY + off, right = fr.maxX + off
-        let sx = fr.minX - off - S * 0.085, sw = S * 0.07
+        // the scale column stands where the frame's bar would be, so the photo runs right up to it
+        let sw = S * 0.07, sx = fr.minX - off + t / 2 - sw
         let sh = bot - top
         return Geo(S: S, t: t, off: off, gap: gap, R: R, fr: fr, top: top, bot: bot, right: right,
                    midx: fr.midX, midy: fr.midY, sx: sx, sw: sw, ox: sx, ix: sx + sw, hh: sh * 0.175,

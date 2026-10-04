@@ -134,9 +134,9 @@ enum XAFinder {
         }
         let feather = short * 0.025
         // The sharp picture runs out under the bright-frame bars (their middle sits 0.0286 of the
-        // width outside the frame), so the hand-over to the surround hides behind them.
+        // width outside the frame) and fades into the surround softly, with no straight seam.
         let bar = e.width * 0.0286 * p
-        let mask = softRect(t.insetBy(dx: -bar, dy: -bar), in: e, sigma: short * 0.006)
+        let mask = softRect(t.insetBy(dx: -bar * 0.5, dy: -bar * 0.5), in: e, sigma: short * 0.016)
         let b = CIFilter.blendWithMask()
         // where the main camera's picture ends (the format can use its full length) the surround
         // carries on under the bars instead of black
@@ -152,17 +152,24 @@ enum XAFinder {
             mix.targetImage = out
             mix.time = Float(min(1, p * 1.4))
             out = (mix.outputImage ?? out).cropped(to: e)
-            if p < 0.6 { return out }
         }
-        // Toward the speed scale (the top while the finder lies turned) the scene sinks a little
-        // further into the dark, so the end of the surround never shows against a bright wall.
-        let g = CIFilter.linearGradient()
-        g.point0 = CGPoint(x: e.midX, y: e.maxY)
-        // it starts past the speed scale's numbers, so the picture under the markings stays clear
-        g.point1 = CGPoint(x: e.midX, y: min(e.maxY - 1, t.maxY + e.width * 0.19))
-        g.color0 = CIColor(red: 0, green: 0, blue: 0, alpha: 0.3)
-        g.color1 = CIColor(red: 0, green: 0, blue: 0, alpha: 0)
-        if let shade = g.outputImage?.cropped(to: e) { out = shade.composited(over: out).cropped(to: e) }
+        // Looking through a finder: past the bright-frame lines the scene goes dark quickly, so
+        // the surround never shows where it ends.
+        let reach = bar + short * 0.02
+        let outer = softRect(t.insetBy(dx: -reach, dy: -reach), in: e, sigma: short * 0.014)
+        let dark = CIFilter.blendWithMask()
+        dark.inputImage = out
+        dark.backgroundImage = CIImage(color: .black).cropped(to: e)
+        dark.maskImage = outer
+        if let d = dark.outputImage?.cropped(to: e) {
+            if p < 1 {
+                let m = CIFilter.dissolveTransition()
+                m.inputImage = out; m.targetImage = d; m.time = Float(p)
+                out = (m.outputImage ?? d).cropped(to: e)
+            } else { out = d }
+        }
+        // the patch comes once the frame has nearly settled
+        if p < 0.6 { return out }
 
         // The rangefinder patch: a brighter, warmer window in the middle with the second image
         // laid over the first, offset along the finder's long side (the screen's up and down
