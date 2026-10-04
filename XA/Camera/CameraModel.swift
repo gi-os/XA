@@ -1152,7 +1152,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                 f.time = Float(amount)
                 developed = (f.outputImage ?? developed).cropped(to: developed.extent.union(upright.extent))
             }
-            img = t == 0 ? developed : Self.rotated(developed, clockwise: 360 - t)
+            var shown = t == 0 ? developed : Self.rotated(developed, clockwise: 360 - t)
             if m == .film {
                 // The rangefinder patch slips when the camera moves or focus hunts, then settles.
                 var drive: CGFloat = 0
@@ -1166,8 +1166,9 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                     if d.isAdjustingFocus { drive = max(drive, 0.35) }
                 }
                 patchShift = max(patchShift * 0.86, min(1, drive))
-                img = XAFinder.compose(img, format: dev.filmRecipe.format, shift: patchShift)
+                shown = XAFinder.compose(shown, format: dev.filmRecipe.format, shift: patchShift)
             }
+            img = shown
         }
         let pixel = m == .digi && dev.stack.look.pixelWidth != nil
         lock.lock()
