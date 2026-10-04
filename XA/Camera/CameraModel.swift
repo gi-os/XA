@@ -168,6 +168,10 @@ final class CameraModel: NSObject, ObservableObject {
     /// How far the finder's markings have swung with the camera's motion; they settle back.
     @Published private(set) var finderSway: CGSize = .zero
     private var sway: CGSize = .zero
+    /// When FILM's finder started arriving (it steps back into place over 0.75 s), and whether
+    /// the patch has dropped in yet.
+    private var _introStart: CFTimeInterval = 0
+    private var introPatchDone = true
     private let eyeQueue = DispatchQueue(label: "xa.eyes", qos: .userInitiated)
     private var proDims = CMVideoDimensions(width: 4032, height: 3024)
 
@@ -248,6 +252,7 @@ final class CameraModel: NSObject, ObservableObject {
             if old == .booth { cancelBooth(); setFront(false) }
             updateMotion()
             updateUltraWide()
+            if mode == .film { beginFinderIntro() }
             if mode == .booth { setFront(true) }
         }
         syncFrameSettings()
@@ -283,6 +288,7 @@ final class CameraModel: NSObject, ObservableObject {
         default: authorized = false
         }
         updateUltraWide()
+        if mode == .film { beginFinderIntro() }
     }
 
     func stop() {
@@ -1251,7 +1257,16 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                     gain = CIVector(x: gain.x * 0.75 + g.x * 0.25, y: gain.y * 0.75 + g.y * 0.25, z: gain.z * 0.75 + g.z * 0.25)
                     lock.lock(); _uwGain = gain; lock.unlock()
                 }
-                shown = XAFinder.compose(shown, format: dev.filmRecipe.format, shift: patchShift, long: flong, wide: uw, ratio: ratio, gain: gain)
+                lock.lock(); let introStart = _introStart; lock.unlock()
+                let raw = CGFloat((CACurrentMediaTime() - introStart) / 0.75)
+                let q = max(0, min(1, raw))
+                let intro = 1 - (1 - q) * (1 - q) * (1 - q)
+                if intro >= 0.6 && !introPatchDone {
+                    // the patch drops in and bounces into line
+                    introPatchDone = true
+                    patch.pos = 0.9; patch.vel = 0; patch.k = 55; patch.zeta = 0.3
+                }
+                shown = XAFinder.compose(shown, format: dev.filmRecipe.format, shift: patchShift, long: flong, wide: uw, ratio: ratio, gain: gain, intro: intro)
             }
             img = shown
         }
@@ -1553,5 +1568,14 @@ extension CameraModel {
         // the format's crop inside the picture (3:4 portrait), normalised
         let c = f.frame(in: CGRect(x: 0, y: 0, width: 3, height: 4))
         return CGPoint(x: (c.minX + local.x * c.width) / 3, y: (c.minY + local.y * c.height) / 4)
+    }
+}
+
+extension CameraModel {
+    /// FILM's finder arrives: it starts too big for the screen and steps back to fit.
+    func beginFinderIntro() {
+        guard settings.filmRecipe.xaFinder else { return }
+        lock.lock(); _introStart = CACurrentMediaTime(); lock.unlock()
+        introPatchDone = false
     }
 }

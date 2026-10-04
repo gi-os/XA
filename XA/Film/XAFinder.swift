@@ -54,7 +54,8 @@ enum XAFinder {
     /// main picture carried on.
     /// The result has the viewfinder's own shape: as wide as `img`, `long`/3 times as tall.
     static func compose(_ img: CIImage, format: FilmFormat, shift: CGFloat = 0, long: CGFloat = 4,
-                        wide: CIImage? = nil, ratio: CGFloat = 2, gain: CIVector = CIVector(x: 1, y: 1, z: 1)) -> CIImage {
+                        wide: CIImage? = nil, ratio: CGFloat = 2, gain: CIVector = CIVector(x: 1, y: 1, z: 1),
+                        intro: CGFloat = 1) -> CIImage {
         let src = img.extent
         guard src.width > 8, src.height > 8 else { return img }
         let crop = format.frame(in: src)
@@ -63,8 +64,14 @@ enum XAFinder {
         let e = CGRect(x: src.minX, y: src.midY - ch / 2, width: src.width, height: ch)
         let n = frame(format, long: long)
         // Core Image's origin is bottom left.
-        let t = CGRect(x: e.minX + n.minX * e.width, y: e.minY + (1 - n.maxY) * e.height,
-                       width: n.width * e.width, height: n.height * e.height)
+        let final = CGRect(x: e.minX + n.minX * e.width, y: e.minY + (1 - n.maxY) * e.height,
+                           width: n.width * e.width, height: n.height * e.height)
+        // Arriving (intro < 1): the picture starts where the plain viewfinder had it, full size,
+        // and steps back into the frame as the finder zooms out to fit.
+        let p = max(0, min(1, intro))
+        func lerp(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a + (b - a) * p }
+        let t = p >= 1 ? final : CGRect(x: lerp(crop.minX, final.minX), y: lerp(crop.minY, final.minY),
+                                        width: lerp(crop.width, final.width), height: lerp(crop.height, final.height))
         let k = t.width / max(crop.width, 1)
         let mapped = img
             .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
@@ -108,6 +115,16 @@ enum XAFinder {
         b.backgroundImage = around
         b.maskImage = mask
         var out = (b.outputImage ?? around).cropped(to: e)
+        if p < 1 {
+            // the surround fades in as the frame settles; the patch comes once it has
+            let plain = mapped.cropped(to: e).composited(over: CIImage(color: .black).cropped(to: e))
+            let mix = CIFilter.dissolveTransition()
+            mix.inputImage = plain
+            mix.targetImage = out
+            mix.time = Float(min(1, p * 1.4))
+            out = (mix.outputImage ?? out).cropped(to: e)
+            if p < 0.6 { return out }
+        }
         // Toward the speed scale (the top while the finder lies turned) the scene sinks a little
         // further into the dark, so the end of the surround never shows against a bright wall.
         let g = CIFilter.linearGradient()

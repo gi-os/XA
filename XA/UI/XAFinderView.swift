@@ -10,6 +10,8 @@ struct XAFinderView: View {
     @ObservedObject var camera: CameraModel
     let format: FilmFormat
     private let cream = Color(red: 0.957, green: 0.925, blue: 0.835)
+    /// Arriving: the finder starts too big for the screen and steps back to fit.
+    @State private var arrived = false
 
     var body: some View {
         GeometryReader { g in
@@ -20,8 +22,9 @@ struct XAFinderView: View {
                     needle(CGSize(width: g.size.height, height: g.size.width))
                 }
                 .frame(width: g.size.height, height: g.size.width)
+                .scaleEffect(arrived ? 1 : 1.9)
                 .rotationEffect(.degrees(90))
-                .opacity(0.68)
+                .opacity(arrived ? 0.68 : 0)
                 // the markings lag the camera's turn a touch, like glass nearer the eye
                 .offset(camera.finderSway)
                 .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.8), value: camera.finderSway)
@@ -33,6 +36,12 @@ struct XAFinderView: View {
                                center: .center, startRadius: 0, endRadius: hypot(g.size.width, g.size.height) / 2)
                 Rectangle().stroke(Color.black, lineWidth: min(g.size.width, g.size.height) * 0.1)
                     .blur(radius: min(g.size.width, g.size.height) * 0.05)
+            }
+            .opacity(arrived ? 1 : 0.0001)
+            .overlay(Color.clear)
+            .onAppear {
+                arrived = false
+                withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.75)) { arrived = true }
             }
         }
         .allowsHitTesting(false)
