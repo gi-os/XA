@@ -16,6 +16,21 @@ struct XAFinderView: View {
     var body: some View {
         GeometryReader { g in
             ZStack {
+                // the eyepiece: the picture falls off into black at the edges, most in the corners; the
+                // markings sit on top of it, so the scale stays readable
+                // It moves with the markings (it is the same piece of the camera), with black beyond
+                // its edges so a quick swing never shows past it.
+                ZStack {
+                    RadialGradient(stops: [.init(color: .clear, location: 0.62),
+                                           .init(color: .black.opacity(0.5), location: 0.84),
+                                           .init(color: .black.opacity(0.95), location: 1)],
+                                   center: .center, startRadius: 0, endRadius: hypot(g.size.width, g.size.height) / 2)
+                    Rectangle().stroke(Color.black, lineWidth: min(g.size.width, g.size.height) * 0.1)
+                        .blur(radius: min(g.size.width, g.size.height) * 0.05)
+                    Rectangle().stroke(Color.black, lineWidth: 80).padding(-40)
+                }
+                .offset(camera.finderSway)
+                .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.8), value: camera.finderSway)
                 // the finder, in its own landscape space, turned with the body
                 ZStack(alignment: .topLeading) {
                     Canvas { ctx, size in draw(&ctx, size) }
@@ -29,13 +44,6 @@ struct XAFinderView: View {
                 .offset(camera.finderSway)
                 .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.8), value: camera.finderSway)
                 .position(x: g.size.width / 2, y: g.size.height / 2)
-                // the eyepiece: everything falls off into black at the edges, most in the corners
-                RadialGradient(stops: [.init(color: .clear, location: 0.62),
-                                       .init(color: .black.opacity(0.5), location: 0.84),
-                                       .init(color: .black.opacity(0.95), location: 1)],
-                               center: .center, startRadius: 0, endRadius: hypot(g.size.width, g.size.height) / 2)
-                Rectangle().stroke(Color.black, lineWidth: min(g.size.width, g.size.height) * 0.1)
-                    .blur(radius: min(g.size.width, g.size.height) * 0.05)
             }
             .opacity(arrived ? 1 : 0.0001)
             .overlay(Color.clear)
@@ -44,6 +52,7 @@ struct XAFinderView: View {
                 withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.75)) { arrived = true }
             }
         }
+        .clipped()
         .allowsHitTesting(false)
     }
 

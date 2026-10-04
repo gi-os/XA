@@ -42,9 +42,9 @@ enum XAFinder {
     /// shows it (portrait); the result has the same extent.
     /// The rangefinder patch in landscape finder space: centred in the frame.
     static func landscapePatch(_ f: FilmFormat, long: CGFloat = 4) -> CGRect {
-        let fr = landscapeFrame(f, long: long)
+        // in the middle of the finder, where the eye looks
         let w: CGFloat = 0.39, h: CGFloat = 0.315
-        return CGRect(x: fr.midX - w / 2, y: fr.midY - h / 2, width: w, height: h)
+        return CGRect(x: long / 2 - w / 2, y: LH / 2 - h / 2, width: w, height: h)
     }
     static func patch(_ f: FilmFormat, long: CGFloat = 4) -> CGRect { toPortrait(landscapePatch(f, long: long), long: long) }
 
@@ -101,8 +101,29 @@ enum XAFinder {
                 .applyingFilter("CIExposureAdjust", parameters: ["inputEV": -0.1])
                 .cropped(to: e)
         } else {
-            around = mapped.clampedToExtent()
-                .applyingGaussianBlur(sigma: Double(short * 0.006))
+            // Without the ultra-wide: the rest of the main camera's picture, lined up, as far as it
+            // goes; past its edges the whole picture enlarged and blurred well, never the edge
+            // pixels stretched out (that streaks).
+            let m = mapped.extent
+            let cover = max(e.width / src.width, e.height / src.height) * 1.15
+            let fill = img
+                .transformed(by: CGAffineTransform(translationX: -src.midX, y: -src.midY))
+                .transformed(by: CGAffineTransform(scaleX: cover, y: cover))
+                .transformed(by: CGAffineTransform(translationX: e.midX, y: e.midY))
+                .clampedToExtent()
+                .applyingGaussianBlur(sigma: Double(short * 0.03))
+                .cropped(to: e)
+            let edge = short * 0.04
+            let keep = CIImage(color: .white).cropped(to: m.insetBy(dx: edge, dy: edge))
+                .composited(over: CIImage(color: .black).cropped(to: e.insetBy(dx: -edge * 3, dy: -edge * 3)))
+                .applyingGaussianBlur(sigma: Double(edge * 0.6))
+                .cropped(to: e)
+            let soft = mapped.applyingGaussianBlur(sigma: Double(short * 0.006)).cropped(to: m)
+            let blend = CIFilter.blendWithMask()
+            blend.inputImage = soft
+            blend.backgroundImage = fill
+            blend.maskImage = keep
+            around = (blend.outputImage ?? fill)
                 .applyingFilter("CIExposureAdjust", parameters: ["inputEV": -0.15])
                 .cropped(to: e)
         }
@@ -131,7 +152,7 @@ enum XAFinder {
         let g = CIFilter.linearGradient()
         g.point0 = CGPoint(x: e.midX, y: e.maxY)
         g.point1 = CGPoint(x: e.midX, y: t.maxY + feather)
-        g.color0 = CIColor(red: 0, green: 0, blue: 0, alpha: 0.55)
+        g.color0 = CIColor(red: 0, green: 0, blue: 0, alpha: 0.3)
         g.color1 = CIColor(red: 0, green: 0, blue: 0, alpha: 0)
         if let shade = g.outputImage?.cropped(to: e) { out = shade.composited(over: out).cropped(to: e) }
 
