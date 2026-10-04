@@ -1185,8 +1185,9 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             return
         }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        // Power: the developed modes (a whole film lab per frame) run at film's 24 frames a second
-        // and a lighter size; on Low Power Mode or a hot phone, 15 and lighter still.
+        // Power: the developed modes run at a lighter size, at the camera's 30 frames a second
+        // (FILM's finder is one baked colour cube per frame, see FilmPreview); on Low Power Mode
+        // or a hot phone, 20 and lighter still.
         let mNow = frameState().0
         if frameCount % 60 == 0 {
             let p = ProcessInfo.processInfo
@@ -1194,7 +1195,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         }
         if mNow.developed && mNow != .video {
             let now = CACurrentMediaTime()
-            let gap = lowPower ? 1.0 / 15.5 : 1.0 / 24.5
+            let gap = lowPower ? 1.0 / 20.5 : 1.0 / 31
             if now - lastFrameAt < gap { frameCount += 1; return }
             lastFrameAt = now
         }
@@ -1352,12 +1353,9 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         }
         // Leaving FILM: the XA finder plays its arrival backwards, the frame growing back out to the
         // whole picture as the surround fades, before the next mode's finder takes over.
-        lock.lock(); let outroStart = _outroStart; let outroLong = _finderLong; lock.unlock()
-        let since = CGFloat(CACurrentMediaTime() - outroStart) / CGFloat(Self.outroLength)
-        var outFrame = img
-        if m != .film && since >= 0 && since < 1 {
-            outFrame = XAFinder.compose(img, format: dev.filmRecipe.format, long: outroLong, intro: 1 - since * since)
-        }
+        // (The picture itself goes straight to the next mode's shape: changing the canvas
+        // mid-switch made the screen flicker. Only the markings step back out, in the view.)
+        let outFrame = img
         let pixel = m == .digi && dev.stack.look.pixelWidth != nil
         lock.lock()
         let holding = CACurrentMediaTime() < _reviewUntil

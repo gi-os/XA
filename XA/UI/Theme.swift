@@ -78,14 +78,25 @@ struct FlatSlider: View {
     @Binding var value: Double
     var range: ClosedRange<Double> = 0...1
     var format: (Double) -> String = { String(format: "%.2f", $0) }
+    /// What the setting does, shown under the slider.
+    var note: String? = nil
+    /// Its default: shown with the note; double-tap the name to go back to it.
+    var standard: Double? = nil
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(label).font(.system(size: 14))
+                    .onTapGesture(count: 2) { if let standard { value = standard } }
                 Spacer()
                 Text(format(value)).font(XA.mono(13)).foregroundStyle(XA.orange)
             }
             Slider(value: $value, in: range).tint(XA.orange)
+            if note != nil || standard != nil {
+                let d = standard.map { "Default \(format($0))." } ?? ""
+                Text([note, d].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " "))
+                    .font(.system(size: 12)).foregroundStyle(XA.faint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.vertical, 4)
     }

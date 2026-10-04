@@ -127,38 +127,50 @@ struct CustomizeView: View {
                 row("Date back", "\(settings.filmDate.style.title.capitalized) · \(Self.placement(settings.filmDate))", accent: true)
             }
             Toggle("XA viewfinder", isOn: $settings.filmRecipe.xaFinder).tint(XA.orange).font(.system(size: 15))
-            Text("Look through an Olympus XA's finder: the photo in a bright frame, the speed scale with its meter needle, the rangefinder patch. Off: the plain viewfinder.")
+            Text("Look through an Olympus XA's finder: the photo in a bright frame, the speed scale with its meter needle, the rangefinder patch. Off: the plain viewfinder. Default on.")
                 .font(.system(size: 12)).foregroundStyle(XA.faint)
             Toggle("Ultra-wide around the frame", isOn: $settings.filmRecipe.ultraWide).tint(XA.orange).font(.system(size: 15))
                 .disabled(!settings.filmRecipe.xaFinder)
-            Text("Experimental: runs the ultra-wide camera too, to fill the finder around the frame. Off while developing from RAW.")
+            Text("Experimental: runs the ultra-wide camera too, to fill the finder around the frame. Uses more battery. Off while developing from RAW. Default off.")
                 .font(.system(size: 12)).foregroundStyle(XA.faint)
             Text("FILM").font(XA.display(11)).foregroundStyle(XA.faint).padding(.top, 4)
-            FlatSlider(label: "Halation", value: $settings.filmRecipe.halation, range: 0...2, format: { "\(Int(($0 * 100).rounded()))" })
-            FlatSlider(label: "Grain", value: $settings.filmRecipe.grain, range: 0...2, format: { "\(Int(($0 * 100).rounded()))" })
-            FlatSlider(label: "Glare", value: $settings.filmRecipe.glare, range: 0...2, format: { "\(Int(($0 * 100).rounded()))" })
-            Text("100 is the film as measured. Halation bounces three times off the film base and gets the highlights the phone clipped back; grain comes in three layers, blue the coarsest, with coarse fast grains in the shadows; glare is stray light in the camera and on the print.")
-                .font(.system(size: 12)).foregroundStyle(XA.faint)
+            Text("How the film itself behaves. 100 is the stock as measured.").font(.system(size: 12)).foregroundStyle(XA.faint)
+            FlatSlider(label: "Halation", value: $settings.filmRecipe.halation, range: 0...2, format: { "\(Int(($0 * 100).rounded()))" },
+                       note: "The red glow around bright lights and windows. Light passes through the film, bounces off its back and comes back wider. Black-and-white film has a backing that stops most of it, so it glows faint grey.", standard: 1)
+            FlatSlider(label: "Grain", value: $settings.filmRecipe.grain, range: 0...2, format: { "\(Int(($0 * 100).rounded()))" },
+                       note: "The texture of the film. Fast stocks and pushed rolls are grainier, and shadows show the coarsest grain.", standard: 1)
+            FlatSlider(label: "Glare", value: $settings.filmRecipe.glare, range: 0...2, format: { "\(Int(($0 * 100).rounded()))" },
+                       note: "Stray light inside the camera and on the print. It softens the deepest blacks a little, most in bright scenes.", standard: 1)
             Text("CAMERA").font(XA.display(11)).foregroundStyle(XA.faint).padding(.top, 4)
-            FlatSlider(label: "Cheap lens", value: $settings.filmRecipe.lens, format: { "\(Int(($0 * 100).rounded()))" })
-            FlatSlider(label: "Flash falloff", value: $settings.filmRecipe.flash, format: { "\(Int(($0 * 100).rounded()))" })
-            FlatSlider(label: "Light leaks", value: $settings.filmRecipe.leak, format: { "\(Int(($0 * 100).rounded()))" })
-            FlatSlider(label: "Mist filter", value: $settings.filmRecipe.mist, format: { "\(Int(($0 * 100).rounded()))" })
+            Text("The point-and-shoot in front of the film.").font(.system(size: 12)).foregroundStyle(XA.faint)
+            FlatSlider(label: "Cheap lens", value: $settings.filmRecipe.lens, format: { "\(Int(($0 * 100).rounded()))" },
+                       note: "A plastic lens: the corners go about a stop darker and a little soft.", standard: 0.5)
+            FlatSlider(label: "Flash falloff", value: $settings.filmRecipe.flash, format: { "\(Int(($0 * 100).rounded()))" },
+                       note: "With the flash on, the middle of the frame gets the light and the room behind drops into the dark, like a small built-in flash.", standard: 0.5)
+            FlatSlider(label: "Light leaks", value: $settings.filmRecipe.leak, format: { "\(Int(($0 * 100).rounded()))" },
+                       note: "Light getting past the camera's back, burning an orange and red streak in from one edge. It only shows on the print, on some frames: more often the higher you set it.", standard: 0.3)
+            FlatSlider(label: "Mist filter", value: $settings.filmRecipe.mist, format: { "\(Int(($0 * 100).rounded()))" },
+                       note: "A diffusion filter over the lens: highlights bloom into a soft haze. Off unless you want the dreamy look.", standard: 0)
             Text("FORMAT").font(XA.display(11)).foregroundStyle(XA.faint).padding(.top, 4)
             Segmented(items: FilmFormat.allCases.map { ($0, $0.title) }, selection: $settings.filmRecipe.format)
-            Text("The size of the negative: smaller formats show bigger grain and glow. 35mm is cut 2:3, 120 square.")
+            Text("The size of the negative. Smaller formats show bigger grain and glow: 110 is tiny and gritty, 120 is big, smooth and square. 35mm is cut 2:3. Default 35MM.")
                 .font(.system(size: 12)).foregroundStyle(XA.faint)
             Text("LAB").font(XA.display(11)).foregroundStyle(XA.faint).padding(.top, 4)
             Segmented(items: [(FilmScan.lab, "Lab scan"), (.full, "Full size")], selection: $settings.filmRecipe.scan)
-            FlatSlider(label: "Lab auto-correct", value: $settings.filmRecipe.labAuto, format: { "\(Int(($0 * 100).rounded()))" })
-            FlatSlider(label: "Print warmth", value: $settings.filmRecipe.warmth, range: -1...1, format: { String(format: "%+d", Int(($0 * 100).rounded())) })
-            FlatSlider(label: "Print tint", value: $settings.filmRecipe.tint, range: -1...1, format: { String(format: "%+d", Int(($0 * 100).rounded())) })
-            FlatSlider(label: "Preflash", value: $settings.filmRecipe.preflash, format: { "\(Int(($0 * 100).rounded()))" })
-            Text("Leaks show up on the print, not in the finder, on some frames. The lab scans at a minilab's size (3088 px), where grain sits the way it does on real scans.")
+            Text("Lab scan saves at a minilab scanner's size (3088 px on the long side), where grain looks the way it does on real scans. Full size keeps every pixel. Default Lab scan.")
                 .font(.system(size: 12)).foregroundStyle(XA.faint)
+            FlatSlider(label: "Lab auto-correct", value: $settings.filmRecipe.labAuto, format: { "\(Int(($0 * 100).rounded()))" },
+                       note: "What the lab's machine does to every frame: prints a dim or grey day brighter, sets the black and white points so a flat scene still has punch, adds color to a pale frame and warms a cold one. Night stays night. 0 prints the negative as it is.", standard: 0.7)
+            FlatSlider(label: "Print warmth", value: $settings.filmRecipe.warmth, range: -1...1, format: { String(format: "%+d", Int(($0 * 100).rounded())) },
+                       note: "The lab's color timing: plus prints warmer and more yellow, minus cooler and bluer.", standard: 0)
+            FlatSlider(label: "Print tint", value: $settings.filmRecipe.tint, range: -1...1, format: { String(format: "%+d", Int(($0 * 100).rounded())) },
+                       note: "Plus prints more magenta, minus more green.", standard: 0)
+            FlatSlider(label: "Preflash", value: $settings.filmRecipe.preflash, format: { "\(Int(($0 * 100).rounded()))" },
+                       note: "A little even light on the paper before printing. It softens the brightest parts and lifts the look toward faded.", standard: 0)
+            Text("Double-tap a setting's name to put it back to its default.").font(.system(size: 12)).foregroundStyle(XA.faint)
             Toggle("Develop from RAW", isOn: $settings.digiZero).tint(XA.orange).font(.system(size: 15))
                 .onChange(of: settings.digiZero) { _, _ in camera.zeroChanged() }
-            Text("FILM saves full size with none of DIGI's digicam processing. From RAW it also skips the iPhone's own (Smart HDR, tone mapping, sharpening), so the stock is the only look. Slower to save.")
+            Text("FILM saves full size with none of DIGI's digicam processing. From RAW it also skips the iPhone's own (Smart HDR, tone mapping, sharpening), so the stock is the only look. Slower to save. Default off.")
                 .font(.system(size: 12)).foregroundStyle(XA.faint)
             Text("The film stocks (Bowery, Coney, Chelsea, Prospect, Canal, Orchard, Ludlow) are developed through tables baked with spektrafilm, Andrea Volpato's spectral simulation of film from published datasheets, with grain, halation and coupler effects fitted to it. The black-and-white stocks (Bleecker, Delancey, Essex) use XA's own tables, shaped like the published curves. Film modeling powered by spektrafilm (github.com/andreavolpato/spektrafilm); tables CC BY-SA 4.0. Swipe a stock's box up to push it a stop, down to pull.")
                 .font(.system(size: 12)).foregroundStyle(XA.dim)

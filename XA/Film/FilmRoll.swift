@@ -167,6 +167,89 @@ enum LabAuto {
         return CIVector(x: k * gr, y: k * gg, z: k * gb)
     }
 
+    // MARK: the scanner's levels and colour
+
+    /// A grey day prints flat: the darkest thing in the frame is a dark grey and the brightest a
+    /// dull white, and every colour sits close to grey. A minilab scanner sets its black and white
+    /// points from the frame and the operator adds a little colour, so the print snaps.
+    /// x = black point, y = white point (encoded), z = saturation.
+    private static var scanCached = CIVector(x: 0, y: 1, z: 1)
+    private static var scanAt: CFTimeInterval = 0
+
+    static func scan(_ img: CIImage, strength: Double, mono: Bool, preview: Bool, encoded: Bool = false) -> CIVector {
+        let s = CGFloat(max(0, min(1, strength)))
+        guard s > 0 else { return CIVector(x: 0, y: 1, z: 1) }
+        if preview {
+            lock.lock(); let c = scanCached, at = scanAt; lock.unlock()
+            if CACurrentMediaTime() - at < 0.3 { return c }
+        }
+        guard let st = stats(img, encoded: encoded) else { return CIVector(x: 0, y: 1, z: 1) }
+        var v = levels(lo: st.lo, hi: st.hi, chroma: mono ? 1 : st.chroma, s)
+        if preview {
+            lock.lock()
+            let c = scanAt == 0 ? v : scanCached
+            v = CIVector(x: c.x * 0.5 + v.x * 0.5, y: c.y * 0.5 + v.y * 0.5, z: c.z * 0.5 + v.z * 0.5)
+            scanCached = v; scanAt = CACurrentMediaTime()
+            lock.unlock()
+        }
+        return v
+    }
+
+    /// From the frame's 2nd and 98th percentile (encoded luma) and its mean colourfulness.
+    static func levels(lo: CGFloat, hi: CGFloat, chroma: CGFloat, _ s: CGFloat) -> CIVector {
+        // black and white points most of the way to where the frame's own ends are, never so far
+        // that a real low-key or high-key frame is forced to full range
+        let k = 0.75 * s
+        let black = min(0.14, max(0, lo - 0.015) * k)
+        let white = max(0.8, 1 - max(0, 0.985 - hi) * k)
+        // a pale frame gets up to a third more colour; a colourful one none
+        let sat = 1 + 0.35 * s * max(0, min(1, (0.16 - chroma) / 0.12))
+        return CIVector(x: black, y: white, z: sat)
+    }
+
+    /// Levels and saturation on encoded values (`linear`: the image is linear and is encoded around them).
+    static func applyScan(_ img: CIImage, _ v: CIVector, linear: Bool) -> CIImage {
+        guard v.x > 0.002 || v.y < 0.998 || v.z > 1.002 else { return img }
+        let e = img.extent
+        var i = linear ? img.applyingFilter("CILinearToSRGBToneCurve") : img
+        let k = 1 / max(0.2, v.y - v.x)
+        i = i.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: k, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: k, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: k, w: 0), "inputBiasVector": CIVector(x: -v.x * k, y: -v.x * k, z: -v.x * k, w: 0)])
+        if v.z > 1.002 { i = i.applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: v.z]) }
+        i = i.applyingFilter("CIColorClamp", parameters: ["inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 1),
+                                                          "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1)])
+        if linear { i = i.applyingFilter("CISRGBToneCurveToLinear") }
+        return i.cropped(to: e)
+    }
+
+    private static func stats(_ img: CIImage, encoded: Bool) -> (lo: CGFloat, hi: CGFloat, chroma: CGFloat)? {
+        let e = img.extent
+        guard e.width > 1, e.height > 1, e.width.isFinite else { return nil }
+        let k = 64 / max(e.width, e.height)
+        var small = img.transformed(by: CGAffineTransform(scaleX: k, y: k))
+        if !encoded { small = small.applyingFilter("CILinearToSRGBToneCurve") }
+        let b = small.extent.integral
+        let w = Int(b.width), h = Int(b.height)
+        guard w > 2, h > 2 else { return nil }
+        var px = [Float](repeating: 0, count: w * h * 4)
+        px.withUnsafeMutableBytes { raw in
+            context.render(small, toBitmap: raw.baseAddress!, rowBytes: w * 16, bounds: b, format: .RGBAf, colorSpace: nil)
+        }
+        var ys: [Float] = []; ys.reserveCapacity(w * h)
+        var chroma: Float = 0
+        for i in stride(from: 0, to: px.count, by: 4) {
+            let r = px[i], g = px[i + 1], bl = px[i + 2]
+            guard r.isFinite, g.isFinite, bl.isFinite else { continue }
+            ys.append(0.2126 * r + 0.7152 * g + 0.0722 * bl)
+            chroma += max(r, max(g, bl)) - min(r, min(g, bl))
+        }
+        guard ys.count > 16 else { return nil }
+        ys.sort()
+        let lo = ys[Int(Float(ys.count) * 0.02)], hi = ys[min(ys.count - 1, Int(Float(ys.count) * 0.98))]
+        return (CGFloat(max(0, lo)), CGFloat(min(1, hi)), CGFloat(chroma / Float(ys.count)))
+    }
+
     private static func average(_ img: CIImage) -> [CGFloat]? {
         let e = img.extent
         guard e.width > 1, e.height > 1, e.width.isFinite else { return nil }

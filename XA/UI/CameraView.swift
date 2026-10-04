@@ -172,13 +172,13 @@ struct CameraView: View {
     private var finderAspect: CGFloat { 3 / 4 }
 
     /// FILM through the XA finder: the finder takes all the room above the screen strip.
-    private var xaFinder: Bool { (camera.mode == .film || camera.leavingFilm) && settings.filmRecipe.xaFinder }
+    private var xaFinder: Bool { camera.mode == .film && settings.filmRecipe.xaFinder }
 
     @ViewBuilder private var viewfinder: some View {
         if xaFinder && camera.authorized != false {
             Viewfinder(camera: camera)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay { XAFinderView(camera: camera, format: settings.filmRecipe.format, leaving: camera.leavingFilm) }
+                .overlay { XAFinderView(camera: camera, format: settings.filmRecipe.format, leaving: false) }
                 .overlay { ShutterBlinkView(camera: camera, settings: settings) }
                 .background(GeometryReader { g in
                     Color.black
@@ -207,6 +207,9 @@ struct CameraView: View {
                         // FILM looks through the XA's finder; the other modes keep the focus bracket
                         if camera.mode == .film && settings.filmRecipe.xaFinder {
                             XAFinderView(camera: camera, format: settings.filmRecipe.format)
+                        } else if camera.leavingFilm {
+                            // leaving FILM: the finder's markings grow past the screen and fade
+                            XAFinderView(camera: camera, format: settings.filmRecipe.format, leaving: true)
                         } else {
                             FocusBracket(camera: camera)
                         }

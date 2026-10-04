@@ -218,7 +218,9 @@ enum FilmLab {
     /// Tests can look at each stage.
     static var trace: ((String, CIImage) -> Void)?
 
-    static func develop(_ input: CIImage, stock: FilmStock, push: Int, preview: Bool, seed: Int, shot: FilmShot? = nil) -> CIImage {
+    static func develop(_ input: CIImage, stock: FilmStock, push: Int, preview: Bool, seed: Int, shot: FilmShot? = nil, flat: Bool = false) -> CIImage {
+        // The viewfinder: the film baked into one cube (FilmPreview), not the whole lab per frame.
+        if preview && !flat, let fast = FilmPreview.develop(input, stock: stock, push: push, seed: seed, shot: shot) { return fast }
         guard let t = tables(stock.id) else { return input }
         let e = input.extent
         guard e.width > 1, e.height > 1, e.width.isFinite, e.height.isFinite else { return input }
@@ -254,9 +256,11 @@ enum FilmLab {
         if filmGlare > 0 { img = addLight(img, scale(veil(img, full), filmGlare, filmGlare, filmGlare)) }
         trace?("exposed", img)
         // Light spreading in the emulsion, then the red halo from the film base.
-        let mix = CIFilter.dissolveTransition()
-        mix.inputImage = img; mix.targetImage = blur(img, Fit.scatterUM); mix.time = Fit.scatterWeight
-        img = (mix.outputImage ?? img).cropped(to: full)
+        if !flat {
+            let mix = CIFilter.dissolveTransition()
+            mix.inputImage = img; mix.targetImage = blur(img, Fit.scatterUM); mix.time = Fit.scatterWeight
+            img = (mix.outputImage ?? img).cropped(to: full)
+        }
         trace?("scattered", img)
         let h = CGFloat(stock.halation * (r?.halation ?? 1))
         // The halo is light only. (Compositing it with CIAdditionCompositing doubled the alpha, and
@@ -277,7 +281,7 @@ enum FilmLab {
         // Black-and-white film has an anti-halation backing and no red layer: a faint grey glow.
         let halo = stock.mono ? scale(bounced, Fit.halationR * h * 0.4, Fit.halationR * h * 0.4, Fit.halationR * h * 0.4)
                               : scale(bounced, Fit.halationR * h, Fit.halationG * h, 0)
-        if let k = addLightKernel, let lit = k.apply(extent: full, arguments: [img, halo]) { img = lit }
+        if !flat, h > 0, let k = addLightKernel, let lit = k.apply(extent: full, arguments: [img, halo]) { img = lit }
         trace?("halation", img)
         // Into the tables' code space: sRGB-encoded, 0…1.
         img = img.applyingFilter("CILinearToSRGBToneCurve")
@@ -289,7 +293,7 @@ enum FilmLab {
         // On the negative: inhibitor couplers (local contrast), push development, dye clouds, grain.
         let gamma = Float(1 + 0.12 * Double(push))
         if let k = densityKernel,
-           let d = k.apply(extent: full, arguments: [img, blur(img, Fit.couplerUM), blur(img, Fit.couplerTailUM),
+           let d = k.apply(extent: full, arguments: [img, flat ? img : blur(img, Fit.couplerUM), flat ? img : blur(img, Fit.couplerTailUM),
                                                       Fit.couplerK, Fit.couplerTailK, gamma,
                                                       t.pushOffset[push] ?? CIVector(x: 0, y: 0, z: 0), t.dmin, t.dmax,
                                                       timing(shot?.recipe), Float(max(0, shot?.recipe.preflash ?? 0) * 0.02),
@@ -298,8 +302,8 @@ enum FilmLab {
             img = d
         }
         trace?("developed", img)
-        img = blur(img, Fit.dyeBlurUM)
-        if let g = grainKernel, let rnd = CIFilter.randomGenerator().outputImage {
+        if !flat { img = blur(img, Fit.dyeBlurUM) }
+        if !flat, let g = grainKernel, let rnd = CIFilter.randomGenerator().outputImage {
             // Clumps as a scanner sees them (the dye clouds merge into grains of about 14 µm), and
             // the strength a pixel of that size shows: a smaller pixel averages over fewer grains.
             let clump = max(0.6, 2 * Fit.grainClumpUM / um / 2.355)
@@ -331,6 +335,10 @@ enum FilmLab {
                                                              "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1)])
         trace?("grained", img)
         img = cube(img, t.print, t.size, full)
+        // The scanner: levels and colour set from the frame, as a minilab operator's scanner does.
+        if !flat, !preview, let r = shot?.recipe, r.labAuto > 0 {
+            img = LabAuto.applyScan(img, LabAuto.scan(img, strength: r.labAuto, mono: stock.mono, preview: false, encoded: true), linear: false)
+        }
         if stock.mono {
             // a neutral silver print
             img = img.applyingFilter("CIColorMatrix", parameters: [
@@ -345,7 +353,7 @@ enum FilmLab {
             img = addLight(scale(img, 1 - printGlare, 1 - printGlare, 1 - printGlare), scale(veil(img, full), printGlare, printGlare, printGlare))
         }
         // The lab scanner's sharpening.
-        if !preview || um < 40 {
+        if !flat && (!preview || um < 40) {
             let us = CIFilter.unsharpMask()
             us.inputImage = img.clampedToExtent(); us.radius = Float(Fit.sharpenUM / um); us.intensity = Fit.sharpen
             img = (us.outputImage ?? img).cropped(to: full)

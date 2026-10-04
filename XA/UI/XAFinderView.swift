@@ -51,8 +51,15 @@ struct XAFinderView: View {
             .opacity(arrived ? 1 : 0.0001)
             .overlay(Color.clear)
             .onAppear {
-                arrived = false
-                withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.75)) { arrived = true }
+                if leaving {
+                    arrived = true
+                    DispatchQueue.main.async {
+                        withAnimation(.timingCurve(0.6, 0, 0.9, 0.4, duration: CameraModel.outroLength)) { arrived = false }
+                    }
+                } else {
+                    arrived = false
+                    withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.75)) { arrived = true }
+                }
             }
             .onChange(of: leaving) { _, l in
                 // stepping back out: the markings grow past the screen and fade, the arrival reversed
