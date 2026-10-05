@@ -99,7 +99,7 @@ enum DigicamFX {
             r = curve(r); g = curve(g); b = curve(b)
             // Shadows go green: strongest in the darks, gone by the mid-tones.
             let shadow = 1 - smooth(0.05, 0.5, l)
-            g += 0.045 * shadow; b += 0.012 * shadow; r -= 0.02 * shadow
+            g += 0.018 * shadow; b += 0.008 * shadow; r -= 0.008 * shadow
             // Brights a touch warm, like the flash tube on negative film.
             let bright = smooth(0.55, 0.95, l)
             r += 0.02 * bright; b -= 0.025 * bright
@@ -214,13 +214,15 @@ extension DigicamFX {
         for bi in 0..<n { for gi in 0..<n { for ri in 0..<n {
             let r0 = Float(ri) / Float(n - 1), g0 = Float(gi) / Float(n - 1), b0 = Float(bi) / Float(n - 1)
             var (h, s, v) = hsv(r0, g0, b0)
-            // skies: toward a deep cyan-blue, richer and a little darker
-            let sky = bell(h, 212, 45) * min(1, s * 3)
-            h += (204 - h) * 0.35 * sky
-            s = min(1, s * (1 + 0.32 * sky))
-            v *= 1 - 0.07 * sky
+            // skies: a deep, clean blue, richer and a little darker. Only real sky: colour that is
+            // already blue enough and bright enough, so grey-blue shadows never pick up a cast.
+            func ss(_ a: Float, _ b: Float, _ x: Float) -> Float { let t = min(1, max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
+            let sky = bell(h, 214, 34) * ss(0.2, 0.42, s) * ss(0.3, 0.6, v)
+            h += (212 - h) * 0.25 * sky
+            s = min(1, s * (1 + 0.28 * sky))
+            v *= 1 - 0.06 * sky
             // reds a touch hot
-            let red = bell(h, 2, 28) * min(1, s * 3)
+            let red = bell(h, 2, 28) * ss(0.2, 0.45, s)
             s = min(1, s * (1 + 0.16 * red))
             // greens a little muted, as the reviews found the saturation modest
             let green = bell(h, 110, 50)
@@ -258,14 +260,9 @@ extension DigicamFX {
                 .transformed(by: CGAffineTransform(scaleX: s, y: s))
                 .transformed(by: CGAffineTransform(translationX: e.midX, y: e.midY)).cropped(to: e)
         }
-        func only(_ i: CIImage, _ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> CIImage {
-            i.applyingFilter("CIColorMatrix", parameters: [
-                "inputRVector": CIVector(x: r, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: g, z: 0, w: 0),
-                "inputBVector": CIVector(x: 0, y: 0, z: b, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1)]).cropped(to: e)
-        }
-        let red = only(scaled(1 + k), 1, 0, 0), green = only(img, 0, 1, 0), blue = only(scaled(1 - k), 0, 0, 1)
-        let rg = CIFilter.additionCompositing(); rg.inputImage = red; rg.backgroundImage = green
-        let rgb = CIFilter.additionCompositing(); rgb.inputImage = blue; rgb.backgroundImage = rg.outputImage
-        return (rgb.outputImage ?? img).cropped(to: e).settingAlphaOne(in: e)
+        guard let kern = fringeKernel,
+              let out = kern.apply(extent: e, arguments: [scaled(1 + k), img, scaled(1 - k)]) else { return img }
+        return out.cropped(to: e)
     }
+    private static let fringeKernel = CIColorKernel(source: "kernel vec4 xaFringe(__sample r, __sample g, __sample b) { return vec4(r.r, g.g, b.b, 1.0); }")
 }

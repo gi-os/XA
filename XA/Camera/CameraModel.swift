@@ -232,6 +232,7 @@ final class CameraModel: NSObject, ObservableObject {
         d.date = mode == .film ? settings.filmDate : settings.date
         d.filmRecipe = settings.filmRecipe
         d.recipe = settings.recipe
+        d.screenDate = mode == .digi && settings.digiOSD
         if mode == .booth {
             d.booth = settings.boothSkin
             d.deco = settings.boothDeco.step((boothShot ?? 1) - 1)

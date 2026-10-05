@@ -94,6 +94,9 @@ struct DevelopSettings {
     var eyes: Booth.Eyes? = nil
     /// BOOTH: this shot's backdrop and doodles.
     var deco: BoothDeco? = nil
+    /// DIGI with its screen info on: the screen shows the date, so the viewfinder leaves the
+    /// burned-in one off (the photo still gets it).
+    var screenDate = false
 }
 
 /// The darkroom: the same chain for the viewfinder and for the saved photograph.
@@ -161,7 +164,9 @@ enum Darkroom {
             alpha = !preview
             shapeForDate = shape
         }
-        img = stamp(img, s, date: date, dateShift: dateShift, mono: mono, shape: shapeForDate, instant: instant)
+        if !(preview && s.screenDate) {
+            img = stamp(img, s, date: date, dateShift: dateShift, mono: mono, shape: shapeForDate, instant: instant)
+        }
         return (img, alpha)
     }
 
