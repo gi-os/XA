@@ -10,6 +10,8 @@ final class VideoRecorder {
     private let audio: AVAssetWriterInput?
     private let adaptor: AVAssetWriterInputPixelBufferAdaptor
     private var started = false
+    /// Once finishing starts nothing more may be appended (AVFoundation throws if it is).
+    private var finished = false
     private var firstTime: CMTime = .invalid
     private(set) var lastTime: CMTime = .zero
     private let lock = NSLock()
@@ -53,7 +55,7 @@ final class VideoRecorder {
     /// Render `img` (already `size`, origin at zero) into the file at `time`.
     func append(_ img: CIImage, at time: CMTime) {
         lock.lock(); defer { lock.unlock() }
-        guard writer.status == .writing else { return }
+        guard writer.status == .writing, !finished else { return }
         if !started { writer.startSession(atSourceTime: time); started = true; firstTime = time }
         guard time > lastTime || lastTime == .zero, video.isReadyForMoreMediaData, let pool = adaptor.pixelBufferPool else { return }
         var pb: CVPixelBuffer?
@@ -68,7 +70,7 @@ final class VideoRecorder {
 
     func append(audio sample: CMSampleBuffer) {
         lock.lock(); defer { lock.unlock() }
-        guard started, writer.status == .writing, let audio, audio.isReadyForMoreMediaData else { return }
+        guard started, !finished, writer.status == .writing, let audio, audio.isReadyForMoreMediaData else { return }
         if CMSampleBufferGetPresentationTimeStamp(sample) < firstTime { return }
         audio.append(sample)
     }
@@ -81,7 +83,8 @@ final class VideoRecorder {
 
     func finish(_ done: @escaping (URL?) -> Void) {
         lock.lock()
-        guard started, writer.status == .writing else { lock.unlock(); writer.cancelWriting(); done(nil); return }
+        guard started, writer.status == .writing, !finished else { lock.unlock(); writer.cancelWriting(); done(nil); return }
+        finished = true
         video.markAsFinished()
         audio?.markAsFinished()
         writer.endSession(atSourceTime: lastTime)

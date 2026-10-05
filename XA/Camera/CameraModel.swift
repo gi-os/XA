@@ -162,7 +162,9 @@ final class CameraModel: NSObject, ObservableObject {
     private var lastKick: CFTimeInterval = 0
     private var lastFrameAt: CFTimeInterval = 0
     private let qrOutput = AVCaptureMetadataOutput()
-    private var qrSeen: CFTimeInterval = 0
+    private var qrClear: DispatchWorkItem?
+    /// The mic is on the session (read on the frame queue, so kept under the lock).
+    private var _hasMic = false
     private var lowPower = false
     private var finderLight: CGFloat = 1
     // FILM's ultra-wide: the second camera behind the finder's surround.
@@ -346,10 +348,6 @@ final class CameraModel: NSObject, ObservableObject {
         videoOutput.alwaysDiscardsLateVideoFrames = true
         videoOutput.setSampleBufferDelegate(self, queue: frameQueue)
         if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
-        if session.canAddOutput(qrOutput) {
-            session.addOutput(qrOutput)
-            qrOutput.setMetadataObjectsDelegate(self, queue: .main)
-        }
         photoOutput.maxPhotoQualityPrioritization = .quality
         if photoOutput.isAppleProRAWSupported { photoOutput.isAppleProRAWEnabled = settings.digiZero }
         applyCapturePolicy(flash: settings.flash != .off)
@@ -830,7 +828,10 @@ final class CameraModel: NSObject, ObservableObject {
         let add = {
             guard let mic = AVCaptureDevice.default(for: .audio), let inp = try? AVCaptureDeviceInput(device: mic) else { return }
             self.session.beginConfiguration()
-            if self.session.canAddInput(inp) { self.session.addInput(inp); self.audioInput = inp }
+            if self.session.canAddInput(inp) {
+                self.session.addInput(inp); self.audioInput = inp
+                self.lock.lock(); self._hasMic = true; self.lock.unlock()
+            }
             if self.session.canAddOutput(self.audioOutput) {
                 self.session.addOutput(self.audioOutput)
                 self.audioOutput.setSampleBufferDelegate(self, queue: self.audioQueue)
@@ -848,7 +849,7 @@ final class CameraModel: NSObject, ObservableObject {
 
     private func startRecording() {
         guard !recording else { return }
-        fx.reset()
+        frameQueue.async { self.fx.reset() }   // the frame queue owns the looks' state
         // The turn locks when the clip starts, so a take never flips halfway.
         lock.lock(); _wantRecord = true; _lockedTurn = _turn; frameSegments = []; lock.unlock()
         segments = []
@@ -1227,7 +1228,11 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             let frame = fx.apply(vlook, to: base, time: pts.seconds, date: Date())
             lock.lock()
-            if _wantRecord && _recorder == nil { _recorder = VideoRecorder(size: frame.extent.size, audio: audioInput != nil) }
+            var failed = false
+            if _wantRecord && _recorder == nil {
+                _recorder = VideoRecorder(size: frame.extent.size, audio: _hasMic)
+                if _recorder == nil { _wantRecord = false; failed = true }
+            }
             let r = _recorder
             if let r {
                 // A new segment whenever the tape changes mid-take.
@@ -1235,6 +1240,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                 if frameSegments.last?.look != vlook { frameSegments.append(TakeSegment(look: vlook, start: at)) }
             }
             lock.unlock()
+            if failed { DispatchQueue.main.async { self.stopRecording() } }
             r?.append(frame, at: pts)
             let shown = t == 0 ? frame : Self.rotated(frame, clockwise: 360 - t)
             preview?.show(shown, pixelated: vlook == .pocket)
@@ -1544,6 +1550,7 @@ extension CameraModel {
         session.stopRunning()
         detach(session)
         input = nil; device = nil; uwInput = nil; audioInput = nil
+        lock.lock(); _hasMic = false; lock.unlock()
         lock.lock(); _uw = nil; lock.unlock()
         multiCam = false
         if multi && configureMulti() {
@@ -1682,9 +1689,25 @@ final class FinderMotion: ObservableObject {
 /// PRO reads QR codes, like the system camera: the code's text, shown while it is in view.
 extension CameraModel: AVCaptureMetadataOutputObjectsDelegate {
     /// Only PRO looks for codes; the other modes pay nothing for it.
+    /// Only PRO looks for codes: the reader is on the session only while in PRO (VIDEO, with the
+    /// mic, and the other modes never carry it). Runs on the session queue.
     func updateQR(_ m: CaptureMode) {
-        guard qrOutput.availableMetadataObjectTypes.contains(.qr) else { return }
-        qrOutput.metadataObjectTypes = m == .pro ? [.qr] : []
+        let on = session.outputs.contains(qrOutput)
+        if m == .pro && !on && !(session is AVCaptureMultiCamSession) {
+            session.beginConfiguration()
+            if session.canAddOutput(qrOutput) {
+                session.addOutput(qrOutput)
+                qrOutput.setMetadataObjectsDelegate(self, queue: .main)
+            }
+            session.commitConfiguration()
+            if session.outputs.contains(qrOutput), qrOutput.availableMetadataObjectTypes.contains(.qr) {
+                qrOutput.metadataObjectTypes = [.qr]
+            }
+        } else if m != .pro && on {
+            session.beginConfiguration()
+            session.removeOutput(qrOutput)
+            session.commitConfiguration()
+        }
         if m != .pro { DispatchQueue.main.async { self.qrCode = nil } }
     }
 
@@ -1692,11 +1715,11 @@ extension CameraModel: AVCaptureMetadataOutputObjectsDelegate {
         guard mode == .pro,
               let code = objects.compactMap({ ($0 as? AVMetadataMachineReadableCodeObject)?.stringValue }).first,
               !code.isEmpty else { return }
-        qrSeen = CACurrentMediaTime()
         if qrCode != code { qrCode = code }
-        // gone a couple of seconds after it leaves the frame
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-            if CACurrentMediaTime() - self.qrSeen >= 2.4 { self.qrCode = nil }
-        }
+        // gone a couple of seconds after it leaves the frame (one timer, pushed back each sighting)
+        qrClear?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.qrCode = nil }
+        qrClear = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: w)
     }
 }
