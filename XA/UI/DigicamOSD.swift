@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// DIGI's screen, the way a 2005 pocket digicam filled its LCD: thick white rounded type with
+/// DIGI's screen, the way a 2005 pocket digicam filled its LCD: thick white straight-sided type with
 /// a hard black keyline all round, white line icons keylined the same way, cyan button hints,
 /// and a lot of junk, every piece of it live. Laid out on a 390-point-wide finder and scaled.
 struct DigicamOSD: View {
@@ -111,8 +111,8 @@ struct DigicamOSD: View {
     private func bottom(_ k: CGFloat) -> some View {
         VStack(spacing: 6 * k) {
             HStack(spacing: 20 * k) {
-                OSDText("◀▶ SIM", 10.5 * k, color: OSD.cyan, edge: OSD.cyanEdge)
-                OSDText("▲ ROLL", 10.5 * k, color: OSD.cyan, edge: OSD.cyanEdge)
+                HStack(spacing: 4 * k) { Arrows(kind: .sideways, k: k); OSDText("SIM", 10.5 * k, color: OSD.cyan, edge: OSD.cyanEdge) }
+                HStack(spacing: 4 * k) { Arrows(kind: .up, k: k); OSDText("ROLL", 10.5 * k, color: OSD.cyan, edge: OSD.cyanEdge) }
             }
             TimelineView(.everyMinute) { t in
                 HStack(alignment: .lastTextBaseline) {
@@ -177,7 +177,7 @@ struct DigicamOSD: View {
 // MARK: - the look
 
 enum OSD {
-    static let font = "MPLUSRounded1c-ExtraBold"
+    static let font = "Archivo-ExtraBold"
     static let white = Color(red: 0.98, green: 0.98, blue: 0.97)
     static let cyan = Color(red: 0.37, green: 0.84, blue: 1)
     static let cyanEdge = Color(red: 0, green: 0.2, blue: 0.3)
@@ -427,5 +427,28 @@ private struct Scanlines: View {
             ctx.fill(p, with: .color(.black))
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// The button guide's arrows, drawn (the text arrows turn into emoji on iOS).
+private struct Arrows: View {
+    enum Kind { case sideways, up }
+    let kind: Kind
+    let k: CGFloat
+    var body: some View {
+        let h = 8 * k
+        let w = kind == .sideways ? 18 * k : 9 * k
+        Keylined(color: OSD.cyan, line: 0.1) {
+            var f = Path()
+            switch kind {
+            case .sideways:
+                f.move(to: CGPoint(x: 0, y: h / 2)); f.addLine(to: CGPoint(x: h * 0.85, y: 0)); f.addLine(to: CGPoint(x: h * 0.85, y: h)); f.closeSubpath()
+                f.move(to: CGPoint(x: w, y: h / 2)); f.addLine(to: CGPoint(x: w - h * 0.85, y: 0)); f.addLine(to: CGPoint(x: w - h * 0.85, y: h)); f.closeSubpath()
+            case .up:
+                f.move(to: CGPoint(x: w / 2, y: 0)); f.addLine(to: CGPoint(x: w, y: h)); f.addLine(to: CGPoint(x: 0, y: h)); f.closeSubpath()
+            }
+            return (Path(), f)
+        }
+        .frame(width: w, height: h)
     }
 }

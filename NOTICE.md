@@ -21,7 +21,7 @@ The fonts in `XA/Resources/Fonts` come from Google Fonts. Their license texts ar
 
 - SIL Open Font License 1.1: Anton, Archivo, Bebas Neue, Bungee, Caveat, Chakra Petch,
   Cormorant Garamond, DM Serif Display, Fredoka, IBM Plex Sans Condensed, Mochiy Pop One,
-  M PLUS Rounded 1c, Nunito, Orbitron, Oxanium, Press Start 2P, Racing Sans One, Righteous, Roboto Condensed, Saira Extra Condensed, Stardos Stencil,
+  Nunito, Orbitron, Oxanium, Press Start 2P, Racing Sans One, Righteous, Roboto Condensed, Saira Extra Condensed, Stardos Stencil,
   Russo One, Share Tech Mono, Silkscreen, Space Mono, Unbounded.
 - Apache License 2.0: Yellowtail.
 
