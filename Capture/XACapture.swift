@@ -32,16 +32,30 @@ struct LockedCameraView: View {
         // Control open exactly what you know. Anything that needs the unlocked app opens it.
         CameraView(camera: camera, settings: settings, onRoll: { open() }, onCustomize: { open() }, onFilm: {}, modes: [.digi, .film, .pro])
         .environment(\.scenePhase, .active)
+        .onAppear {
+            // The camera first, at once: the system ends a Lock Screen camera that has not
+            // started capturing within a few seconds, and nothing else may hold it up.
+            // No Photos here (the Lock Screen camera may not touch the library): pictures go to
+            // this session's folder and the app moves them into Photos the next time it opens.
+            camera.library = nil
+            camera.start()
+        }
         .task {
             await loadContext()
-            camera.library = Library()
             CameraSounds.shared.prepare()
-            camera.start()
         }
     }
 
+    /// The app's last settings, if the system hands them over quickly.
     private func loadContext() async {
-        guard let ctx = try? await XACaptureIntent.appContext else { return }
+        let ctx: XAContext? = await withTaskGroup(of: XAContext?.self) { g in
+            g.addTask { try? await XACaptureIntent.appContext }
+            g.addTask { try? await Task.sleep(nanoseconds: 1_500_000_000); return nil }
+            let first = await g.next() ?? nil
+            g.cancelAll()
+            return first
+        }
+        guard let ctx else { return }
         let m = CaptureMode(rawValue: ctx.mode) ?? .digi
         camera.mode = m == .video ? .digi : m
         camera.stack = Stack(simID: ctx.simID, look: Look(rawValue: ctx.look) ?? .none, shape: FrameShape(rawValue: ctx.shape) ?? .none)

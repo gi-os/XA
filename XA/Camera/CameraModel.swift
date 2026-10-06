@@ -309,7 +309,18 @@ final class CameraModel: NSObject, ObservableObject {
     func start() {
         updateMotion()
         loadFavorites()
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        #if CAPTURE_EXTENSION
+        // The Lock Screen camera has the app's camera permission and cannot ask for it: unless
+        // it was refused outright, start the camera.
+        if status != .denied && status != .restricted {
+            authorized = true
+            sessionQueue.async { self.configure() }
+            if mode == .film { beginFinderIntro() }
+            return
+        }
+        #endif
+        switch status {
         case .authorized: authorized = true; sessionQueue.async { self.configure() }
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { ok in
@@ -1194,6 +1205,9 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         if frameCount % 60 == 0 {
             let p = ProcessInfo.processInfo
             lowPower = p.isLowPowerModeEnabled || p.thermalState == .serious || p.thermalState == .critical
+            #if CAPTURE_EXTENSION
+            lowPower = true   // the Lock Screen camera runs in a small memory budget
+            #endif
         }
         if mNow.developed && mNow != .video {
             let now = CACurrentMediaTime()
@@ -1532,7 +1546,10 @@ extension CameraModel {
 extension CameraModel {
     /// Whether FILM should run the ultra-wide behind its finder now.
     private var wantsUltraWide: Bool {
-        mode == .film && settings.filmRecipe.xaFinder && settings.filmRecipe.ultraWide && !settings.digiZero && !front && AVCaptureMultiCamSession.isMultiCamSupported
+        #if CAPTURE_EXTENSION
+        return false   // one camera on the Lock Screen: less memory, nothing to fall back from
+        #endif
+        return mode == .film && settings.filmRecipe.xaFinder && settings.filmRecipe.ultraWide && !settings.digiZero && !front && AVCaptureMultiCamSession.isMultiCamSupported
             && AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back) != nil
     }
 
