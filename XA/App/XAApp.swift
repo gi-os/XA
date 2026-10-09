@@ -113,25 +113,56 @@ struct RootView: View {
         Task { try? await XACaptureIntent.updateAppContext(c) }
     }
 
-    /// Pictures the Lock Screen camera could not put in Photos wait in its session folders.
+    /// Pictures the Lock Screen camera took wait in its session folders (it may not use Photos):
+    /// each goes into Photos, and a folder is let go only once all of its pictures are in.
     private func ingestLockScreenShots() async {
         for await update in LockedCameraCaptureManager.shared.sessionContentUpdates {
             switch update {
             case .initial(let urls): for u in urls { ingest(u) }
-            case .added(let u): ingest(u)
+            case .added(let u):
+                // a new folder: give the camera a moment to finish writing into it
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                ingest(u)
             default: break
             }
         }
     }
 
     private func ingest(_ dir: URL) {
-        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-        for f in files {
-            guard let data = try? Data(contentsOf: f) else { continue }
-            let type = UTType(filenameExtension: f.pathExtension) ?? .jpeg
-            library.save(data: data, type: type)
+        let fm = FileManager.default
+        var files: [URL] = []
+        if let walk = fm.enumerator(at: dir, includingPropertiesForKeys: [.isRegularFileKey]) {
+            for case let f as URL in walk where (try? f.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
+                files.append(f)
+            }
         }
-        Task { try? await LockedCameraCaptureManager.shared.invalidateSessionContent(at: dir) }
+        guard !files.isEmpty else { return }
+        // A developed picture and the camera's own copy of the same shot: keep the developed one.
+        let developed = files.filter { !$0.lastPathComponent.hasPrefix("XA-camera-") }
+        let keep = developed.isEmpty ? files : developed + files.filter { $0.lastPathComponent.hasPrefix("XA-camera-") && !hasDeveloped($0, in: developed) }
+        let group = DispatchGroup()
+        var allOK = true
+        for f in keep.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            guard let data = try? Data(contentsOf: f) else { allOK = false; continue }
+            let type = UTType(filenameExtension: f.pathExtension.lowercased()) ?? .jpeg
+            group.enter()
+            if type.conforms(to: .movie) {
+                library.save(video: f) { id in if id == nil { allOK = false }; group.leave() }
+            } else {
+                library.save(data: data, type: type) { ok in if !ok { allOK = false }; group.leave() }
+            }
+        }
+        group.notify(queue: .main) {
+            if allOK { Task { try? await LockedCameraCaptureManager.shared.invalidateSessionContent(at: dir) } }
+        }
+    }
+
+    /// The camera's copy is left over only when its shot never finished developing; a developed
+    /// picture written within a few seconds of it is the same shot.
+    private func hasDeveloped(_ camera: URL, in developed: [URL]) -> Bool {
+        func stamp(_ u: URL) -> Int? { u.deletingPathExtension().lastPathComponent.split(separator: "-").compactMap { Int($0) }.first { $0 > 1_000_000_000_000 } }
+        guard let t = stamp(camera) else { return false }
+        return developed.contains { (stamp($0) ?? 0) >= t && (stamp($0) ?? 0) - t < 60_000 }
     }
 }
 

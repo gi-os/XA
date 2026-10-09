@@ -1051,8 +1051,27 @@ final class CameraModel: NSObject, ObservableObject {
             defer { DispatchQueue.main.async { self.developing = max(0, self.developing - 1) } }
             // DIGI expands the photo's HDR gain map, so a lamp is brighter than white paper and
             // only real light sources bloom. PRO keeps the file untouched anyway.
+            #if CAPTURE_EXTENSION
+            // The Lock Screen camera: the camera's own file goes into the session folder first, so
+            // a picture is kept even if developing it runs out of the extension's small memory or
+            // time; the developed one replaces it.
+            let backup = self.writeBackup(data)
+            let opts: [CIImageOption: Any] = [.applyOrientationProperty: true]
+            #else
             let opts: [CIImageOption: Any] = shot.mode == .pro ? [.applyOrientationProperty: true] : [.applyOrientationProperty: true, .expandToHDR: true]
+            #endif
             guard var src = CIImage(data: data, options: opts) ?? CIImage(data: data, options: [.applyOrientationProperty: true]) else { return }
+            #if CAPTURE_EXTENSION
+            // ...and develops at a lab scan's size, well inside its memory.
+            if shot.mode != .pro {
+                let long = max(src.extent.width, src.extent.height)
+                if long > 2600 {
+                    let k = 2600 / long
+                    src = src.transformed(by: CGAffineTransform(scaleX: k, y: k))
+                    src = src.cropped(to: src.extent.integral)
+                }
+            }
+            #endif
             // ZERO: the RAW developed flat, no boost, no local tone mapping, no HDR: only the
             // film shapes the picture. The metadata still comes from the file.
             let fileProps = src.properties
@@ -1110,6 +1129,10 @@ final class CameraModel: NSObject, ObservableObject {
                 }
             }
             guard let out else { return }
+            #if CAPTURE_EXTENSION
+            self.writeFallback(out, type)
+            if let backup { try? FileManager.default.removeItem(at: backup) }
+            #endif
             let e = thumbSource.extent
             let k: CGFloat = 200 / max(e.width, 1)
             let small = thumbSource.transformed(by: CGAffineTransform(scaleX: k, y: k))
@@ -1119,6 +1142,7 @@ final class CameraModel: NSObject, ObservableObject {
                 func ms(_ t: Double) -> String { t < 1 ? "\(Int(t * 1000)) ms" : String(format: "%.1f s", t) }
                 self.lastTiming = "taken \(ms(self.timing.taken)) · photo \(ms(self.timing.photo)) · saved \(ms(done))"
                 if let thumb { self.lastShot = UIImage(cgImage: thumb) }
+                #if !CAPTURE_EXTENSION
                 if let lib = self.library {
                     lib.save(data: out, type: type) { ok in
                         if !ok { self.writeFallback(out, type) }
@@ -1126,6 +1150,7 @@ final class CameraModel: NSObject, ObservableObject {
                 } else {
                     self.writeFallback(out, type)
                 }
+                #endif
             }
         }
     }
@@ -1138,11 +1163,20 @@ final class CameraModel: NSObject, ObservableObject {
         }
     }
 
-    private func writeFallback(_ data: Data, _ type: UTType) {
-        guard let dir = fallbackFolder else { return }
+    @discardableResult
+    private func writeFallback(_ data: Data, _ type: UTType, prefix: String = "XA") -> URL? {
+        guard let dir = fallbackFolder else { return nil }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let ext = type.preferredFilenameExtension ?? "jpg"
-        let url = dir.appendingPathComponent("XA-\(Int(Date().timeIntervalSince1970 * 1000)).\(ext)")
-        try? data.write(to: url)
+        let url = dir.appendingPathComponent("\(prefix)-\(Int(Date().timeIntervalSince1970 * 1000))-\(Int.random(in: 0..<10000)).\(ext)")
+        do { try data.write(to: url, options: .atomic); return url } catch { return nil }
+    }
+
+    /// The camera's file as it came, kept until the developed picture is written.
+    private func writeBackup(_ data: Data) -> URL? {
+        var type: UTType = .jpeg
+        if let src = CGImageSourceCreateWithData(data as CFData, nil), let t = CGImageSourceGetType(src), let u = UTType(t as String) { type = u }
+        return writeFallback(data, type, prefix: "XA-camera")
     }
 
     // MARK: instant review
