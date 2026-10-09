@@ -131,7 +131,6 @@ enum LabAuto {
     private static var cached = CIVector(x: 1, y: 1, z: 1)
     private static var cachedAt: CFTimeInterval = 0
 
-    /// Gains for the linear frame `img`. The viewfinder reads a few times a second and eases.
     /// How underexposed the frame is as a whole, 0 (fine) to 1 (two and a half stops or more
     /// under): a thin negative. Only then does the lab's lift turn the shadows muddy and off-colour.
     static func underexposure(_ img: CIImage, preview: Bool) -> Double {
@@ -150,6 +149,7 @@ enum LabAuto {
     private static var underCached: Double = 0
     private static var underAt: CFTimeInterval = 0
 
+    /// Gains for the linear frame `img`. The viewfinder reads a few times a second and eases.
     static func correction(_ img: CIImage, strength: Double, preview: Bool) -> CIVector {
         let s = CGFloat(max(0, min(1, strength)))
         guard s > 0 else { return CIVector(x: 1, y: 1, z: 1) }
