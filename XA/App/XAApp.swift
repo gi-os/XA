@@ -76,6 +76,7 @@ struct RootView: View {
         .onChange(of: settings.filmDate) { _, _ in camera.syncFrameSettings() }
         .onChange(of: settings.recipe) { _, _ in camera.syncFrameSettings() }
         .onChange(of: settings.digiOSD) { _, _ in camera.syncFrameSettings() }
+        .onChange(of: settings.filmAlwaysOn) { _, _ in camera.syncFrameSettings() }
         .onChange(of: settings.filmRecipe) { _, _ in camera.syncFrameSettings(); camera.updateUltraWide() }
         .onChange(of: settings.digiMegapixels) { _, _ in camera.applyResolution(); pushContext() }
         .onChange(of: settings.proMegapixels) { _, _ in camera.applyResolution() }

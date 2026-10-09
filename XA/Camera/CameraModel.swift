@@ -188,6 +188,9 @@ final class CameraModel: NSObject, ObservableObject {
     /// the patch has dropped in yet.
     private var _introStart: CFTimeInterval = 0
     private var _outroStart: CFTimeInterval = -10
+    private var _peekStart: CFTimeInterval = -100
+    private var _filmAlwaysOn = false
+    static let peekHold: Double = 2.6, peekFade: Double = 0.7
     static let outroLength: Double = 0.45
     /// Leaving FILM: the XA finder stays up a moment to step back out.
     @Published var leavingFilm = false
@@ -239,7 +242,14 @@ final class CameraModel: NSObject, ObservableObject {
             d.booth = settings.boothSkin
             d.deco = settings.boothDeco.step((boothShot ?? 1) - 1)
         }
-        lock.lock(); _develop = d; _frameMode = mode; lock.unlock()
+        lock.lock()
+        // FILM's finder is plain, like a real viewfinder; a change of film (stock, push, the
+        // camera or lab settings, or arriving in FILM) shows it accurately for a moment.
+        if mode == .film && (_frameMode != .film || _develop.stack != d.stack || _develop.filmRecipe != d.filmRecipe) {
+            _peekStart = CACurrentMediaTime()
+        }
+        _develop = d; _frameMode = mode; _filmAlwaysOn = settings.filmAlwaysOn
+        lock.unlock()
     }
 
     /// How much of DIGI's processing the viewfinder shows right now, 0…1, eased.
@@ -1291,7 +1301,21 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                 lock.lock(); dev.eyes = _boothEyes; let busy = eyesBusy; if !busy { eyesBusy = true }; lock.unlock()
                 if !busy { findEyes(upright) }
             }
-            var developed = Darkroom.develop(upright, dev, date: Date(), preview: true, dateShift: 1 - amount).0
+            // FILM: plain finder, with a peek at the film after each change (see syncFrameSettings).
+            var peek: CGFloat = 1
+            if m == .film {
+                lock.lock(); let since = CACurrentMediaTime() - _peekStart; let always = _filmAlwaysOn; lock.unlock()
+                if !always {
+                    peek = since < Self.peekHold ? 1 : CGFloat(max(0, 1 - (since - Self.peekHold) / Self.peekFade))
+                    dev.accurate = true
+                }
+            }
+            var developed = peek > 0 ? Darkroom.develop(upright, dev, date: Date(), preview: true, dateShift: 1 - amount).0 : upright
+            if peek > 0 && peek < 1 {
+                let f = CIFilter.dissolveTransition()
+                f.inputImage = upright; f.targetImage = developed; f.time = Float(peek * peek * (3 - 2 * peek))
+                developed = (f.outputImage ?? developed).cropped(to: upright.extent)
+            }
             if amount < 1 {
                 // Switching modes: the film fades in or out and the date slides with it.
                 let f = CIFilter.dissolveTransition()

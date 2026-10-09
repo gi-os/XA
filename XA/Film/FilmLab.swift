@@ -297,8 +297,8 @@ enum FilmLab {
                                                       Fit.couplerK, Fit.couplerTailK, gamma,
                                                       t.pushOffset[push] ?? CIVector(x: 0, y: 0, z: 0), t.dmin, t.dmax,
                                                       timing(shot?.recipe), Float(max(0, shot?.recipe.preflash ?? 0) * 0.02),
-                                                      shot == nil ? CIVector(x: 0, y: 0, z: 0) : stock.toe,
-                                                      Float(shot == nil || stock.mono ? 0 : (shot?.recipe.scan == .lab ? 0.09 : 0.05)), Float(t.greyCode)]) {
+                                                      shot == nil ? CIVector(x: 0, y: 0, z: 0) : CIVector(x: stock.toe.x * CGFloat(shot!.under), y: stock.toe.y * CGFloat(shot!.under), z: stock.toe.z * CGFloat(shot!.under)),
+                                                      Float(shot == nil || stock.mono ? 0 : (shot?.recipe.scan == .lab ? 0.09 : 0.05) * (shot?.under ?? 0)), Float(t.greyCode)]) {
             img = d
         }
         trace?("developed", img)

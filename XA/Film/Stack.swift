@@ -97,6 +97,9 @@ struct DevelopSettings {
     /// DIGI with its screen info on: the screen shows the date, so the viewfinder leaves the
     /// burned-in one off (the photo still gets it).
     var screenDate = false
+    /// FILM's finder peek: develop the frame through the full lab (as the photo will be), not
+    /// the quick viewfinder cube.
+    var accurate = false
 }
 
 /// The darkroom: the same chain for the viewfinder and for the saved photograph.
@@ -190,9 +193,10 @@ enum Darkroom {
         // A leak is a surprise on the print, never in the finder.
         if preview { shot.recipe.leak = 0 }
         if r.labAuto > 0 { shot.lab = LabAuto.correction(img, strength: r.labAuto, preview: preview) }
+        shot.under = LabAuto.underexposure(img, preview: preview)
         let sim = FilmCatalog.sim(s.stack.simID)
         if let sim, !sim.isNeutral {
-            img = SimEngine.apply(sim, to: img, preview: preview, push: s.stack.push, seed: preview ? nil : shot.seed, shot: shot)
+            img = SimEngine.apply(sim, to: img, preview: preview && !s.accurate, push: s.stack.push, seed: preview ? nil : shot.seed, shot: shot)
         }
         // The finder shows the picture clean; the date is burned in on the frame you take, as on
         // the XA (CameraModel lays the finder over the viewfinder).

@@ -30,6 +30,9 @@ final class AppSettings: ObservableObject {
     @Published var filmDate: DateConfig { didSet { save(filmDate, "filmDateConfig") } }
     /// FILM's camera and lab.
     @Published var filmRecipe: FilmRecipe { didSet { save(filmRecipe, "filmRecipe") } }
+    /// FILM's finder shows the film all the time (a quick approximation) instead of a plain view
+    /// with an accurate peek each time the film changes.
+    @Published var filmAlwaysOn: Bool { didSet { d.set(filmAlwaysOn, forKey: "filmAlwaysOn") } }
     /// Which digicam faults DIGI photos get, and how much.
     @Published var recipe: DigiRecipe { didSet { save(recipe, "digiRecipe") } }
     /// DIGI shows each shot on the viewfinder for a moment, like a digicam's review.
@@ -81,6 +84,7 @@ final class AppSettings: ObservableObject {
         showRollButton = d.object(forKey: "showRollButton") as? Bool ?? true
         showFlipButton = d.object(forKey: "showFlipButton") as? Bool ?? true
         digiOSD = d.object(forKey: "digiOSD") as? Bool ?? true
+        filmAlwaysOn = d.object(forKey: "filmAlwaysOn") as? Bool ?? false
         flash = FlashSetting(rawValue: d.string(forKey: "flash") ?? "") ?? .off
         sounds = d.object(forKey: "sounds") as? Bool ?? true
         boothSkin = BoothSkin(rawValue: d.string(forKey: "boothSkin") ?? "") ?? .doll

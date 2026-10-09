@@ -115,6 +115,9 @@ struct FilmShot {
     var seed = 0
     /// The lab's correction for this frame (exposure and colour as light gains), from LabAuto.
     var lab: CIVector?
+    /// How thin the negative is as a whole (LabAuto.underexposure): the stock's muddy, off-colour
+    /// lift of thin shadows happens only on an underexposed frame, never on every frame's blacks.
+    var under: Double = 0
 }
 
 /// A minilab's auto-correction (a Frontier's or Noritsu's scanner and printer): it reads the
@@ -129,6 +132,24 @@ enum LabAuto {
     private static var cachedAt: CFTimeInterval = 0
 
     /// Gains for the linear frame `img`. The viewfinder reads a few times a second and eases.
+    /// How underexposed the frame is as a whole, 0 (fine) to 1 (two and a half stops or more
+    /// under): a thin negative. Only then does the lab's lift turn the shadows muddy and off-colour.
+    static func underexposure(_ img: CIImage, preview: Bool) -> Double {
+        if preview {
+            lock.lock(); let u = underCached, at = underAt; lock.unlock()
+            if CACurrentMediaTime() - at < 0.3 { return u }
+        }
+        guard let a = average(img) else { return 0 }
+        func lin(_ x: CGFloat) -> CGFloat { x <= 0.04045 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
+        let y = max(1e-4, 0.2126 * lin(a[0]) + 0.7152 * lin(a[1]) + 0.0722 * lin(a[2]))
+        let t = max(0, min(1, (log2(0.16 / y) - 0.9) / 1.6))
+        let u = Double(t * t * (3 - 2 * t))
+        if preview { lock.lock(); underCached = u; underAt = CACurrentMediaTime(); lock.unlock() }
+        return u
+    }
+    private static var underCached: Double = 0
+    private static var underAt: CFTimeInterval = 0
+
     static func correction(_ img: CIImage, strength: Double, preview: Bool) -> CIVector {
         let s = CGFloat(max(0, min(1, strength)))
         guard s > 0 else { return CIVector(x: 1, y: 1, z: 1) }
@@ -153,17 +174,20 @@ enum LabAuto {
         func lin(_ x: CGFloat) -> CGFloat { x <= 0.04045 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
         let r = max(lin(a[0]), 1e-4), g = max(lin(a[1]), 1e-4), b = max(lin(a[2]), 1e-4)
         let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
-        // Density: two thirds of the way to a normal print, and film's habit of being printed
-        // from a well-exposed negative (a third of a stop up).
-        let stops = max(-0.8, min(1.2, log2(0.16 / y) * 0.65 * s)) + 0.33 * s
+        // Density: a normally exposed frame (within about half a stop) is printed as it is; past
+        // that, two thirds of the rest is taken out. No blanket brightening: the stocks are
+        // already calibrated to print a grey card grey.
+        let off = log2(0.16 / y)
+        let beyond = off > 0 ? max(0, off - 0.45) : min(0, off + 0.45)
+        let stops = max(-0.8, min(1.2, beyond * 0.65 * s))
         let k = pow(2, stops)
         // Balance: about half of the cast taken out…
         func bal(_ c: CGFloat) -> CGFloat { max(0.8, min(1.25, pow(y / c, 0.45 * s))) }
         var gr = bal(r), gg = bal(g), gb = bal(b)
         // …and a cold frame (cloud, shade) printed a little warm, as the operators did.
         let cool = max(0, min(1, (b / r - 1) * 2))
-        gr *= 1 + 0.05 * s * cool
-        gb *= 1 - 0.06 * s * cool
+        gr *= 1 + 0.025 * s * cool
+        gb *= 1 - 0.03 * s * cool
         return CIVector(x: k * gr, y: k * gg, z: k * gb)
     }
 
