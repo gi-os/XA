@@ -127,9 +127,12 @@ final class FilmLabTests: XCTestCase {
             CIContext().render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 300, y: 200, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
             XCTAssertTrue(px.allSatisfy { $0.isFinite })
         }
-        // Warmer printing: more red than blue in a grey.
+        // Warmer printing: more red than blue in a grey (a real 18% grey, in linear light: the
+        // sRGB 0.18 above is nearly three stops under, a thin negative).
+        let grey = CIImage(color: CIColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 1, colorSpace: CGColorSpace(name: CGColorSpace.linearSRGB)!)!)
+            .cropped(to: CGRect(x: 0, y: 0, width: 600, height: 400))
         var warm = FilmRecipe(); warm.lens = 0; warm.flash = 0; warm.leak = 0; warm.warmth = 1
-        let w = FilmLab.develop(src, stock: FilmStock.all[0], push: 0, preview: false, seed: 1, shot: FilmShot(recipe: warm))
+        let w = FilmLab.develop(grey, stock: FilmStock.all[0], push: 0, preview: false, seed: 1, shot: FilmShot(recipe: warm))
         var px = [Float](repeating: 0, count: 4)
         CIContext().render(w, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 300, y: 200, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
         XCTAssertGreaterThan(px[0], px[2])
@@ -175,22 +178,5 @@ final class FilmLabTests: XCTestCase {
             XCTAssertEqual(px[1], px[2], accuracy: 0.004, st.id)
             XCTAssertTrue(FilmCatalog.sim(st.id)?.mono == true, st.id)
         }
-    }
-
-    func testZZDebugWarmTrace() {
-        let src = CIImage(color: CIColor(red: 0.18, green: 0.18, blue: 0.18)).cropped(to: CGRect(x: 0, y: 0, width: 600, height: 400))
-        var warm = FilmRecipe(); warm.lens = 0; warm.flash = 0; warm.leak = 0; warm.warmth = 1
-        let ctx = CIContext()
-        var log: [String] = []
-        FilmLab.trace = { name, img in
-            var q = [Float](repeating: 0, count: 4)
-            ctx.render(img.cropped(to: CGRect(x: 300, y: 200, width: 1, height: 1)), toBitmap: &q, rowBytes: 16, bounds: CGRect(x: 300, y: 200, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
-            log.append("\(name) \(q)")
-        }
-        defer { FilmLab.trace = nil }
-        let w = FilmLab.develop(src, stock: FilmStock.all[0], push: 0, preview: false, seed: 1, shot: FilmShot(recipe: warm))
-        var px = [Float](repeating: 0, count: 4)
-        ctx.render(w, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 300, y: 200, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
-        XCTFail("XATRACE " + log.joined(separator: " | ") + " | out \(px)")
     }
 }
