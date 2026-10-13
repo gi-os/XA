@@ -69,9 +69,10 @@ final class Pocket3DTests: XCTestCase {
         let out = fx.apply(.pocket3D, to: frame(1440, 1080), time: 0, date: Date())
         var px = [Float](repeating: 0, count: 64 * 64 * 4)
         Looks.context.render(out, toBitmap: &px, rowBytes: 64 * 16, bounds: CGRect(x: 200, y: 90, width: 64, height: 64), format: .RGBAf, colorSpace: nil)
-        let ys = stride(from: 0, to: px.count, by: 4).map { px[$0 + 1] }
-        let mean = ys.reduce(0, +) / Float(ys.count)
-        let sd = sqrt(ys.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Float(ys.count))
+        let ys: [Float] = stride(from: 0, to: px.count, by: 4).map { px[$0 + 1] }
+        let mean: Float = ys.reduce(0, +) / Float(ys.count)
+        let squares: [Float] = ys.map { ($0 - mean) * ($0 - mean) }
+        let sd: Float = (squares.reduce(0, +) / Float(ys.count)).squareRoot()
         XCTAssertGreaterThan(sd, 0.003)
     }
 
@@ -81,7 +82,8 @@ final class Pocket3DTests: XCTestCase {
         var enc = IMAADPCM(), dec = IMAADPCM()
         var err: Double = 0, sig: Double = 0
         for i in 0..<16_000 {
-            let x = Int16(12_000 * sin(2 * Double.pi * 1000 * Double(i) / 16_000))
+            let phase: Double = 2 * Double.pi * 1000 * Double(i) / 16_000
+            let x = Int16(12_000 * sin(phase))
             let y = dec.decode(enc.encode(x))
             XCTAssertEqual(Int32(y), enc.predictor)
             if i > 200 { err += pow(Double(y) - Double(x), 2); sig += pow(Double(x), 2) }
@@ -93,10 +95,11 @@ final class Pocket3DTests: XCTestCase {
 
     private func rms(_ hz: Double, rate: Double = 48_000) -> Float {
         let a = Pocket3DAudio()
-        var x = (0..<Int(rate)).map { Float(0.3 * sin(2 * Double.pi * hz * Double($0) / rate)) }
+        var x: [Float] = (0..<Int(rate)).map { (i: Int) -> Float in Float(0.3 * sin(2 * Double.pi * hz * Double(i) / rate)) }
         a.process(&x, rate: rate)
-        let tail = x[Int(rate / 2)...]
-        return sqrt(tail.map { $0 * $0 }.reduce(0, +) / Float(tail.count))
+        let tail: ArraySlice<Float> = x[Int(rate / 2)...]
+        let power: Float = tail.map { $0 * $0 }.reduce(0, +) / Float(tail.count)
+        return power.squareRoot()
     }
 
     func testItHearsVoicesButNothingAbove8kHz() {
@@ -115,7 +118,7 @@ final class Pocket3DTests: XCTestCase {
         var fmt: CMAudioFormatDescription?
         XCTAssertEqual(CMAudioFormatDescriptionCreate(allocator: nil, asbd: &asbd, layoutSize: 0, layout: nil, magicCookieSize: 0,
                                                       magicCookie: nil, extensions: nil, formatDescriptionOut: &fmt), noErr)
-        var samples = (0..<n).map { Int16(10_000 * sin(2 * Double.pi * 440 * Double($0) / rate)) }
+        var samples: [Int16] = (0..<n).map { (i: Int) -> Int16 in Int16(10_000 * sin(2 * Double.pi * 440 * Double(i) / rate)) }
         var block: CMBlockBuffer?
         XCTAssertEqual(CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: n * 2, blockAllocator: nil,
                                                           customBlockSource: nil, offsetToData: 0, dataLength: n * 2,
