@@ -22,7 +22,10 @@ struct RootView: View {
     @State private var showCustomize = false
     @State private var showFilm = false
     @State private var pull: CGFloat = 0
+    /// A QR code's link from the Lock Screen camera, opened in the browser once the app is up.
+    @State private var pendingLink: URL?
     @Environment(\.scenePhase) private var phase
+    @Environment(\.openURL) private var openURL
 
     init() {
         let s = AppSettings()
@@ -91,6 +94,11 @@ struct RootView: View {
             case "roll": openRoll()
             case "customize": showCustomize = true
             case "film": showFilm = true
+            case "link":
+                if let s = a.userInfo?["link"] as? String, let u = URL(string: s) {
+                    pendingLink = u
+                    if phase == .active { openPendingLink() }
+                }
             default: break
             }
         }
@@ -99,6 +107,7 @@ struct RootView: View {
     private func phaseChanged(_ p: ScenePhase) {
         // Back from Settings with Photos access changed: the roll picks it up.
         if p == .active {
+            openPendingLink()
             if !showRoll { camera.resume() }
             library.refresh(); library.flushPending()
             // pictures the Lock Screen camera left while the app wasn't running
@@ -143,6 +152,13 @@ struct RootView: View {
     private func syncThumb() {
         guard let first = library.assets.first else { camera.showThumb(nil); return }
         library.thumbnail(first, side: 150) { camera.showThumb($0) }
+    }
+
+    /// The browser opens a moment after the app is up (asked any sooner, iOS can ignore it).
+    private func openPendingLink() {
+        guard let u = pendingLink else { return }
+        pendingLink = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { openURL(u) }
     }
 
     private func openRoll() { pull = 0; withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { showRoll = true } }

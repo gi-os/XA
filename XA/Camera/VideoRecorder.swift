@@ -62,8 +62,20 @@ final class VideoRecorder {
         CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pb)
         guard let pb else { return }
         let e = img.extent
-        let fitted = img.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY))
-            .transformed(by: CGAffineTransform(scaleX: size.width / max(e.width, 1), y: size.height / max(e.height, 1)))
+        let sx = size.width / max(e.width, 1), sy = size.height / max(e.height, 1)
+        let placed = img.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY))
+        var fitted: CIImage
+        if abs(sx / sy - 1) < 0.01 {
+            // the take's own shape (a pixel or two off from rounding): fill it exactly
+            fitted = placed.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+        } else {
+            // A tape of another shape joined the take (POCKET 3D's 2:1 into a 4:3 one, or the
+            // other way): fitted whole, black around it, never stretched.
+            let s = min(sx, sy)
+            fitted = placed.transformed(by: CGAffineTransform(scaleX: s, y: s))
+                .transformed(by: CGAffineTransform(translationX: (size.width - e.width * s) / 2, y: (size.height - e.height * s) / 2))
+            fitted = fitted.composited(over: CIImage(color: .black).cropped(to: CGRect(origin: .zero, size: size)))
+        }
         VideoRecorder.context.render(fitted, to: pb, bounds: CGRect(origin: .zero, size: size), colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
         if adaptor.append(pb, withPresentationTime: time) { lastTime = time }
     }

@@ -81,6 +81,22 @@ final class ReleaseTests: XCTestCase {
         XCTAssertEqual(l.mode, .film)
     }
 
+    /// A QR code's link goes to the browser, bare web addresses included; text and Wi-Fi codes
+    /// are copied instead.
+    func testQRCodesOpenInTheBrowser() {
+        XCTAssertEqual(QRLink.url("https://example.com/a?b=1")?.absoluteString, "https://example.com/a?b=1")
+        XCTAssertEqual(QRLink.url("example.com/menu")?.absoluteString, "https://example.com/menu")
+        XCTAssertEqual(QRLink.url(" www.nyc.gov \n")?.absoluteString, "https://www.nyc.gov")
+        XCTAssertEqual(QRLink.url("HTTPS://EXAMPLE.COM")?.host?.lowercased(), "example.com")
+        XCTAssertEqual(QRLink.url("tel:+12125551234")?.scheme, "tel")
+        XCTAssertNil(QRLink.url("WIFI:S:home;T:WPA;P:secret;;"))
+        XCTAssertNil(QRLink.url("hello world"))
+        XCTAssertNil(QRLink.url("v1.2"))
+        XCTAssertNil(QRLink.url("https://"))
+        XCTAssertTrue(CameraModel.readsCodes(.digi) && CameraModel.readsCodes(.film) && CameraModel.readsCodes(.pro))
+        XCTAssertFalse(CameraModel.readsCodes(.video) || CameraModel.readsCodes(.booth))
+    }
+
     /// The ribbon copes with a mode it doesn't offer (the Lock Screen camera has no VIDEO).
     func testTheRibbonLandsOnAModeItOffers() {
         let modes: [CaptureMode] = [.digi, .film, .pro]

@@ -567,6 +567,28 @@ private struct TapeBox: View {
         case .cctv: cctv
         case .slitScan: slit
         case .datamosh: mosh
+        case .pocket3D: pocket3D
+        }
+    }
+
+    /// A clamshell handheld, lid up: the wide top screen with a 2:1 picture on it, the two
+    /// lenses on the lid, 480 × 240 at 20 frames a second.
+    private var pocket3D: some View {
+        let f = "Nunito-Black", ink = Color(hex: "#0E1A22")
+        return BoxCanvas(bg: Color(hex: "#1FA3C4")) {
+            RoundedRectangle(cornerRadius: 5).fill(ink).frame(width: 96, height: 58).tl(10, 9)
+            LinearGradient(colors: [Color(hex: "#8FD3F4"), Color(hex: "#DDEFF6"), Color(hex: "#9CC48A")], startPoint: .top, endPoint: .bottom)
+                .frame(width: 84, height: 42).tl(16, 17)
+            HStack(spacing: 16) {
+                ForEach(0..<2, id: \.self) { _ in
+                    Circle().fill(ink).frame(width: 12, height: 12)
+                        .overlay(Circle().fill(Color(hex: "#3B5566")).frame(width: 5, height: 5))
+                }
+            }
+            .tr(14, 14)
+            Circle().fill(Color(hex: "#FF3B30")).frame(width: 5, height: 5).tr(16, 34)
+            T("POCKET 3D", f, 17, .white).bl(10, 19)
+            T("480×240 · 20 FPS", f, 8, ink, 0.5).bl(10, 7)
         }
     }
 

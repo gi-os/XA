@@ -7,7 +7,11 @@ import UIKit
 /// remember the frames before, Super 8, Pocket and Stop Motion hold frames the way the real
 /// things ran slow.
 enum VideoLook: Int, CaseIterable, Codable, Identifiable {
-    case clean, pocket, pocketColor, super8, vhs, trails, motion, stopMotion, cctv, slitScan, datamosh
+    // (stored by number: new tapes go on the end; `shelf` is the order they're shown in)
+    case clean, pocket, pocketColor, super8, vhs, trails, motion, stopMotion, cctv, slitScan, datamosh, pocket3D
+
+    /// The tapes in the order they sit on the shelf: the pocket cameras together.
+    static let shelf: [VideoLook] = [.clean, .pocket, .pocketColor, .pocket3D, .super8, .vhs, .trails, .motion, .stopMotion, .cctv, .slitScan, .datamosh]
 
     var id: Int { rawValue }
     var title: String {
@@ -23,8 +27,15 @@ enum VideoLook: Int, CaseIterable, Codable, Identifiable {
         case .cctv: return "CCTV"
         case .slitScan: return "SLIT-SCAN"
         case .datamosh: return "DATAMOSH"
+        case .pocket3D: return "POCKET 3D"
         }
     }
+
+    /// A look that makes a picture its own size (the 3DS's 480 × 240), not the camera's.
+    var nativeSize: CGSize? { self == .pocket3D ? Pocket3DLook.size : nil }
+
+    /// Shown in the viewfinder with hard pixels, the way the console's own screen shows it.
+    var pixelated: Bool { self == .pocket || self == .pocket3D }
 
     /// The tape's colour, for the take timeline.
     var color: String {
@@ -40,16 +51,18 @@ enum VideoLook: Int, CaseIterable, Codable, Identifiable {
         case .cctv: return "#C8F56A"
         case .slitScan: return "#1B4FA0"
         case .datamosh: return "#00A6D6"
+        case .pocket3D: return "#1FA3C4"
         }
     }
 
-    /// Frames per second the look shows; the file still runs at the camera's rate and repeats frames.
+    /// Frames per second the look shows, and the file is written at (only its new frames go in).
     var heldFPS: Double? {
         switch self {
         case .super8: return 18
         case .pocket, .pocketColor: return 12
         case .stopMotion: return 8
         case .cctv: return 15
+        case .pocket3D: return 20
         default: return nil
         }
     }
@@ -58,7 +71,16 @@ enum VideoLook: Int, CaseIterable, Codable, Identifiable {
 /// Per-recording state: the last frames, the hold clock, the wobble.
 final class VideoFX {
     private var held: CIImage?
-    private var heldAt: Double = -1
+    private var heldLook: VideoLook?
+    /// When a held look's next new frame is due, on its own clock.
+    private var nextTick: Double = -1
+    /// Whether the frame `apply` just returned is a new one (false: the held one again).
+    private(set) var lastWasNew = true
+    /// Where that new frame sits in time. A held look's frames are stamped on its own clock,
+    /// so a 20 fps look writes 20 evenly spaced frames a second, not repeats of 30.
+    private(set) var lastStamp: Double = 0
+    /// The 3DS camera: its exposure and last frame carry over from one frame to the next.
+    let pocket3D = Pocket3DLook()
     private var previousOut: CIImage?
     private var previousIn: CIImage?
     private var keyframeAt: Double = 0
@@ -106,14 +128,37 @@ final class VideoFX {
         abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1 && abs(a.minX - b.minX) < 1 && abs(a.minY - b.minY) < 1
     }
 
-    func reset() { held = nil; heldAt = -1; previousOut = nil; previousIn = nil; keyframeAt = 0; history = [] }
+    func reset() {
+        held = nil; heldLook = nil; nextTick = -1; lastWasNew = true
+        previousOut = nil; previousIn = nil; keyframeAt = 0; history = []
+        pocket3D.reset()
+    }
 
-    /// `time` is seconds, monotonic. Returns the frame to show and record.
+    /// Frames a second a look shows, if it holds frames (the 3DS slows down in the dark).
+    func fps(_ look: VideoLook) -> Double? { look == .pocket3D ? pocket3D.fps : look.heldFPS }
+
+    /// `time` is seconds, monotonic. Returns the frame to show and record: the camera's size,
+    /// or the look's own (`nativeSize`).
     func apply(_ look: VideoLook, to src: CIImage, time: Double, date: Date) -> CIImage {
         let e = src.extent
-        if let fps = look.heldFPS {
-            if let held, time - heldAt < 1 / fps, held.extent == e { return held }
+        let outRect = look.nativeSize.map { CGRect(origin: .zero, size: $0) } ?? e
+        let fps = fps(look)
+        if let fps {
+            let same = heldLook == look
+            if let held, same, held.extent == outRect, nextTick >= 0, time < nextTick - 0.004 {
+                lastWasNew = false
+                return held
+            }
+            // On the look's own clock: at 20 a second, two of every three of the camera's 30.
+            // A new tape, or a frame that came late, starts the clock again from now.
+            let step = 1 / fps
+            let onTime = same && nextTick >= 0 && time >= nextTick - 0.004 && time - nextTick < step
+            lastStamp = onTime ? nextTick : time
+            nextTick = lastStamp + step
+        } else {
+            lastStamp = time
         }
+        lastWasNew = true
         if look == .motion || look == .slitScan {
             if let last = history.last, !Self.same(last.extent, e) { history = [] }
             history.append(bake(src, scale: 0.5).cropped(to: e))
@@ -132,9 +177,10 @@ final class VideoFX {
         case .cctv: out = cctv(src, date: date)
         case .slitScan: out = slitScan(src)
         case .datamosh: out = datamosh(src, time: time)
+        case .pocket3D: out = pocket3D.render(src, ctx: ctx)
         }
-        out = out.cropped(to: e)
-        if look.heldFPS != nil { held = out; heldAt = time }
+        out = out.cropped(to: outRect)
+        if fps != nil { held = out; heldLook = look }
         return out
     }
 

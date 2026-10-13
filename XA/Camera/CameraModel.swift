@@ -111,6 +111,8 @@ final class CameraModel: NSObject, ObservableObject {
     private var frameSegments: [TakeSegment] = []
     private var _recorder: VideoRecorder?
     private let fx = VideoFX()
+    /// POCKET 3D's sound (the 3DS's microphone and its 4-bit, 16 kHz code). The audio queue's.
+    private let pocketAudio = Pocket3DAudio()
     private var recordTimer: Timer?
     private let videoOutput = AVCaptureVideoDataOutput()
     private let sessionQueue = DispatchQueue(label: "xa.session")
@@ -555,9 +557,10 @@ final class CameraModel: NSObject, ObservableObject {
             if session.canAddControl(zoom) { session.addControl(zoom) }
         } else if m == .video {
             lock.lock(); let vlook = frameVideoLook; lock.unlock()
-            let looks = AVCaptureIndexPicker("Look", symbolName: "film", localizedIndexTitles: VideoLook.allCases.map { Self.controlTitle($0.title) })
-            looks.selectedIndex = vlook.rawValue
-            looks.setActionQueue(.main) { [weak self] i in self?.videoLook = VideoLook(rawValue: i) ?? .clean }
+            let shelf = VideoLook.shelf
+            let looks = AVCaptureIndexPicker("Look", symbolName: "film", localizedIndexTitles: shelf.map { Self.controlTitle($0.title) })
+            looks.selectedIndex = shelf.firstIndex(of: vlook) ?? 0
+            looks.setActionQueue(.main) { [weak self] i in self?.videoLook = shelf[min(shelf.count - 1, max(0, i))] }
             for c in [looks, zoom] as [AVCaptureControl] where session.canAddControl(c) { session.addControl(c) }
         } else {
             let bias = AVCaptureSystemExposureBiasSlider(device: dev) { [weak self] b in
@@ -629,6 +632,16 @@ final class CameraModel: NSObject, ObservableObject {
     /// a mirror shows you. The selfie camera's frames and photos arrive as its sensor reads them,
     /// landscape, and the same turn makes both upright, so what you see is what is saved. Its
     /// sensor sits the other way round from the back camera's: a three-quarter turn, not a quarter.
+    /// How dark the scene is for POCKET 3D's little sensor, from the brightness the camera
+    /// measured for this frame (APEX Bv, in the frame's Exif). Not there: bright.
+    static func sceneDarkness(_ sb: CMSampleBuffer) -> Double {
+        guard let all = CMCopyDictionaryOfAttachments(allocator: nil, target: sb, attachmentMode: kCMAttachmentMode_ShouldPropagate) as? [String: Any],
+              let exif = all[kCGImagePropertyExifDictionary as String] as? [String: Any],
+              let bv = (exif[kCGImagePropertyExifBrightnessValue as String] as? NSNumber)?.doubleValue, bv.isFinite
+        else { return 0 }
+        return Pocket3DLook.darkness(brightness: bv)
+    }
+
     static func upright(_ img: CIImage, mirror: Bool) -> CIImage {
         var out = img
         if out.extent.width > out.extent.height { out = rotated(out, clockwise: mirror ? 270 : 90) }
@@ -927,7 +940,7 @@ final class CameraModel: NSObject, ObservableObject {
 
     /// Next or previous tape in VIDEO.
     func stepTape(_ by: Int) {
-        let all = VideoLook.allCases, n = all.count
+        let all = VideoLook.shelf, n = all.count
         let i = all.firstIndex(of: videoLook) ?? 0
         videoLook = all[((i + by) % n + n) % n]
         UISelectionFeedbackGenerator().selectionChanged()
@@ -1025,6 +1038,7 @@ final class CameraModel: NSObject, ObservableObject {
     private func startRecording() {
         guard !recording else { return }
         frameQueue.async { self.fx.reset() }   // the frame queue owns the looks' state
+        audioQueue.async { self.pocketAudio.reset() }
         // The turn locks when the clip starts, so a take never flips halfway.
         lock.lock(); _wantRecord = true; _lockedTurn = _turn; frameSegments = []; lock.unlock()
         segments = []
@@ -1484,8 +1498,11 @@ final class CameraModel: NSObject, ObservableObject {
 extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         if output === audioOutput {
-            lock.lock(); let r = _recorder; lock.unlock()
-            r?.append(audio: sampleBuffer)
+            lock.lock(); let r = _recorder; let look = frameVideoLook; lock.unlock()
+            guard let r else { return }
+            // the tape playing now decides the sound too: POCKET 3D records the way a 3DS hears
+            if look == .pocket3D, let heard = pocketAudio.process(sampleBuffer) { r.append(audio: heard) }
+            else { r.append(audio: sampleBuffer) }
             return
         }
         if output === uwOutput {
@@ -1548,9 +1565,17 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             lock.lock(); let t = _lockedTurn ?? _turn; lock.unlock()
             let upright = Self.rotated(src, clockwise: t)
             var base = upright
-            if let sim = FilmCatalog.sim(dev.stack.simID), !sim.isNeutral { base = SimEngine.apply(sim, to: base, preview: true, push: dev.stack.push) }
+            // (POCKET 3D is the console's camera straight: no film on it)
+            if vlook != .pocket3D, let sim = FilmCatalog.sim(dev.stack.simID), !sim.isNeutral {
+                base = SimEngine.apply(sim, to: base, preview: true, push: dev.stack.push)
+            }
+            if vlook == .pocket3D { fx.pocket3D.dark += (Self.sceneDarkness(sampleBuffer) - fx.pocket3D.dark) * 0.05 }
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             let frame = fx.apply(vlook, to: base, time: pts.seconds, date: Date())
+            // A look that holds frames writes only its new ones, on its own clock: POCKET 3D's
+            // file is 20 even frames a second, like the 3DS's own.
+            let fresh = fx.lastWasNew
+            let at = fx.fps(vlook) == nil ? pts : CMTime(seconds: fx.lastStamp, preferredTimescale: max(pts.timescale, 600))
             lock.lock()
             var failed = false
             if _wantRecord && _recorder == nil {
@@ -1565,9 +1590,9 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             }
             lock.unlock()
             if failed { DispatchQueue.main.async { self.stopRecording() } }
-            r?.append(frame, at: pts)
+            if fresh { r?.append(frame, at: at) }
             let shown = t == 0 ? frame : Self.rotated(frame, clockwise: 360 - t)
-            preview?.show(shown, pixelated: vlook == .pocket)
+            preview?.show(shown, pixelated: vlook.pixelated)
             return
         }
         let img: CIImage
@@ -2116,17 +2141,17 @@ final class FinderMotion: ObservableObject {
     @Published var light: CGFloat = 1
 }
 
-/// PRO reads QR codes, like the system camera: the code's text, shown while it is in view.
+/// The photo modes read QR codes, like the system camera: the code shown while it is in view,
+/// a tap away from the browser.
 extension CameraModel: AVCaptureMetadataOutputObjectsDelegate {
-    /// Only PRO looks for codes; the other modes pay nothing for it.
-    /// Only PRO looks for codes: the reader is on the session only while in PRO (VIDEO, with the
-    /// mic, and the other modes never carry it). Runs on the session queue.
+    /// DIGI, FILM and PRO look for codes (on the Lock Screen too); VIDEO and BOOTH don't carry
+    /// the reader. Not alongside FILM's ultra-wide (two cameras at once). On the session queue.
+    static func readsCodes(_ m: CaptureMode) -> Bool { m == .digi || m == .film || m == .pro }
+
     func updateQR(_ m: CaptureMode) {
-        #if CAPTURE_EXTENSION
-        return   // a code can't be opened from the Lock Screen, so it isn't looked for there
-        #endif
+        let want = Self.readsCodes(m)
         let on = session.outputs.contains(qrOutput)
-        if m == .pro && !on && !(session is AVCaptureMultiCamSession) {
+        if want && !on && !(session is AVCaptureMultiCamSession) {
             session.beginConfiguration()
             if session.canAddOutput(qrOutput) {
                 session.addOutput(qrOutput)
@@ -2136,16 +2161,16 @@ extension CameraModel: AVCaptureMetadataOutputObjectsDelegate {
             if session.outputs.contains(qrOutput), qrOutput.availableMetadataObjectTypes.contains(.qr) {
                 qrOutput.metadataObjectTypes = [.qr]
             }
-        } else if m != .pro && on {
+        } else if !want && on {
             session.beginConfiguration()
             session.removeOutput(qrOutput)
             session.commitConfiguration()
         }
-        if m != .pro { DispatchQueue.main.async { self.qrCode = nil } }
+        if !want { DispatchQueue.main.async { self.qrCode = nil } }
     }
 
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput objects: [AVMetadataObject], from connection: AVCaptureConnection) {
-        guard mode == .pro,
+        guard Self.readsCodes(mode),
               let code = objects.compactMap({ ($0 as? AVMetadataMachineReadableCodeObject)?.stringValue }).first,
               !code.isEmpty else { return }
         if qrCode != code { qrCode = code }

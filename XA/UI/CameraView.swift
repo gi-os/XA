@@ -11,6 +11,9 @@ struct CameraView: View {
     /// The Lock Screen camera: swipes that would open the roll (and ask for Face ID) are off;
     /// the roll button still opens it on purpose.
     var lockScreen = false
+    /// Where a QR code's link goes. Nil: straight to the browser. (The Lock Screen camera can't
+    /// open one itself: it hands the link to the app, which opens it once the phone is unlocked.)
+    var onLink: ((URL) -> Void)? = nil
     /// The film rows are open; folded, the loaded film sits in the mode row as a little box.
     @State private var filmOpen = false
     /// Which way up the phone is held, so the film box can turn with it.
@@ -31,8 +34,10 @@ struct CameraView: View {
                 .overlay { FocusTapLayer(camera: camera, filmOpen: $filmOpen) }
                 // above the tap layer, or a tap on it only aimed focus
                 .overlay(alignment: .bottom) {
-                    if camera.mode == .pro, !lockScreen, let code = camera.qrCode {
-                        QRChip(code: code).id(code).padding(.bottom, 14)
+                    if CameraModel.readsCodes(camera.mode), let code = camera.qrCode {
+                        // above DIGI's screen junk, whose bottom rows sit where the chip would
+                        QRChip(code: code, open: onLink).id(code)
+                            .padding(.bottom, camera.mode == .digi && settings.digiOSD ? 64 : 14)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
@@ -157,7 +162,7 @@ struct CameraView: View {
         withAnimation(.snappy) {
             if horizontal { camera.stepSim(dx < 0 ? 1 : -1) }
             else if camera.mode == .video {
-                let all = VideoLook.allCases, n = all.count
+                let all = VideoLook.shelf, n = all.count
                 let i = all.firstIndex(of: camera.videoLook) ?? 0
                 camera.videoLook = all[((i + (dy < 0 ? 1 : -1)) % n + n) % n]
                 UISelectionFeedbackGenerator().selectionChanged()
@@ -462,7 +467,7 @@ private struct VideoRows: View {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
-                        ForEach(VideoLook.allCases) { l in
+                        ForEach(VideoLook.shelf) { l in
                             let on = camera.videoLook == l
                             Button { camera.videoLook = l } label: {
                                 FilmBox(item: .video(l), width: 80)
@@ -849,18 +854,35 @@ private struct ShutterBlinkView: View {
 }
 
 /// A QR code in PRO's view: tap to open a link, or copy anything else.
+/// What a QR code opens: a link with a scheme the phone knows, or a bare web address
+/// ("example.com/menu"), which goes to the browser the way it would typed in. Anything else
+/// (plain text, a Wi-Fi network) is copied instead.
+enum QRLink {
+    static let schemes: Set<String> = ["http", "https", "mailto", "tel", "sms", "facetime", "facetime-audio", "maps", "spotify", "itms-apps", "shortcuts"]
+
+    static func url(_ code: String) -> URL? {
+        let t = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, t.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { return nil }
+        if let u = URL(string: t), let s = u.scheme?.lowercased(), schemes.contains(s) {
+            return (s == "http" || s == "https") && u.host == nil ? nil : u
+        }
+        let web = #"^(?i)(www\.)?[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}(:[0-9]{1,5})?([/?#].*)?$"#
+        if t.range(of: web, options: .regularExpression) != nil { return URL(string: "https://" + t) }
+        return nil
+    }
+}
+
 private struct QRChip: View {
     let code: String
+    var open: ((URL) -> Void)?
     @State private var copied = false
     @Environment(\.openURL) private var openURL
-    private var url: URL? {
-        guard let u = URL(string: code.trimmingCharacters(in: .whitespacesAndNewlines)), let s = u.scheme?.lowercased(),
-              ["http", "https", "mailto", "tel", "sms", "facetime", "maps", "spotify", "itms-apps", "shortcuts"].contains(s) else { return nil }
-        return u
-    }
+    private var url: URL? { QRLink.url(code) }
     var body: some View {
         Button {
-            if let url { openURL(url) } else {
+            if let url {
+                if let open { open(url) } else { openURL(url) }
+            } else {
                 UIPasteboard.general.string = code
                 copied = true
             }
@@ -878,6 +900,12 @@ private struct QRChip: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(url != nil ? "Open \(code)" : "Copy \(code)")
+        // "Copied" goes back to the code after a moment
+        .task(id: copied) {
+            guard copied else { return }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            copied = false
+        }
     }
 }
 

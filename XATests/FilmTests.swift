@@ -210,7 +210,8 @@ final class FilmTests: XCTestCase {
             let fx = VideoFX()
             for i in 0..<3 {
                 let out = fx.apply(l, to: src, time: Double(i) / 30, date: Date())
-                XCTAssertEqual(out.extent, src.extent, "\(l.title)")
+                // the camera's size, or the look's own (POCKET 3D's 480 × 240)
+                XCTAssertEqual(out.extent, l.nativeSize.map { CGRect(origin: .zero, size: $0) } ?? src.extent, "\(l.title)")
                 XCTAssertNotNil(Looks.context.createCGImage(out, from: out.extent), "\(l.title)")
             }
         }

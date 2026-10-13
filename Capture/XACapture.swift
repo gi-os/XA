@@ -36,7 +36,8 @@ struct LockedCameraView: View {
         // The same camera screen as the app, so the Lock Screen, the Action button and Camera
         // Control open exactly what you know. Anything that needs the unlocked app opens it.
         CameraView(camera: camera, settings: settings, onRoll: { open("roll") }, onCustomize: { open("customize") },
-                   onFilm: { open("film") }, modes: LockSettings.modes, lockScreen: true)
+                   onFilm: { open("film") }, modes: LockSettings.modes, lockScreen: true,
+                   onLink: { open("link", link: $0) })
         .environment(\.scenePhase, .active)
         .task {
             CameraSounds.shared.prepare()
@@ -87,13 +88,16 @@ struct LockedCameraView: View {
     }
 
     /// Into the app (Face ID first), once the shots in hand are saved: the system puts the camera
-    /// away the moment the app opens, and anything still developing would be cut short.
-    private func open(_ destination: String) {
+    /// away the moment the app opens, and anything still developing would be cut short. A QR
+    /// code's link goes along, for the app to open in the browser.
+    private func open(_ destination: String, link: URL? = nil) {
         Task { @MainActor in
             var waited = 0
             while camera.developing > 0 && waited < 40 { try? await Task.sleep(nanoseconds: 100_000_000); waited += 1 }
             let activity = NSUserActivity(activityType: NSUserActivityTypeLockedCameraCapture)
-            activity.userInfo = ["open": destination]
+            var info: [String: Any] = ["open": destination]
+            if let link { info["link"] = link.absoluteString }
+            activity.userInfo = info
             try? await session.openApplication(for: activity)
         }
     }
