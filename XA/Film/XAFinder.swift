@@ -214,7 +214,8 @@ enum XAFinder {
     static func matchGain(main: CIImage, wide: CIImage, ratio: CGFloat) -> CIVector? {
         let w = wide.extent
         let mid = CGRect(x: w.midX - w.width / ratio / 2, y: w.midY - w.height / ratio / 2, width: w.width / ratio, height: w.height / ratio)
-        guard let a = average(main, main.extent), let b = average(wide, mid) else { return nil }
+        // in linear light: the gains are applied to linear pixels
+        guard let a = average(main, main.extent, linear: true), let b = average(wide, mid, linear: true) else { return nil }
         func g(_ x: Float, _ y: Float) -> CGFloat { CGFloat(min(2, max(0.5, (x + 0.002) / (y + 0.002)))) }
         return CIVector(x: g(a[0], b[0]), y: g(a[1], b[1]), z: g(a[2], b[2]))
     }
@@ -226,13 +227,15 @@ enum XAFinder {
     }
 
     private static let meter = CIContext(options: [.workingColorSpace: NSNull()])
-    private static func average(_ img: CIImage, _ r: CGRect) -> [Float]? {
+    private static let linearMeter = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB) as Any])
+    /// `linear` false: display-referred values (what the eye judges as bright); true: linear light.
+    private static func average(_ img: CIImage, _ r: CGRect, linear: Bool = false) -> [Float]? {
         let f = CIFilter.areaAverage()
         f.inputImage = img
         f.extent = r
         guard let out = f.outputImage else { return nil }
         var px = [Float](repeating: 0, count: 4)
-        meter.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        (linear ? linearMeter : meter).render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
         return px.allSatisfy { $0.isFinite } ? px : nil
     }
 

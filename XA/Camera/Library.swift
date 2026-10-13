@@ -39,18 +39,23 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
 
     private var flushing: Set<URL> = []
 
-    /// Saves whatever is waiting, oldest first, and removes each once Photos has it.
+    /// Saves whatever is waiting, oldest first, and removes each once Photos has it. Add-only
+    /// access is enough; files go in by URL (never all loaded into memory at once).
     func flushPending() {
         let s = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        guard s == .authorized || s == .limited, let dir = Self.pendingFolder,
-              let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
+        guard s == .authorized || s == .limited || PHPhotoLibrary.authorizationStatus(for: .addOnly) == .authorized,
+              let dir = Self.pendingFolder,
+              let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return }
         for url in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where !flushing.contains(url) {
-            guard let data = try? Data(contentsOf: url) else { continue }
-            let type = UTType(filenameExtension: url.pathExtension) ?? .jpeg
+            let type = UTType(filenameExtension: url.pathExtension.lowercased()) ?? .jpeg
             flushing.insert(url)
-            save(data: data, type: type) { ok in
-                if ok { try? FileManager.default.removeItem(at: url) }
-                self.flushing.remove(url)
+            if type.conforms(to: .movie) {
+                save(video: url) { _ in self.flushing.remove(url) }   // moved into Photos on success
+            } else {
+                save(file: url, type: type) { ok in
+                    if ok { try? FileManager.default.removeItem(at: url) }
+                    self.flushing.remove(url)
+                }
             }
         }
     }
@@ -69,18 +74,40 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     private var savedIDs: [String] { UserDefaults.standard.stringArray(forKey: Self.idsKey) ?? [] }
     private func remember(_ id: String) {
         var ids = savedIDs
+        guard !ids.contains(id) else { return }
         ids.append(id)
         UserDefaults.standard.set(ids, forKey: Self.idsKey)
     }
 
+    /// A picture the Lock Screen camera put in Photos itself: onto the roll and into the album.
+    func adopt(_ id: String) {
+        remember(id); file(id); scheduleReload()
+    }
+
+    /// The XA album: by the id XA made it with, else by its title.
+    private static let albumKey = "xaAlbumID"
     private func album() -> PHAssetCollection? {
+        if let id = UserDefaults.standard.string(forKey: Self.albumKey),
+           let a = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [id], options: nil).firstObject { return a }
         let o = PHFetchOptions()
         o.predicate = NSPredicate(format: "title = %@", Self.title)
-        return PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: o).firstObject
+        let a = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: o).firstObject
+        if let a { UserDefaults.standard.set(a.localIdentifier, forKey: Self.albumKey) }
+        return a
+    }
+    /// Album filing one at a time: a burst of first saves made several "XA" albums.
+    private let albumQueue = DispatchQueue(label: "xa.album")
+
+    private var reloadQueued = false
+    /// Many changes in a row (a save, its album filing, iCloud) reload once.
+    func scheduleReload() {
+        guard !reloadQueued else { return }
+        reloadQueued = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.reloadQueued = false; self.reload() }
     }
 
     func reload() {
-        guard authorized else { assets = []; return }
+        guard authorized else { if !assets.isEmpty { assets = [] }; return }
         var seen = Set<String>()
         var list: [PHAsset] = []
         func take(_ r: PHFetchResult<PHAsset>) {
@@ -92,11 +119,15 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
         let ids = savedIDs
         if !ids.isEmpty { take(PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)) }
         list.sort { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
-        assets = list
+        // published only when the roll really changed: every publish redraws the whole app
+        if list.map(\.localIdentifier) != assets.map(\.localIdentifier)
+            || zip(list, assets).contains(where: { $0.modificationDate != $1.modificationDate }) {
+            assets = list
+        }
     }
 
     func photoLibraryDidChange(_ changeInstance: PHChange) {
-        DispatchQueue.main.async { self.reload() }
+        DispatchQueue.main.async { self.scheduleReload() }
     }
 
     static func clock(_ seconds: Double) -> String {
@@ -104,14 +135,15 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
         return String(format: "%d:%02d", s / 60, s % 60)
     }
 
+    private static let dayFormat: DateFormatter = { let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("EEEEMMMd"); return f }()
+
     /// Days, newest first, for the roll.
     var days: [(title: String, assets: [PHAsset])] {
         let cal = Calendar.current
         var out: [(title: String, assets: [PHAsset])] = []
         var current: Date?
         var bucket: [PHAsset] = []
-        let fmt = DateFormatter()
-        fmt.dateFormat = "EEEE d MMM"
+        let fmt = Self.dayFormat
         func title(_ d: Date) -> String {
             if cal.isDateInToday(d) { return "TODAY" }
             if cal.isDateInYesterday(d) { return "YESTERDAY" }
@@ -131,19 +163,35 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     /// or add-only), then into the XA album, which needs full access. A failed album step never
     /// loses the picture.
     func save(data: Data, type: UTType, completion: ((Bool) -> Void)? = nil) {
-        let write = {
+        save(add: { req in
+            let o = PHAssetResourceCreationOptions()
+            o.uniformTypeIdentifier = type.identifier
+            req.addResource(with: .photo, data: data, options: o)
+        }, completion: completion)
+    }
+
+    /// The same from a file (nothing loaded into memory).
+    func save(file url: URL, type: UTType, completion: ((Bool) -> Void)? = nil) {
+        save(add: { req in
+            let o = PHAssetResourceCreationOptions()
+            o.uniformTypeIdentifier = type.identifier
+            req.addResource(with: .photo, fileURL: url, options: o)
+        }, completion: completion)
+    }
+
+    private func save(add: @escaping (PHAssetCreationRequest) -> Void, completion: ((Bool) -> Void)?) {
+        let write = { (addOnly: Bool) in
             var id: String?
             PHPhotoLibrary.shared().performChanges({
                 let req = PHAssetCreationRequest.forAsset()
-                let o = PHAssetResourceCreationOptions()
-                o.uniformTypeIdentifier = type.identifier
-                req.addResource(with: .photo, data: data, options: o)
+                add(req)
                 id = req.placeholderForCreatedAsset?.localIdentifier
             }, completionHandler: { ok, _ in
                 DispatchQueue.main.async {
                     guard ok else { completion?(false); return }
-                    if let id { self.remember(id); self.file(id) }
-                    self.reload()
+                    // remembered even without read access, so the roll shows it once it has access
+                    if let id { self.remember(id); if !addOnly { self.file(id) } }
+                    self.scheduleReload()
                     completion?(true)
                 }
             })
@@ -153,40 +201,43 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
             PHPhotoLibrary.requestAuthorization(for: .readWrite) { s in
                 DispatchQueue.main.async {
                     self.apply(s)
-                    if s == .authorized || s == .limited { write() } else { self.saveAddOnly(data, type, completion) }
+                    if s == .authorized || s == .limited { write(false) } else { self.addOnly(write, completion) }
                 }
             }
         case .denied, .restricted:
-            saveAddOnly(data, type, completion)
+            addOnly(write, completion)
         default:
-            write()
+            write(false)
         }
     }
 
-    /// Into the XA album, when Photos lets XA see albums.
-    private func file(_ id: String) {
-        guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized,
-              let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject else { return }
-        let existing = album()
-        PHPhotoLibrary.shared().performChanges({
-            if let existing {
-                PHAssetCollectionChangeRequest(for: existing)?.addAssets([asset] as NSArray)
-            } else {
-                PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: Self.title).addAssets([asset] as NSArray)
+    /// Without read access, XA can still add the picture to Photos (it just can't show it yet).
+    private func addOnly(_ write: @escaping (Bool) -> Void, _ completion: ((Bool) -> Void)?) {
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { s in
+            DispatchQueue.main.async {
+                guard s == .authorized || s == .limited else { completion?(false); return }
+                write(true)
             }
-        }, completionHandler: nil)
+        }
     }
 
-    /// Without read access, XA can still add the picture to Photos (it just can't show it).
-    private func saveAddOnly(_ data: Data, _ type: UTType, _ completion: ((Bool) -> Void)?) {
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { s in
-            guard s == .authorized || s == .limited else { DispatchQueue.main.async { completion?(false) }; return }
-            PHPhotoLibrary.shared().performChanges({
-                let req = PHAssetCreationRequest.forAsset()
-                let o = PHAssetResourceCreationOptions()
-                o.uniformTypeIdentifier = type.identifier
-                req.addResource(with: .photo, data: data, options: o)
-            }, completionHandler: { ok, _ in DispatchQueue.main.async { completion?(ok) } })
+    /// Into the XA album, when Photos lets XA see albums. One at a time, so the album is made once.
+    private func file(_ id: String) {
+        guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else { return }
+        albumQueue.async {
+            guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject else { return }
+            let existing = self.album()
+            var made: String?
+            try? PHPhotoLibrary.shared().performChangesAndWait {
+                if let existing {
+                    PHAssetCollectionChangeRequest(for: existing)?.addAssets([asset] as NSArray)
+                } else {
+                    let req = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: Self.title)
+                    req.addAssets([asset] as NSArray)
+                    made = req.placeholderForCreatedAssetCollection.localIdentifier
+                }
+            }
+            if let made { UserDefaults.standard.set(made, forKey: Self.albumKey) }
         }
     }
 
@@ -217,10 +268,13 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     }
 
     func thumbnail(_ asset: PHAsset, side: CGFloat, _ done: @escaping (UIImage?) -> Void) {
-        if isTransparent(asset) {
+        if isTransparentCached(asset) {
             data(asset) { d, _ in
-                let img = d.flatMap { self.decode($0, maxSide: side * 2) }
-                DispatchQueue.main.async { done(img) }
+                // decoded off the main thread
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let img = d.flatMap { self.decode($0, maxSide: side * 2) }
+                    DispatchQueue.main.async { done(img) }
+                }
             }
             return
         }
@@ -228,33 +282,60 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
         images.requestImage(for: asset, targetSize: CGSize(width: side, height: side), contentMode: .aspectFill, options: o) { img, _ in done(img) }
     }
 
+    /// For the viewer: never bigger than 4096 on the long side (a 48MP photo decoded whole is
+    /// 190 MB, and the viewer keeps its neighbours too).
     func full(_ asset: PHAsset, _ done: @escaping (UIImage?) -> Void) {
-        if isTransparent(asset) {
+        let cap: CGFloat = 4096
+        let long = CGFloat(max(asset.pixelWidth, asset.pixelHeight))
+        let k = long > cap ? cap / long : 1
+        if isTransparentCached(asset) {
             data(asset) { d, _ in
-                let img = d.flatMap { self.decode($0, maxSide: nil) }
-                DispatchQueue.main.async { done(img) }
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let img = d.flatMap { self.decode($0, maxSide: cap) }
+                    DispatchQueue.main.async { done(img) }
+                }
             }
             return
         }
-        let o = PHImageRequestOptions(); o.deliveryMode = .highQualityFormat; o.isNetworkAccessAllowed = true
-        images.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: o) { img, _ in done(img) }
+        let o = PHImageRequestOptions(); o.deliveryMode = .highQualityFormat; o.resizeMode = .exact; o.isNetworkAccessAllowed = true
+        let size = CGSize(width: max(1, CGFloat(asset.pixelWidth) * k), height: max(1, CGFloat(asset.pixelHeight) * k))
+        images.requestImage(for: asset, targetSize: size, contentMode: .aspectFit, options: o) { img, _ in done(img) }
     }
 
+    /// A movie, with any access: Limited and add-only access can't touch albums, so the movie
+    /// goes in first and into the album only with full access (in one change it failed whole).
     func save(video url: URL, completion: ((String?) -> Void)? = nil) {
-        let existing = album()
-        var id: String?
-        PHPhotoLibrary.shared().performChanges({
-            let req = PHAssetCreationRequest.forAsset()
-            let o = PHAssetResourceCreationOptions(); o.shouldMoveFile = true
-            req.addResource(with: .video, fileURL: url, options: o)
-            guard let ph = req.placeholderForCreatedAsset else { return }
-            id = ph.localIdentifier
-            if let existing {
-                PHAssetCollectionChangeRequest(for: existing)?.addAssets([ph] as NSArray)
-            } else {
-                PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: Self.title).addAssets([ph] as NSArray)
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .notDetermined {
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { s in
+                DispatchQueue.main.async { self.apply(s); self.save(video: url, completion: completion) }
             }
-        }, completionHandler: { ok, _ in DispatchQueue.main.async { completion?(ok ? id : nil) } })
+            return
+        }
+        let write = { (canRead: Bool) in
+            var id: String?
+            PHPhotoLibrary.shared().performChanges({
+                let req = PHAssetCreationRequest.forAsset()
+                let o = PHAssetResourceCreationOptions(); o.shouldMoveFile = true
+                req.addResource(with: .video, fileURL: url, options: o)
+                id = req.placeholderForCreatedAsset?.localIdentifier
+            }, completionHandler: { ok, _ in
+                DispatchQueue.main.async {
+                    if ok, let id { self.remember(id); if canRead { self.file(id) }; self.scheduleReload() }
+                    completion?(ok ? id : nil)
+                }
+            })
+        }
+        if status == .authorized || status == .limited {
+            write(true)
+        } else {
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { s in
+                DispatchQueue.main.async {
+                    guard s == .authorized || s == .limited else { completion?(nil); return }
+                    write(false)
+                }
+            }
+        }
     }
 
     func playerItem(_ asset: PHAsset, _ done: @escaping (AVPlayerItem?) -> Void) {

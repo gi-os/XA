@@ -49,11 +49,15 @@ enum BoothDeco: String, CaseIterable, Codable {
 
 extension Booth {
     /// The whole booth: face, skin, then the frame's backdrop and doodles.
-    static func develop(_ src: CIImage, _ skin: BoothSkin, deco: BoothDeco?, faces: Eyes?, preview: Bool) -> CIImage {
+    /// `mask`: in the viewfinder, the person found a moment ago off the frame queue (segmenting
+    /// every frame here stalled the viewfinder); nil there means no backdrop yet. The photo
+    /// segments itself, accurately.
+    static func develop(_ src: CIImage, _ skin: BoothSkin, deco: BoothDeco?, faces: Eyes?, preview: Bool, mask cached: CIImage? = nil) -> CIImage {
         var person = Booth.skin(src, skin, eyes: faces)
         guard let deco else { return person }
         let e = person.extent
-        if let back = Deco.backdrop(deco, size: e.size), let mask = personMask(person, preview: preview) {
+        let raw: CIImage? = preview ? cached : segment(person, quality: .accurate)
+        if let back = Deco.backdrop(deco, size: e.size), let raw, let mask = shaped(raw, e) {
             let b = CIFilter.blendWithMask()
             b.inputImage = person
             b.backgroundImage = back
@@ -66,17 +70,28 @@ extension Booth {
         return person
     }
 
-    /// Who is a person and who is the wall, from the iPhone's person segmentation.
-    static func personMask(_ img: CIImage, preview: Bool) -> CIImage? {
-        let req = VNGeneratePersonSegmentationRequest()
-        req.qualityLevel = preview ? .balanced : .accurate
+    /// Who is a person and who is the wall, from the iPhone's person segmentation: the raw
+    /// mask, scaled to `img`'s extent. `request` is kept between viewfinder frames (Vision
+    /// smooths its masks over time); a photo makes its own.
+    static func segment(_ img: CIImage, quality: VNGeneratePersonSegmentationRequest.QualityLevel,
+                        request: VNGeneratePersonSegmentationRequest? = nil) -> CIImage? {
+        let req = request ?? VNGeneratePersonSegmentationRequest()
+        req.qualityLevel = quality
         req.outputPixelFormat = kCVPixelFormatType_OneComponent8
         let handler = VNImageRequestHandler(ciImage: img, options: [:])
         guard (try? handler.perform([req])) != nil, let pb = req.results?.first?.pixelBuffer else { return nil }
-        let m = CIImage(cvPixelBuffer: pb)
+        // copied out, so Vision's buffer goes back to it
+        let m0 = CIImage(cvPixelBuffer: pb)
+        guard let cg = Looks.context.createCGImage(m0, from: m0.extent) else { return nil }
+        let m = CIImage(cgImage: cg)
         let e = img.extent
         let sx = e.width / max(m.extent.width, 1), sy = e.height / max(m.extent.height, 1)
-        let scaled = m.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+        return m.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+            .transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY))
+    }
+
+    /// The raw mask made generous and soft, over `e`.
+    static func shaped(_ scaled: CIImage, _ e: CGRect) -> CIImage? {
         let short = min(e.width, e.height)
         // Generous: anything the model half thinks is you (hair, shoulders, a hand) counts as you,
         // and the cut is grown a little past your edge, so the backdrop never bites into you.

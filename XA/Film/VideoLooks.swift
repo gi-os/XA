@@ -177,10 +177,7 @@ final class VideoFX {
     /// Soft, low-resolution, colour bleeding sideways, scanlines, the odd tracking band.
     private func vhs(_ src: CIImage, time: Double, date: Date) -> CIImage {
         let e = src.extent
-        let k: CGFloat = 360 / max(e.width, 1)
-        var img = src.transformed(by: CGAffineTransform(scaleX: k, y: k * 0.9))
-            .transformed(by: CGAffineTransform(scaleX: 1 / k, y: 1 / (k * 0.9)))
-            .cropped(to: e)
+        var img = Self.soften(src, width: 360, squash: 0.9)
         let cc = CIFilter.colorControls(); cc.inputImage = img; cc.saturation = 1.3; cc.contrast = 1.05
         img = (cc.outputImage ?? img).cropped(to: e)
         // Chromatic aberration: the three channels don't land in the same place. Red is
@@ -194,12 +191,11 @@ final class VideoFX {
                 .concatenating(CGAffineTransform(scaleX: scale, y: scale))
                 .concatenating(CGAffineTransform(translationX: c.x + dx, y: c.y))
         }
-        let red = channel(img.clampedToExtent(), r: 1, g: 0, b: 0).transformed(by: about(1 + spread, dx: shift)).cropped(to: e)
-        let blue = channel(img.clampedToExtent(), r: 0, g: 0, b: 1).transformed(by: about(1 - spread, dx: -shift)).cropped(to: e)
-        let green = channel(img, r: 0, g: 1, b: 0)
-        let rg = CIFilter.additionCompositing(); rg.inputImage = red; rg.backgroundImage = green
-        let rgb = CIFilter.additionCompositing(); rgb.inputImage = blue; rgb.backgroundImage = rg.outputImage
-        img = (rgb.outputImage ?? img).cropped(to: e)
+        // One kernel takes each channel from its own shifted copy, alpha 1 (three added layers
+        // summed their alpha to 3, which brightened the recording).
+        let red = img.clampedToExtent().transformed(by: about(1 + spread, dx: shift))
+        let blue = img.clampedToExtent().transformed(by: about(1 - spread, dx: -shift))
+        img = (Self.merge?.apply(extent: e, arguments: [red, img, blue]) ?? img).cropped(to: e)
         // Tape noise, alive: coarse grain that moves every frame.
         img = FilmGrain.apply(img, amount: 0.8, size: 0.9, moving: true)
         // Scanlines.
@@ -216,8 +212,7 @@ final class VideoFX {
         if noiseBandY >= 0 {
             let band = CGRect(x: e.minX, y: noiseBandY - e.height * 0.04, width: e.width, height: e.height * 0.04)
             if let n = CIFilter.randomGenerator().outputImage {
-                let g = CIFilter.colorControls(); g.inputImage = n.transformed(by: CGAffineTransform(scaleX: 6, y: 1)); g.saturation = 0
-                if let noise = g.outputImage?.cropped(to: band) {
+                if let noise = FilmGrain.rawGrey?.apply(extent: .infinite, arguments: [n])?.transformed(by: CGAffineTransform(scaleX: 6, y: 1)).cropped(to: band) {
                     let sc = CIFilter.screenBlendMode(); sc.inputImage = noise; sc.backgroundImage = img
                     img = (sc.outputImage ?? img).cropped(to: e)
                 }
@@ -231,13 +226,21 @@ final class VideoFX {
         return img
     }
 
-    private func channel(_ img: CIImage, r: CGFloat, g: CGFloat, b: CGFloat) -> CIImage {
-        let m = CIFilter.colorMatrix(); m.inputImage = img
-        m.rVector = CIVector(x: r, y: 0, z: 0, w: 0)
-        m.gVector = CIVector(x: 0, y: g, z: 0, w: 0)
-        m.bVector = CIVector(x: 0, y: 0, z: b, w: 0)
-        m.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
-        return (m.outputImage ?? img).clampedToExtent()
+    static let merge = CIColorKernel(source: "kernel vec4 xaRGB(__sample r, __sample g, __sample b) { return vec4(r.r, g.g, b.b, 1.0); }")
+
+    /// A low-resolution picture: really down to `width` (and `squash` of the height) and back up,
+    /// smooth. Two plain scales in a row fold into nothing, so the first one is a real resample.
+    static func soften(_ img: CIImage, width: CGFloat, squash: CGFloat) -> CIImage {
+        let e = img.extent
+        let k = min(1, width / max(e.width, 1))
+        guard k < 1 else { return img }
+        let down = CIFilter.lanczosScaleTransform()
+        down.inputImage = img.clampedToExtent().cropped(to: e.insetBy(dx: -8, dy: -8))
+        down.scale = Float(k * squash)
+        down.aspectRatio = Float(1 / squash)
+        guard let small = down.outputImage else { return img }
+        let back = small.samplingLinear().transformed(by: CGAffineTransform(scaleX: 1 / k, y: 1 / (k * squash)))
+        return back.clampedToExtent().cropped(to: e)
     }
 
     /// Each frame laid over the last ones, so anything moving leaves a tail.
@@ -285,9 +288,7 @@ final class VideoFX {
         let cc = CIFilter.colorControls(); cc.inputImage = src; cc.saturation = 0.15; cc.contrast = 1.25; cc.brightness = -0.03
         let tint = CIFilter.colorMatrix(); tint.inputImage = cc.outputImage
         tint.rVector = CIVector(x: 0.85, y: 0, z: 0, w: 0); tint.gVector = CIVector(x: 0, y: 1.0, z: 0, w: 0); tint.bVector = CIVector(x: 0, y: 0, z: 0.82, w: 0)
-        let k: CGFloat = 480 / max(e.width, 1)
-        var img = (tint.outputImage ?? src).cropped(to: e)
-            .transformed(by: CGAffineTransform(scaleX: k, y: k)).transformed(by: CGAffineTransform(scaleX: 1 / k, y: 1 / k)).cropped(to: e)
+        var img = Self.soften((tint.outputImage ?? src).cropped(to: e), width: 480, squash: 1)
         img = FilmGrain.apply(img, amount: 0.5, size: 0.2, moving: true)
         if let osd = CCTVOverlay.image(size: e.size, date: date) {
             img = osd.transformed(by: CGAffineTransform(translationX: e.minX, y: e.minY)).composited(over: img)

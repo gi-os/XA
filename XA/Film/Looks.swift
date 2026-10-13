@@ -96,8 +96,11 @@ enum Looks {
         return (f.outputImage ?? i).cropped(to: i.extent)
     }
 
+    /// The tables are built from sRGB palettes and sRGB levels, so they are applied in sRGB (in
+    /// the linear working space the palettes came out washed and the thresholds fell dark).
     private static func cube(_ data: Data, _ i: CIImage) -> CIImage {
-        let f = CIFilter.colorCube(); f.inputImage = i; f.cubeDimension = 32; f.cubeData = data
+        let f = CIFilter.colorCubeWithColorSpace(); f.inputImage = i; f.cubeDimension = 32; f.cubeData = data
+        if let cs = CGColorSpace(name: CGColorSpace.sRGB) { f.colorSpace = cs }
         return f.outputImage ?? i
     }
 

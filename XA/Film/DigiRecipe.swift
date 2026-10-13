@@ -139,8 +139,7 @@ extension DigicamFX {
         gain.rVector = CIVector(x: g, y: 0, z: 0, w: 0); gain.gVector = CIVector(x: 0, y: g * 0.96, z: 0, w: 0); gain.bVector = CIVector(x: 0, y: 0, z: g * 0.9, w: 0)
         gain.aVector = CIVector(x: 0, y: 0, z: 0, w: 0); gain.biasVector = CIVector(x: 0, y: 0, z: 0, w: 1)
         guard let line = gain.outputImage?.cropped(to: e) else { return img }
-        let add = CIFilter.screenBlendMode(); add.inputImage = line; add.backgroundImage = img
-        return (add.outputImage ?? img).cropped(to: e)
+        return (screenUp?.apply(extent: e, arguments: [img, line]) ?? img).cropped(to: e)
     }
 
     /// A warm leak from one edge. `seed` picks the edge, so a photo keeps its leak.
@@ -163,7 +162,10 @@ extension DigicamFX {
         g.color0 = CIColor(red: 1, green: 0.42 * 1, blue: 0.12, alpha: 0.85 * a)
         g.color1 = CIColor(red: 1, green: 0.2, blue: 0.05, alpha: 0)
         guard let glow = g.outputImage?.cropped(to: e) else { return img }
-        let s = CIFilter.screenBlendMode(); s.inputImage = glow; s.backgroundImage = img
-        return (s.outputImage ?? img).cropped(to: e)
+        return (screenUp?.apply(extent: e, arguments: [img, glow]) ?? img).cropped(to: e)
     }
+
+    /// Screen, but never darker than the picture: a plain screen over values above white (an
+    /// HDR highlight, a sharpening overshoot) pulled them down and left dark rims round lights.
+    static let screenUp = CIColorKernel(source: "kernel vec4 xaScreenUp(__sample b, __sample a) { vec3 s = clamp(a.rgb, 0.0, 1.0); return vec4(max(b.rgb, s + b.rgb - s * b.rgb), b.a); }")
 }

@@ -7,23 +7,24 @@ import CoreImage.CIFilterBuiltins
 enum FilmGrain {
     /// `moving`: a fresh patch of noise each call, so video grain dances instead of sitting
     /// on the lens like dirt. Stills leave it off and stay repeatable.
-    static func apply(_ img: CIImage, amount: Double, size: Double, moving: Bool = false) -> CIImage {
+    static func apply(_ img: CIImage, amount: Double, size: Double, moving: Bool = false, seed: Int = 0) -> CIImage {
         guard amount > 0, let rnd = CIFilter.randomGenerator().outputImage else { return img }
         let e = img.extent
         // A grain is a fraction of the frame, never a single pixel: at 2MP a fine grain is about
         // two pixels across and a coarse one five. Per-pixel noise reads as a bad sensor.
         let unit: CGFloat = max(1, min(e.width, e.height) / 640)
         let cell: CGFloat = unit * (1.1 + CGFloat(size) * 2.2)
-        // One channel of noise, grey.
-        let mono = CIFilter.colorMatrix()
-        mono.inputImage = rnd
-        mono.rVector = CIVector(x: 1, y: 0, z: 0, w: 0)
-        mono.gVector = CIVector(x: 1, y: 0, z: 0, w: 0)
-        mono.bVector = CIVector(x: 1, y: 0, z: 0, w: 0)
-        mono.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
-        mono.biasVector = CIVector(x: 0, y: 0, z: 0, w: 1)
-        guard let grey = mono.outputImage else { return img }
-        let jump = moving ? CGAffineTransform(translationX: CGFloat.random(in: -4000...4000), y: CGFloat.random(in: -4000...4000)) : .identity
+        // One channel of noise, grey. The generator's raw values are used as they are: a colour
+        // matrix would un-premultiply its random alpha and bias every grain bright.
+        guard let grey = rawGrey?.apply(extent: .infinite, arguments: [rnd]) else { return img }
+        // A still keeps its own grain (its seed); video takes a fresh patch every frame.
+        let jump: CGAffineTransform
+        if moving {
+            jump = CGAffineTransform(translationX: CGFloat(Int.random(in: -4000...4000)), y: CGFloat(Int.random(in: -4000...4000)))
+        } else {
+            var g = SeededRandom(seed &* 31 &+ 7)
+            jump = CGAffineTransform(translationX: CGFloat(Int(g.next() * 8000) - 4000), y: CGFloat(Int(g.next() * 8000) - 4000))
+        }
         let scaled = grey.transformed(by: jump).transformed(by: CGAffineTransform(scaleX: cell, y: cell))
         // Clumps: a little blur, then the contrast the blur took away put back.
         let blur = CIFilter.gaussianBlur()
@@ -56,13 +57,11 @@ enum FilmGrain {
         weigh.inputImage = noise
         weigh.backgroundImage = mask
         guard let weighted = weigh.outputImage else { return img }
-        let clear = CIFilter.colorMatrix()
-        clear.inputImage = weighted
-        clear.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
-        guard let grain = clear.outputImage?.cropped(to: e) else { return img }
-        let add = CIFilter.additionCompositing()
-        add.inputImage = grain
-        add.backgroundImage = img
-        return (add.outputImage ?? img).cropped(to: e)
+        // Added as light, the picture's own alpha kept (a layer with alpha 0 would add nothing).
+        return addKeep?.apply(extent: e, arguments: [img, weighted.cropped(to: e)])?.cropped(to: e) ?? img
     }
+
+    /// The random generator's raw red as a grey, alpha 1 (no un-premultiplying of its random alpha).
+    static let rawGrey = CIColorKernel(source: "kernel vec4 xaRawGrey(__sample s) { return vec4(s.r, s.r, s.r, 1.0); }")
+    static let addKeep = CIColorKernel(source: "kernel vec4 xaAddKeep(__sample b, __sample l) { return vec4(b.rgb + l.rgb * b.a, b.a); }")
 }

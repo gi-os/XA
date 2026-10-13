@@ -50,7 +50,7 @@ enum DigicamFX {
             if r.jpeg.level > 0 { out = jpeg(out, quality: r.jpegQuality) }
         }
         if r.leak.level > 0 { out = leak(out, amount: r.leak.level, seed: seed) }
-        if r.grain.level > 0 { out = FilmGrain.apply(out, amount: r.grain.level, size: 0.5) }
+        if r.grain.level > 0 { out = FilmGrain.apply(out, amount: r.grain.level, size: 0.5, seed: seed) }
         return out
     }
 

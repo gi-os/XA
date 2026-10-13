@@ -315,7 +315,8 @@ enum SimEngine {
         f.cubeData = cube(for: s)
         if let cs = CGColorSpace(name: CGColorSpace.sRGB) { f.colorSpace = cs }
         var out = (f.outputImage ?? img).cropped(to: e)
-        if s.grain > 0 { out = grain(out, amount: s.grain, size: s.grainSize) }
+        // A photo keeps its own grain; the finder's moves, so it never sits on the lens like dirt.
+        if s.grain > 0 { out = FilmGrain.apply(out, amount: s.grain, size: s.grainSize, moving: seed == nil, seed: seed ?? 0) }
         if s.vignette > 0 {
             let v = CIFilter.vignetteEffect()
             v.inputImage = out
@@ -364,12 +365,9 @@ enum SimEngine {
             m.rVector = CIVector(x: wt, y: 0, z: 0, w: 0)
             m.gVector = CIVector(x: 0, y: wt, z: 0, w: 0)
             m.bVector = CIVector(x: 0, y: 0, z: wt, w: 0)
-            m.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+            m.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)   // alpha 0 would make the layer add nothing
             guard let layer = m.outputImage else { continue }
-            if let s0 = sum {
-                let add = CIFilter.additionCompositing(); add.inputImage = layer; add.backgroundImage = s0
-                sum = add.outputImage
-            } else { sum = layer }
+            sum = sum.map { FilmLab.addLight($0, layer) } ?? layer
         }
         return sum?.transformed(by: CGAffineTransform(scaleX: 1 / q, y: 1 / q)).cropped(to: e)
     }
@@ -386,11 +384,8 @@ enum SimEngine {
             t.rVector = CIVector(x: a, y: 0, z: 0, w: 0)
             t.gVector = CIVector(x: 0, y: a * 0.97, z: 0, w: 0)
             t.bVector = CIVector(x: 0, y: 0, z: a * 0.9, w: 0)
-            t.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
-            if let tinted = t.outputImage {
-                let add = CIFilter.additionCompositing(); add.inputImage = tinted; add.backgroundImage = out
-                out = (add.outputImage ?? out).cropped(to: e)
-            }
+            t.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+            if let tinted = t.outputImage { out = FilmLab.addLight(out, tinted.cropped(to: e)).cropped(to: e) }
         }
         if halation > 0 {
             // The glow's brightness, not its colour: halation is red whatever the light was.
@@ -404,11 +399,8 @@ enum SimEngine {
                 t.rVector = CIVector(x: CGFloat(tone.r) * a, y: 0, z: 0, w: 0)
                 t.gVector = CIVector(x: 0, y: CGFloat(tone.g) * a, z: 0, w: 0)
                 t.bVector = CIVector(x: 0, y: 0, z: CGFloat(tone.b) * a, w: 0)
-                t.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
-                if let tinted = t.outputImage {
-                    let add = CIFilter.additionCompositing(); add.inputImage = tinted; add.backgroundImage = out
-                    out = (add.outputImage ?? out).cropped(to: e)
-                }
+                t.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+                if let tinted = t.outputImage { out = FilmLab.addLight(out, tinted.cropped(to: e)).cropped(to: e) }
             }
         }
         return out

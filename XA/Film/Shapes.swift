@@ -124,10 +124,13 @@ enum Shapes {
         }
         guard let cg = img.cgImage else { return nil }
         let m = CIImage(cgImage: cg)
-        lock.lock()
-        if masks.count > 16 { masks.removeAll() }
-        masks[key] = m
-        lock.unlock()
+        // Only viewfinder-size masks are kept: a photo-size one is 50 MB and is made once.
+        if size.width * size.height <= 2_500_000 {
+            lock.lock()
+            if masks.count > 16 { masks.removeAll() }
+            masks[key] = m
+            lock.unlock()
+        }
         return m.transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
     }
 
@@ -191,7 +194,9 @@ enum Shapes {
         let e = img.extent
         let layout = instantLayout(for: e.size, kind: kind)
         let win = layout.window.size
-        let crop = CGRect(x: e.midX - win.width / 2, y: e.midY - win.height / 2, width: win.width, height: win.height)
+        // whole pixels: a half-pixel origin resampled the print soft with a half-covered edge
+        let crop = CGRect(x: (e.midX - win.width / 2).rounded(), y: (e.midY - win.height / 2).rounded(),
+                          width: win.width.rounded(), height: win.height.rounded())
         var photo = img.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
         let paperRect = CGRect(origin: .zero, size: layout.paper)
         let paperImg = CIImage(color: paper).cropped(to: paperRect)

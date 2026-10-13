@@ -100,10 +100,29 @@ struct DevelopSettings {
     /// FILM's finder peek: develop the frame through the full lab (as the photo will be), not
     /// the quick viewfinder cube.
     var accurate = false
+    /// BOOTH's viewfinder: the person found a moment ago off the frame queue.
+    var boothMask: CIImage? = nil
 }
 
 /// The darkroom: the same chain for the viewfinder and for the saved photograph.
 enum Darkroom {
+    /// Down to `longEdge` at whole pixels, edges clamped first: an unclamped resample reads
+    /// transparency past the edges, and rounding the size up left a half-covered edge row that
+    /// the film then printed too bright or too dark.
+    static func scaled(_ img: CIImage, longEdge: CGFloat) -> CIImage {
+        let e = img.extent
+        let s = longEdge / max(e.width, e.height, 1)
+        guard s < 1 else { return img }
+        let size = CGSize(width: (e.width * s).rounded(.down), height: (e.height * s).rounded(.down))
+        let down = CIFilter.lanczosScaleTransform()
+        down.inputImage = img.clampedToExtent().cropped(to: e.insetBy(dx: -16, dy: -16))
+        down.scale = Float(s)
+        guard let o = down.outputImage else { return img }
+        let origin = CGPoint(x: (e.minX * s).rounded(.up), y: (e.minY * s).rounded(.up))
+        return o.cropped(to: CGRect(origin: origin, size: size))
+            .transformed(by: CGAffineTransform(translationX: -origin.x, y: -origin.y))
+    }
+
     /// Returns the developed image and whether it has transparent pixels.
     /// `dateShift` pushes the date back down and out of the frame (0 = in place, 1 = gone),
     /// for the slide when switching from PRO to DIGI.
@@ -118,14 +137,9 @@ enum Darkroom {
             // of cut-outs, warps and doodles light enough for any phone.
             var src = src
             let long = max(src.extent.width, src.extent.height)
-            if !preview && long > 2400 {
-                let down = CIFilter.lanczosScaleTransform()
-                down.inputImage = src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
-                down.scale = Float(2400 / long)
-                if let o = down.outputImage { src = o.cropped(to: o.extent.integral) }
-            }
+            if !preview && long > 2400 { src = Darkroom.scaled(src, longEdge: 2400) }
             let faces = preview ? s.eyes : (s.eyes ?? Booth.eyes(in: src))
-            return (Booth.develop(src, skin, deco: s.deco, faces: faces, preview: preview), false)
+            return (Booth.develop(src, skin, deco: s.deco, faces: faces, preview: preview, mask: s.boothMask), false)
         }
         if s.film { return (developFilm(src, s, date: date, preview: preview, dateShift: dateShift, flashFired: conditions.flashFired), false) }
         var img = preview || s.film ? src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
@@ -182,16 +196,13 @@ enum Darkroom {
         if !preview {
             img = img.cropped(to: frame).transformed(by: CGAffineTransform(translationX: -frame.minX, y: -frame.minY))
             if let edge = r.scan.longEdge, max(img.extent.width, img.extent.height) > edge {
-                let down = CIFilter.lanczosScaleTransform()
-                down.inputImage = img
-                down.scale = Float(edge / max(img.extent.width, img.extent.height))
-                if let o = down.outputImage { img = o.transformed(by: CGAffineTransform(translationX: -o.extent.minX, y: -o.extent.minY)) }
-                img = img.cropped(to: img.extent.integral)
+                img = Darkroom.scaled(img, longEdge: edge)
             }
         }
         var shot = FilmShot(recipe: r, flashFired: flashFired, seed: Int(date.timeIntervalSince1970 * 1000))
         // A leak is a surprise on the print, never in the finder.
         if preview { shot.recipe.leak = 0 }
+        shot.finder = preview
         if r.labAuto > 0 { shot.lab = LabAuto.correction(img, strength: r.labAuto, preview: preview) }
         shot.under = LabAuto.underexposure(img, preview: preview)
         let sim = FilmCatalog.sim(s.stack.simID)

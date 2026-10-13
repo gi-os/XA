@@ -20,6 +20,12 @@ final class CameraSounds {
         }
     }
 
+    /// Back to the ambient category once the microphone has left (VIDEO switches the app to
+    /// play-and-record, which ignores the silent switch and stops other audio).
+    func ambient() {
+        queue.async { try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers]) }
+    }
+
     func play(_ cue: Cue) {
         queue.async {
             guard let p = self.players[cue] else { return }

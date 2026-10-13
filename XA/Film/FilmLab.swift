@@ -183,9 +183,12 @@ enum FilmLab {
     /// highlight boost).
     private static let boostKernel = CIColorKernel(source: """
     kernel vec4 xaBoost(__sample c, float ev, float range) {
-        float m = max(c.r, max(c.g, c.b));
+        // Only what the sensor clipped is given back. An HDR photo's highlight above white is
+        // already as bright as it was, so it is never boosted again (monotonic: at least `c`).
+        vec3 s = min(c.rgb, vec3(1.0));
+        float m = max(s.r, max(s.g, s.b));
         float t = smoothstep(1.0 - range, 1.0, m);
-        return vec4(c.rgb * exp2(ev * t), 1.0);
+        return vec4(max(c.rgb, s * exp2(ev * t)), 1.0);
     }
     """)
 
@@ -313,9 +316,9 @@ enum FilmLab {
                 rnd.transformed(by: CGAffineTransform(translationX: dx, y: dy)).cropped(to: full)
                     .clampedToExtent().applyingGaussianBlur(sigma: Double(sigma)).cropped(to: full)
             }
-            let a = noise(shift, shift * 0.7, clump)
-            let b = noise(-shift * 1.3 - 5000, shift + 3000, clump * 2)
-            let c = noise(shift * 0.6 + 9000, -shift - 7000, clump * 4)
+            let a = noise(shift, (shift * 0.7).rounded(), clump)
+            let b = noise((-shift * 1.3).rounded() - 5000, shift + 3000, clump * 2)
+            let c = noise((shift * 0.6).rounded() + 9000, -shift - 7000, clump * 4)
             // Uniform noise has a spread of 0.289; a blur of `clump` pixels averages it down.
             func norm(_ s: CGFloat) -> CGFloat { max(1, 2 * s * sqrt(.pi)) / 0.2887 }
             let rms = Float(stock.grain * aperture * (r?.grain ?? 1) * max(0.5, 1 + 0.3 * Double(push)))
@@ -337,7 +340,13 @@ enum FilmLab {
         img = cube(img, t.print, t.size, full)
         // The scanner: levels and colour set from the frame, as a minilab operator's scanner does.
         if !flat, !preview, let r = shot?.recipe, r.labAuto > 0 {
-            img = LabAuto.applyScan(img, LabAuto.scan(img, strength: r.labAuto, mono: stock.mono, preview: false, encoded: true), linear: false)
+            // Metered on a small flat develop of the same frame (the full-size graph read back to
+            // the CPU cost a whole extra render per photo, and every frame of the finder's peek).
+            var m = shot!; m.recipe.labAuto = 0
+            let k = 256 / max(e.width, e.height, 1)
+            let proxy = develop(input.transformed(by: CGAffineTransform(scaleX: k, y: k)), stock: stock, push: push,
+                                preview: false, seed: seed, shot: m, flat: true)
+            img = LabAuto.applyScan(img, LabAuto.scan(proxy, strength: r.labAuto, mono: stock.mono, preview: shot?.finder == true), linear: false)
         }
         if stock.mono {
             // a neutral silver print

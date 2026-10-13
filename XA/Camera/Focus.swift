@@ -36,8 +36,16 @@ enum FocusGeometry {
 /// face turned toward the camera.
 enum EyeFinder {
     static func nearerEye(in pixelBuffer: CVPixelBuffer) -> CGPoint? {
+        nearerEye(VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:]))
+    }
+
+    /// The same on an upright (portrait) viewfinder frame.
+    static func nearerEye(in image: CIImage) -> CGPoint? {
+        nearerEye(VNImageRequestHandler(ciImage: image, orientation: .up, options: [:]))
+    }
+
+    private static func nearerEye(_ handler: VNImageRequestHandler) -> CGPoint? {
         let req = VNDetectFaceLandmarksRequest()
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
         try? handler.perform([req])
         guard let faces = req.results, let face = faces.max(by: { $0.boundingBox.width < $1.boundingBox.width }),
               let lm = face.landmarks else { return nil }

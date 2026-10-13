@@ -96,13 +96,15 @@ enum Digicam {
     static func crunch(_ img: CIImage, noise amount: CGFloat) -> CIImage {
         let extent = img.extent
         let sharp = CIFilter.unsharpMask()
-        sharp.inputImage = img
+        sharp.inputImage = img.clampedToExtent()   // no transparency read in at the edges (a bright border)
         sharp.radius = 2.2
         sharp.intensity = 0.7
         var out = (sharp.outputImage ?? img).cropped(to: extent)
         if amount > 0 { out = colorNoise(out, amount: amount) }
         return out
     }
+
+    private static let chroma = CIColorKernel(source: "kernel vec4 xaChroma(__sample i, __sample n, float k) { return vec4(i.rgb + (n.rgb - vec3(0.5)) * k * i.a, i.a); }")
 
     /// A CCD's colour noise is blotchy chroma, a few pixels across, not single hot pixels.
     static func colorNoise(_ i: CIImage, amount: CGFloat) -> CIImage {
@@ -113,18 +115,10 @@ enum Digicam {
         blur.radius = Float(cell * 0.8)
         guard let rnd = blur.outputImage else { return i }
         let two: CGFloat = amount * 2 * 2.4
-        let m = CIFilter.colorMatrix()
-        m.inputImage = rnd
-        m.rVector = CIVector(x: two, y: 0, z: 0, w: 0)
-        m.gVector = CIVector(x: 0, y: two, z: 0, w: 0)
-        m.bVector = CIVector(x: 0, y: 0, z: two, w: 0)
-        m.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
-        m.biasVector = CIVector(x: -two / 2, y: -two / 2, z: -two / 2, w: 0)
-        guard let n = m.outputImage?.cropped(to: i.extent) else { return i }
-        let add = CIFilter.additionCompositing()
-        add.inputImage = n
-        add.backgroundImage = i
-        return (add.outputImage ?? i).cropped(to: i.extent)
+        // The noise's raw values, centred, added to the picture in one kernel: a colour matrix on
+        // the generator would un-premultiply its random alpha, and a layer with alpha 0 adds nothing.
+        guard let out = chroma?.apply(extent: i.extent, arguments: [i, rnd.cropped(to: i.extent), two]) else { return i }
+        return out.cropped(to: i.extent)
     }
 }
 

@@ -460,7 +460,9 @@ enum DateBack {
             }
             let box = shape.path(in: frame)?.boundingBox ?? frame
             let w = face.width(of: text)
-            let origin = CGPoint(x: box.midX - w / 2, y: box.maxY - box.height * 0.08)
+            var origin = CGPoint(x: box.midX - w / 2, y: box.maxY - box.height * 0.08)
+            // The star's two lower points have a notch between them: the date goes in the body.
+            if shape == .nova { origin.y = Self.novaBaseline(frame) }
             decorate(face, ctx) { drawRun(text, face: face, origin: origin, ctx: ctx) }
             return
         }
@@ -593,8 +595,15 @@ enum DateBack {
 
     // MARK: stamp and tape
 
+    /// Inside NOVA's star, low in its body (the same centre and radii as FrameShape.nova).
+    static func novaBaseline(_ frame: CGRect) -> CGFloat {
+        let outer = min(frame.width, frame.height) * 0.47
+        return frame.midY + 0.04 * frame.height + 0.55 * 0.46 * outer
+    }
+
     private static func anchor(_ size: CGSize, _ shape: FrameShape, _ w: CGFloat, _ h: CGFloat) -> CGPoint {
         let frame = CGRect(origin: .zero, size: size)
+        if shape == .nova { return CGPoint(x: frame.midX, y: Self.novaBaseline(frame) - h * 0.5) }
         if shape != .none, let box = shape.path(in: frame)?.boundingBox {
             return CGPoint(x: box.midX, y: box.maxY - box.height * 0.12)
         }

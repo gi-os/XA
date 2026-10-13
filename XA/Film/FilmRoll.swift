@@ -115,6 +115,8 @@ struct FilmShot {
     var seed = 0
     /// The lab's correction for this frame (exposure and colour as light gains), from LabAuto.
     var lab: CIVector?
+    /// Developing for the viewfinder (the FILM peek): metering may be a few frames old.
+    var finder = false
     /// How thin the negative is as a whole (LabAuto.underexposure): the stock's muddy, off-colour
     /// lift of thin shadows happens only on an underexposed frame, never on every frame's blacks.
     var under: Double = 0
@@ -126,7 +128,10 @@ struct FilmShot {
 /// more; a phone picture taken under cloud, put through the film as it is, comes out dim, flat
 /// and blue. Partial, as labs are: real night stays night and a sunset keeps its colour.
 enum LabAuto {
-    private static let context = CIContext(options: [.workingColorSpace: NSNull(), .cacheIntermediates: false])
+    /// Linear light, like every other Core Image context in XA: with no colour management the
+    /// camera's frames stayed display-encoded and every frame metered about half a stop bright.
+    private static let context = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB) as Any,
+                                                     .cacheIntermediates: false])
     private static let lock = NSLock()
     private static var cached = CIVector(x: 1, y: 1, z: 1)
     private static var cachedAt: CFTimeInterval = 0

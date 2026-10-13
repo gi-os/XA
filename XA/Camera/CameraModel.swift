@@ -5,6 +5,8 @@ import CoreImage.CIFilterBuiltins
 import ImageIO
 import UIKit
 import UniformTypeIdentifiers
+import Vision
+import Photos
 
 /// The PRO strip's five dials.
 enum ProControl: String, CaseIterable, Identifiable {
@@ -27,6 +29,8 @@ enum ProControl: String, CaseIterable, Identifiable {
 final class CameraModel: NSObject, ObservableObject {
     // VIDEO
     @Published var videoLook: VideoLook = .clean { didSet { UserDefaults.standard.set(videoLook.rawValue, forKey: "videoLook"); lock.lock(); frameVideoLook = videoLook; lock.unlock() } }
+    /// Whether the phone can shoot Apple ProRAW (Customize hides Develop from RAW otherwise).
+    @Published private(set) var rawSupported = false
     @Published private(set) var recording = false
     @Published private(set) var recordSeconds: Double = 0
     // FOCUS
@@ -81,6 +85,10 @@ final class CameraModel: NSObject, ObservableObject {
     @Published var isoIndex: Int? { didSet { if isoIndex != oldValue { applyPro() } } }
     @Published var wbIndex: Int = 0 { didSet { if wbIndex != oldValue { applyPro() } } }
     @Published var focusIndex: Int? { didSet { if focusIndex != oldValue { applyPro() } } }
+    /// The dials as the session queue reads them (no waiting on the main thread from there).
+    private func snapshotDials() {
+        lock.lock(); _dials = (shutterIndex, isoIndex, wbIndex, focusIndex, ev); lock.unlock()
+    }
 
     /// A plain session, or in FILM (with the XA finder) a multi-camera one that also streams the ultra-wide.
     private(set) var session: AVCaptureSession = AVCaptureSession()
@@ -89,6 +97,9 @@ final class CameraModel: NSObject, ObservableObject {
     var library: Library?
     /// Where the Lock Screen camera saves when Photos is not available to it.
     var fallbackFolder: URL?
+    /// The hardware buttons (volume, Camera Control) take pictures only while the camera is on
+    /// screen: not under the roll, a sheet or the photo viewer.
+    @Published var captureButtonsEnabled = true
 
     private let photoOutput = AVCapturePhotoOutput()
     private let audioOutput = AVCaptureAudioDataOutput()
@@ -140,7 +151,12 @@ final class CameraModel: NSObject, ObservableObject {
     private var boothSession = 0
     private var boothFrames: [Int: [Int: UIImage]] = [:]
     private var _boothEyes: Booth.Eyes?
+    private var _boothMask: CIImage?
     private var eyesBusy = false
+    private var lastEyesAt: CFTimeInterval = 0
+    private var eyeAFBusy = false
+    /// Kept between frames, on the eye queue: Vision smooths a person's mask over time.
+    private lazy var segmentation = VNGeneratePersonSegmentationRequest()
     // FILM's finder: how far the rangefinder's second image sits off, and what drives it.
     private let motion = CMMotionManager()
     private var patchShift: CGFloat = 0
@@ -165,6 +181,23 @@ final class CameraModel: NSObject, ObservableObject {
     private var qrClear: DispatchWorkItem?
     /// The mic is on the session (read on the frame queue, so kept under the lock).
     private var _hasMic = false
+    /// What Camera Control's pickers show, read on the session queue (kept under the lock).
+    private var _ctlSim: String?
+    private var _ctlLook: Look = .none
+    /// Configure tries left when the camera can't be opened yet (another app still has it).
+    private var configureTries = 0
+    /// The ultra-wide couldn't run alongside the main camera on this phone: not tried again.
+    private var multiCamFailed = false
+    /// The PRO dials, read on the session queue (kept under the lock).
+    private var _dials: (shutter: Int?, iso: Int?, wb: Int, focus: Int?, ev: Float) = (nil, nil, 0, nil, 0)
+    #if CAPTURE_EXTENSION
+    /// The Lock Screen camera writes each shot's files in order on this queue.
+    private let ioQueue = DispatchQueue(label: "xa.lock.io", qos: .userInitiated)
+    private let run = Int(Date().timeIntervalSince1970 * 1000)
+    private var shotCount = 0
+    /// Each pending shot's file name and recipe, read on the photo callback's queue.
+    private var _lockShots: [Int64: (name: String, recipe: LockShot)] = [:]
+    #endif
     private var lowPower = false
     private var finderLight: CGFloat = 1
     // FILM's ultra-wide: the second camera behind the finder's surround.
@@ -213,6 +246,32 @@ final class CameraModel: NSObject, ObservableObject {
         stack = Self.loadStack(for: mode)
         _toDigi = mode.developed
         syncFrameSettings()
+        lock.lock(); _ctlSim = stack.simID; _ctlLook = stack.look; lock.unlock()
+        // The camera can stop under us (a call, another app, the media server restarting): start
+        // it again when it can, and never leave a take running into a dead session.
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: nil, queue: nil) { [weak self] n in
+            guard let self else { return }
+            self.sessionQueue.async {
+                guard (n.object as? AVCaptureSession) === self.session else { return }
+                if self.input == nil { self.configure(); return }
+                if !self.session.isRunning { self.session.startRunning() }
+            }
+        }
+        nc.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: nil, queue: .main) { [weak self] _ in
+            if self?.recording == true { self?.stopRecording() }
+        }
+    }
+
+    /// The Lock Screen camera takes on the app's settings (already applied to `settings` and to
+    /// its own defaults by LockSettings.apply): the mode, the film for it, the favourites.
+    func adopt(_ l: LockSettings) {
+        let m = LockSettings.modes.contains(l.mode) ? l.mode : .digi
+        if mode != m { mode = m }
+        stack = m == .film ? l.filmStack : l.digiStack
+        loadFavorites()
+        syncFrameSettings()
+        if input != nil { applyResolution(); flashChanged() }
     }
 
     /// The last viewfinder frame, small, for the editors' previews.
@@ -267,6 +326,7 @@ final class CameraModel: NSObject, ObservableObject {
 
     private func stackChanged() {
         if let data = try? JSONEncoder().encode(stack) { UserDefaults.standard.set(data, forKey: Self.stackKey(mode)) }
+        lock.lock(); _ctlSim = stack.simID; _ctlLook = stack.look; lock.unlock()
         syncFrameSettings()
         onStackChange?()
     }
@@ -298,15 +358,18 @@ final class CameraModel: NSObject, ObservableObject {
         guard old != mode, input != nil else { return }
         let m = mode
         publishPhotoSize(m)
+        snapshotDials()
         sessionQueue.async {
+            // the microphone only while in VIDEO: elsewhere it kept the orange dot on, stopped the
+            // user's music and made XA's sounds ignore the silent switch
+            if m == .video { self.addAudioIfNeeded() } else { self.removeAudio() }
             self.applyProOnQueue(m)
             self.updateQR(m)
-            if m == .video { self.addAudioIfNeeded() }
         }
         preparePhotos()
         // Camera Control is rebuilt once the fade is over, so it cannot stall the feed during it.
         sessionQueue.asyncAfter(deadline: .now() + 0.7) {
-            guard self.mode == m, let dev = self.device else { return }
+            guard self.frameState().0 == m, let dev = self.device else { return }
             self.session.beginConfiguration()
             self.addControls(dev, m)
             self.session.commitConfiguration()
@@ -344,10 +407,22 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     func stop() {
+        // a take is finished and saved before the camera goes, never left open
+        if recording { stopRecording() }
         cancelBooth()
         sessionQueue.async { if self.session.isRunning { self.session.stopRunning() } }
     }
-    func resume() { sessionQueue.async { if !self.session.isRunning && self.input != nil { self.session.startRunning() } } }
+    func resume() {
+        sessionQueue.async {
+            // a camera that couldn't be opened before (another app had it) is tried again
+            if self.input == nil {
+                let s = AVCaptureDevice.authorizationStatus(for: .video)
+                if s == .authorized { self.configureTries = 0; self.configure() }
+                return
+            }
+            if !self.session.isRunning { self.session.startRunning() }
+        }
+    }
 
     private static func backCamera() -> AVCaptureDevice? {
         let kinds: [AVCaptureDevice.DeviceType] = [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
@@ -360,8 +435,14 @@ final class CameraModel: NSObject, ObservableObject {
         session.beginConfiguration()
         session.sessionPreset = .photo
         guard let dev = Self.backCamera(), let inp = try? AVCaptureDeviceInput(device: dev), session.canAddInput(inp) else {
-            session.commitConfiguration(); return
+            session.commitConfiguration()
+            // The camera can still be held a moment (the Lock Screen handing over, another app
+            // closing): try again shortly instead of leaving a black finder.
+            configureTries += 1
+            if configureTries < 8 { sessionQueue.asyncAfter(deadline: .now() + 0.3) { self.configure() } }
+            return
         }
+        configureTries = 0
         session.addInput(inp)
         device = dev; input = inp
         if session.canAddOutput(photoOutput) { session.addOutput(photoOutput) }
@@ -371,8 +452,9 @@ final class CameraModel: NSObject, ObservableObject {
         if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
         photoOutput.maxPhotoQualityPrioritization = .quality
         if photoOutput.isAppleProRAWSupported { photoOutput.isAppleProRAWEnabled = settings.digiZero }
+        let raw = photoOutput.isAppleProRAWSupported
         applyCapturePolicy(flash: settings.flash != .off)
-        let m = mode
+        let m = frameState().0
         setupPhotoOutput(dev, m)
         addControls(dev, m)
         session.commitConfiguration()
@@ -381,14 +463,22 @@ final class CameraModel: NSObject, ObservableObject {
         session.startRunning()
         applyProOnQueue(m)
         updateQR(m)
+        if m == .video { addAudioIfNeeded() }
         if m == .booth { switchCamera(toFront: true) }
-        DispatchQueue.main.async { self.preparePhotos() }
+        DispatchQueue.main.async { self.rawSupported = raw; self.preparePhotos() }
     }
 
     private func setupPhotoOutput(_ dev: AVCaptureDevice, _ m: CaptureMode) {
-        let dims = dev.activeFormat.supportedMaxPhotoDimensions
         func px(_ d: CMVideoDimensions) -> Int { Int(d.width) * Int(d.height) }
         func mp(_ d: CMVideoDimensions) -> Int { CaptureMode.megapixels(CGSize(width: CGFloat(d.width), height: CGFloat(d.height))) }
+        // 5712×4284 is only ever delivered as 24MP through deferred delivery, which XA doesn't use:
+        // asked for, it comes back 12MP.
+        var dims = dev.activeFormat.supportedMaxPhotoDimensions.filter { !($0.width == 5712 && $0.height == 4284) }
+        #if CAPTURE_EXTENSION
+        // The Lock Screen camera has a small memory budget: 12MP at most.
+        dims = dims.filter { px($0) <= CaptureMode.digi.maxSensorPixels }
+        #endif
+        if dims.isEmpty { dims = dev.activeFormat.supportedMaxPhotoDimensions }
         guard let largest = dims.max(by: { px($0) < px($1) }) else { return }
         let options = Array(Set(dims.map(mp))).sorted()
         if px(photoOutput.maxPhotoDimensions) != px(largest) { photoOutput.maxPhotoDimensions = largest }
@@ -442,18 +532,19 @@ final class CameraModel: NSObject, ObservableObject {
         let zoom = AVCaptureSystemZoomSlider(device: dev) { [weak self] z in
             DispatchQueue.main.async { self?.zoom = z }
         }
+        lock.lock(); let ctlSim = _ctlSim, ctlLook = _ctlLook; lock.unlock()
         if m.usesFilm {
             let sims = FilmCatalog.sims(for: m)
-            let simTitles = sims.map { $0.title.capitalized }
+            let simTitles = sims.map { Self.controlTitle($0.title) }
             let simPicker = AVCaptureIndexPicker("Sim", symbolName: "film", localizedIndexTitles: simTitles)
-            let loaded = FilmCatalog.sim(stack.simID)?.id
+            let loaded = FilmCatalog.sim(ctlSim)?.id
             simPicker.selectedIndex = sims.firstIndex { $0.id == loaded } ?? 0
             simPicker.setActionQueue(.main) { [weak self] i in
                 guard let self else { return }
                 self.stack.simID = sims[min(sims.count - 1, max(0, i))].id
             }
-            let lookPicker = AVCaptureIndexPicker("Look", symbolName: "camera.filters", localizedIndexTitles: Look.allCases.map { $0.title.capitalized })
-            lookPicker.selectedIndex = stack.look.rawValue
+            let lookPicker = AVCaptureIndexPicker("Look", symbolName: "camera.filters", localizedIndexTitles: Look.allCases.map { Self.controlTitle($0.title) })
+            lookPicker.selectedIndex = ctlLook.rawValue
             lookPicker.setActionQueue(.main) { [weak self] i in
                 self?.stack.look = Look(rawValue: i) ?? .none
             }
@@ -463,8 +554,9 @@ final class CameraModel: NSObject, ObservableObject {
         } else if m == .booth {
             if session.canAddControl(zoom) { session.addControl(zoom) }
         } else if m == .video {
-            let looks = AVCaptureIndexPicker("Look", symbolName: "film", localizedIndexTitles: VideoLook.allCases.map { $0.title.capitalized })
-            looks.selectedIndex = videoLook.rawValue
+            lock.lock(); let vlook = frameVideoLook; lock.unlock()
+            let looks = AVCaptureIndexPicker("Look", symbolName: "film", localizedIndexTitles: VideoLook.allCases.map { Self.controlTitle($0.title) })
+            looks.selectedIndex = vlook.rawValue
             looks.setActionQueue(.main) { [weak self] i in self?.videoLook = VideoLook(rawValue: i) ?? .clean }
             for c in [looks, zoom] as [AVCaptureControl] where session.canAddControl(c) { session.addControl(c) }
         } else {
@@ -477,6 +569,17 @@ final class CameraModel: NSObject, ObservableObject {
         if m.usesFilm, session.canAddControl(zoom) { session.addControl(zoom) }
         session.setControlsDelegate(self, queue: sessionQueue)
         DispatchQueue.main.async { self.hasCameraControl = true }
+    }
+
+    /// A box title as Camera Control shows it: words in title case, speeds and initials kept
+    /// ("NOCTURNE 800T" → "Nocturne 800T", "VHS" stays "VHS").
+    static func controlTitle(_ t: String) -> String {
+        let initials: Set<String> = ["VHS", "CCTV", "LCD", "XA"]
+        return t.split(separator: " ").map { w -> String in
+            let s = String(w)
+            if initials.contains(s) || s.contains(where: { $0.isNumber }) { return s }
+            return s.prefix(1).uppercased() + s.dropFirst().lowercased()
+        }.joined(separator: " ")
     }
 
     func rebuildControls() {
@@ -543,10 +646,13 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     func flip() {
+        guard !recording else { return }   // never mid-take: the take would change camera halfway
         sessionQueue.async {
             // the selfie camera has no ultra-wide: back to the plain session first
             if self.multiCam { self.rebuildSession(multi: false) }
             self.switchCamera(toFront: !self.frontFlag)
+            // and back on the rear camera in FILM, the ultra-wide returns
+            DispatchQueue.main.async { self.updateUltraWide() }
         }
     }
 
@@ -563,11 +669,14 @@ final class CameraModel: NSObject, ObservableObject {
             guard let dev, let inp = try? AVCaptureDeviceInput(device: dev) else { return }
             self.session.beginConfiguration()
             self.session.removeInput(old)
-            if self.session.canAddInput(inp) { self.session.addInput(inp); self.input = inp; self.device = dev } else { self.session.addInput(old) }
-            let m = self.mode
+            var switched = false
+            if self.session.canAddInput(inp) { self.session.addInput(inp); self.input = inp; self.device = dev; switched = true } else { self.session.addInput(old) }
+            let m = self.frameState().0
             if let d = self.device { self.setupPhotoOutput(d, m); self.addControls(d, m) }
             self.session.commitConfiguration()
-            self.frontFlag = toFront
+            // only a camera that really changed changes the flags
+            guard switched else { return }
+            self.lock.lock(); self.frontFlag = toFront; self.lock.unlock()
             if let d = self.device { self.setupLenses(d) }
             DispatchQueue.main.async { self.front = toFront }
             self.applyRotation()
@@ -592,6 +701,7 @@ final class CameraModel: NSObject, ObservableObject {
 
     private func applyPro() {
         let m = mode
+        snapshotDials()
         sessionQueue.async { self.applyProOnQueue(m) }
     }
 
@@ -599,19 +709,25 @@ final class CameraModel: NSObject, ObservableObject {
         guard let dev = device, (try? dev.lockForConfiguration()) != nil else { return }
         defer { dev.unlockForConfiguration() }
         let pro = m == .pro
-        let (sIdx, iIdx, wb, fIdx, bias) = DispatchQueue.main.sync { (shutterIndex, isoIndex, wbIndex, focusIndex, ev) }
-        // Exposure.
-        if pro && (sIdx != nil || iIdx != nil) && dev.isExposureModeSupported(.custom) {
-            let meteredShutter = Int64(dev.exposureDuration.seconds * 1e9)
-            let meteredIso = Int(dev.iso)
+        lock.lock(); let (sIdx, iIdx, wb, fIdx, bias) = _dials; lock.unlock()
+        // Exposure. The metered values and the format's limits are checked and rounded inward:
+        // setExposureModeCustom throws for anything a hair outside its range.
+        let es = dev.exposureDuration.seconds, ei = dev.iso
+        if pro && (sIdx != nil || iIdx != nil) && dev.isExposureModeSupported(.custom) && es.isFinite && es > 0 && ei.isFinite && ei > 0 {
+            // In custom mode the device reports XA's own last values: fold in how far off the
+            // meter says they are, so S and ISO priority keep metering the scene.
+            let off = Double(dev.exposureTargetOffset)
+            let metered = es * pow(2, (off.isFinite ? -off : 0))
             let fmt = dev.activeFormat
-            let lo = Int64(fmt.minExposureDuration.seconds * 1e9)
-            let hi = Int64(min(fmt.maxExposureDuration.seconds, 1) * 1e9)
-            let r = Exposure.rebalance(meteredShutter: max(meteredShutter, 1), meteredIso: max(meteredIso, 1),
+            let lo = Int64((fmt.minExposureDuration.seconds * 1e9).rounded(.up))
+            let hi = Int64((min(fmt.maxExposureDuration.seconds, 1) * 1e9).rounded(.down))
+            let iLo = Int(fmt.minISO.rounded(.up)), iHi = max(Int(fmt.minISO.rounded(.up)), Int(fmt.maxISO.rounded(.down)))
+            let r = Exposure.rebalance(meteredShutter: max(Int64(min(metered, 30) * 1e9), 1), meteredIso: max(Int(ei), 1),
                                        heldShutter: sIdx.map { Exposure.shutterAt($0) }, heldIso: iIdx.map { Exposure.isoAt($0) },
-                                       shutterRange: max(lo, 1)...max(hi, max(lo, 1)), isoRange: Int(fmt.minISO)...Int(fmt.maxISO))
-            let duration = CMTime(value: r.shutter, timescale: 1_000_000_000)
-            dev.setExposureModeCustom(duration: duration, iso: Float(r.iso), completionHandler: nil)
+                                       shutterRange: max(lo, 1)...max(hi, max(lo, 1)), isoRange: iLo...iHi)
+            let maxD = CMTimeMinimum(fmt.maxExposureDuration, CMTime(value: 1, timescale: 1))
+            let duration = CMTimeMaximum(fmt.minExposureDuration, CMTimeMinimum(CMTime(value: r.shutter, timescale: 1_000_000_000), maxD))
+            dev.setExposureModeCustom(duration: duration, iso: min(max(Float(r.iso), fmt.minISO), fmt.maxISO), completionHandler: nil)
         } else if dev.isExposureModeSupported(.continuousAutoExposure) {
             dev.exposureMode = .continuousAutoExposure
             let b = pro ? bias : 0
@@ -673,7 +789,7 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     /// The roll button shows the newest picture on the roll, from launch on.
-    func showThumb(_ img: UIImage?) { if let img { lastShot = img } }
+    func showThumb(_ img: UIImage?) { lastShot = img }
 
     // MARK: focus
 
@@ -756,7 +872,10 @@ final class CameraModel: NSObject, ObservableObject {
 
     /// Second stage: fire, then let go of the lock.
     func fullPress() {
-        if mode == .video { toggleRecording(); return }
+        if mode == .video {
+            guard authorized == true, input != nil else { return }
+            toggleRecording(); return
+        }
         shoot()
         releaseHalfPress()
     }
@@ -780,8 +899,21 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     /// Eye AF: every few frames, find the nearer eye and aim there. In AF-S a held half-press freezes it.
-    private func trackEye(_ pb: CVPixelBuffer) {
-        guard let eye = EyeFinder.nearerEye(in: pb) else { return }
+    private func trackEye(_ frame: CIImage) {
+        lock.lock(); let busy = eyeAFBusy; if !busy { eyeAFBusy = true }; lock.unlock()
+        guard !busy else { return }
+        // small: a face to focus on is never tiny in the frame
+        let k: CGFloat = min(1, 480 / max(frame.extent.width, 1))
+        let small = frame.transformed(by: CGAffineTransform(scaleX: k, y: k))
+        eyeQueue.async {
+            let found = EyeFinder.nearerEye(in: small)
+            self.lock.lock(); self.eyeAFBusy = false; self.lock.unlock()
+            guard let eye = found else { return }
+            self.aimAtEye(eye)
+        }
+    }
+
+    private func aimAtEye(_ eye: CGPoint) {
         DispatchQueue.main.async {
             guard self.settings.afArea == .eye, self.mode != .pro || self.focusIndex == nil else { return }
             if self.halfPressed && self.settings.afMode == .single { return }
@@ -821,7 +953,12 @@ final class CameraModel: NSObject, ObservableObject {
         let loaded = FilmCatalog.sim(stack.simID)?.id
         let i = ids.firstIndex(where: { $0 == loaded }) ?? 0
         let n = ids.count
-        stack.simID = ids[((i + by) % n + n) % n]
+        guard n > 0 else { return }
+        // a new film starts at box speed (one change, so the finder redraws once)
+        var next = stack
+        next.push = 0
+        next.simID = ids[((i + by) % n + n) % n]
+        stack = next
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
@@ -861,9 +998,26 @@ final class CameraModel: NSObject, ObservableObject {
         }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: add()
-        case .notDetermined: AVCaptureDevice.requestAccess(for: .audio) { ok in if ok { self.sessionQueue.async { add() } } }
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio) { ok in
+                // still in VIDEO by the time the answer comes?
+                if ok { self.sessionQueue.async { if self.frameState().0 == .video { add() } } }
+            }
         default: break
         }
+    }
+
+    /// The microphone leaves the session when VIDEO does. On the session queue.
+    private func removeAudio() {
+        guard let inp = audioInput else { return }
+        lock.lock(); _hasMic = false; lock.unlock()
+        session.beginConfiguration()
+        session.removeInput(inp)
+        if session.outputs.contains(audioOutput) { session.removeOutput(audioOutput) }
+        session.commitConfiguration()
+        audioInput = nil
+        // back to sounds that mix with the user's music and respect the silent switch
+        CameraSounds.shared.ambient()
     }
 
     func toggleRecording() { recording ? stopRecording() : startRecording() }
@@ -893,14 +1047,35 @@ final class CameraModel: NSObject, ObservableObject {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         guard let r else { return }
         developing += 1
+        // The take is finished and saved even if the app goes to the background right now.
+        #if !CAPTURE_EXTENSION
+        var bg = UIBackgroundTaskIdentifier.invalid
+        bg = UIApplication.shared.beginBackgroundTask(withName: "xa.take") {
+            if bg != .invalid { UIApplication.shared.endBackgroundTask(bg); bg = .invalid }
+        }
+        #endif
+        let end = {
+            #if !CAPTURE_EXTENSION
+            if bg != .invalid { UIApplication.shared.endBackgroundTask(bg); bg = .invalid }
+            #endif
+        }
         r.finish { url in
             DispatchQueue.main.async {
                 self.developing = max(0, self.developing - 1)
-                guard let url else { return }
+                guard let url else { end(); return }
+                let keep = {
+                    // Photos wouldn't take it now: it waits in the app and goes in later
+                    if let dir = self.fallbackFolder {
+                        try? FileManager.default.moveItem(at: url, to: dir.appendingPathComponent(url.lastPathComponent))
+                    }
+                }
                 if let lib = self.library {
-                    lib.save(video: url) { id in if let id { TakeSegment.store(segs, for: id) } }
-                } else if let dir = self.fallbackFolder {
-                    try? FileManager.default.moveItem(at: url, to: dir.appendingPathComponent(url.lastPathComponent))
+                    lib.save(video: url) { id in
+                        if let id { TakeSegment.store(segs, for: id) } else { keep() }
+                        end()
+                    }
+                } else {
+                    keep(); end()
                 }
             }
         }
@@ -920,7 +1095,9 @@ final class CameraModel: NSObject, ObservableObject {
         } else {
             settingsP = AVCapturePhotoSettings()
         }
-        let want: AVCapturePhotoOutput.QualityPrioritization = settings.flash != .off && m != .pro ? .balanced : m.prioritization
+        // PRO's held shutter or ISO is only honoured at .speed (the camera may override it otherwise).
+        let manual = m == .pro && (shutterIndex != nil || isoIndex != nil)
+        let want: AVCapturePhotoOutput.QualityPrioritization = manual ? .speed : (settings.flash != .off && m != .pro ? .balanced : m.prioritization)
         settingsP.photoQualityPrioritization = want.rawValue <= photoOutput.maxPhotoQualityPrioritization.rawValue ? want : photoOutput.maxPhotoQualityPrioritization
         settingsP.maxPhotoDimensions = shotDims(m)
         let fm: AVCaptureDevice.FlashMode = settings.flash == .on ? .on : (settings.flash == .auto ? .auto : .off)
@@ -948,6 +1125,8 @@ final class CameraModel: NSObject, ObservableObject {
         guard authorized == true, input != nil else { return }
         if mode == .video { toggleRecording(); return }
         if mode == .booth { boothPress(); return }
+        // Shots still developing hold their whole file in memory: past a handful, wait.
+        guard developing < 6 else { UINotificationFeedbackGenerator().notificationOccurred(.warning); return }
         fire(booth: nil)
     }
 
@@ -961,11 +1140,21 @@ final class CameraModel: NSObject, ObservableObject {
         var (_, dev) = frameState()
         if let booth { dev.deco = settings.boothDeco.step(booth.index) }
         let id = settingsP.uniqueID
-        pending[id] = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date(), zero: zero, pressed: pressed, booth: booth, front: front)
-        let instant = settings.flash == .off && !zero && photoOutput.isZeroShutterLagEnabled
+        var shot = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date(), zero: zero, pressed: pressed, booth: booth, front: front)
+        #if CAPTURE_EXTENSION
+        shotCount += 1
+        shot.name = String(format: "XA-%ld-%04d", run, shotCount)
+        lock.lock(); _lockShots[id] = (shot.name, shot.lock); lock.unlock()
+        #endif
+        pending[id] = shot
+        // Manual exposure (PRO's held shutter or ISO) has no zero shutter lag: the picture is
+        // taken when the camera says so, and the click waits for it.
+        let manual = m == .pro && (shutterIndex != nil || isoIndex != nil)
+        let instant = settings.flash == .off && !zero && !manual && photoOutput.isZeroShutterLagEnabled
         if instant {
             answered.insert(id)
-            if settings.sounds { CameraSounds.shared.play(.shutter) }
+            // XA's click only where the system's own is dropped, never both
+            if settings.sounds && settingsP.isShutterSoundSuppressionEnabled { CameraSounds.shared.play(.shutter) }
             if m.usesFilm && settings.instantReview { startReview() }
             flash = true
             DispatchQueue.main.asyncAfter(deadline: .now() + (m == .booth ? 0.22 : 0.08)) { self.flash = false }
@@ -974,26 +1163,46 @@ final class CameraModel: NSObject, ObservableObject {
         }
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         developing += 1
-        let rc = rotation
-        // Off the main thread: whatever the screen is busy drawing can't hold the shot up.
+        // Off the main thread: whatever the screen is busy drawing can't hold the shot up. The
+        // settings were made on the main thread a moment ago; what the camera can do is checked
+        // here, against the session as it is now (a flip or a rebuild may have come between).
         sessionQueue.async {
-            if let c = self.photoOutput.connection(with: .video) {
-                if self.frontFlag {
-                    // The selfie camera is shot exactly as the viewfinder shows it: upright and
-                    // mirrored, the same turn and the same mirror as the frames. Its horizon
-                    // angle came out upside down once mirrored.
-                    if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = false }
-                    if c.isVideoRotationAngleSupported(0) { c.videoRotationAngle = 0 }
-                } else {
-                    if let rc {
-                        let a = rc.videoRotationAngleForHorizonLevelCapture
-                        if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
-                    }
-                    if c.isVideoMirroringSupported && !c.automaticallyAdjustsVideoMirroring { c.automaticallyAdjustsVideoMirroring = true }
+            guard self.session.isRunning, let c = self.photoOutput.connection(with: .video), c.isEnabled, c.isActive else {
+                DispatchQueue.main.async { self.abandon(id) }; return
+            }
+            let maxD = self.photoOutput.maxPhotoDimensions
+            if Int(settingsP.maxPhotoDimensions.width) * Int(settingsP.maxPhotoDimensions.height) > Int(maxD.width) * Int(maxD.height) {
+                settingsP.maxPhotoDimensions = maxD
+            }
+            if settingsP.rawPhotoPixelFormatType != 0, !self.photoOutput.availableRawPhotoPixelFormatTypes.contains(settingsP.rawPhotoPixelFormatType) {
+                DispatchQueue.main.async { self.abandon(id) }; return
+            }
+            if !self.photoOutput.supportedFlashModes.contains(settingsP.flashMode) { settingsP.flashMode = .off }
+            self.lock.lock(); let selfie = self.frontFlag; self.lock.unlock()
+            if selfie {
+                // The selfie camera is shot exactly as the viewfinder shows it: upright and
+                // mirrored, the same turn and the same mirror as the frames. Its horizon
+                // angle came out upside down once mirrored.
+                if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = false }
+                if c.isVideoRotationAngleSupported(0) { c.videoRotationAngle = 0 }
+            } else {
+                if let rc = self.rotation {
+                    let a = rc.videoRotationAngleForHorizonLevelCapture
+                    if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
                 }
+                if c.isVideoMirroringSupported && !c.automaticallyAdjustsVideoMirroring { c.automaticallyAdjustsVideoMirroring = true }
             }
             self.photoOutput.capturePhoto(with: settingsP, delegate: self)
         }
+    }
+
+    /// A shot the camera couldn't take (or that ended without a picture): forget it, so the
+    /// roll button's spinner never sticks. On the main thread.
+    private func abandon(_ id: Int64) {
+        guard let shot = pending.removeValue(forKey: id) else { return }
+        answered.remove(id); quietShots.remove(id)
+        developing = max(0, developing - 1)
+        if let b = shot.booth { boothCollect(b.session, b.index, nil, date: shot.date) }
     }
 
     /// How long the last shot took, for Customize: press → taken → photo → developed.
@@ -1006,14 +1215,22 @@ final class CameraModel: NSObject, ObservableObject {
     /// is the frame from before it fired. So with the flash on (or auto) the fast paths go off
     /// and the camera waits for its own flash; with it off, the shot is instant again.
     private func applyCapturePolicy(flash: Bool) {
-        let fast = !flash
-        if photoOutput.isResponsiveCaptureSupported { photoOutput.isResponsiveCaptureEnabled = fast }
-        if photoOutput.isFastCapturePrioritizationSupported { photoOutput.isFastCapturePrioritizationEnabled = fast }
-        if photoOutput.isZeroShutterLagSupported { photoOutput.isZeroShutterLagEnabled = fast }
+        // Responsive capture needs zero shutter lag on, and fast capture needs responsive capture:
+        // on in that order, off in the reverse (the other way round they stayed off for good).
+        if !flash {
+            if photoOutput.isZeroShutterLagSupported { photoOutput.isZeroShutterLagEnabled = true }
+            if photoOutput.isResponsiveCaptureSupported { photoOutput.isResponsiveCaptureEnabled = true }
+            if photoOutput.isFastCapturePrioritizationSupported { photoOutput.isFastCapturePrioritizationEnabled = true }
+        } else {
+            if photoOutput.isFastCapturePrioritizationSupported { photoOutput.isFastCapturePrioritizationEnabled = false }
+            if photoOutput.isResponsiveCaptureSupported { photoOutput.isResponsiveCaptureEnabled = false }
+            if photoOutput.isZeroShutterLagSupported { photoOutput.isZeroShutterLagEnabled = false }
+        }
     }
 
     /// ZERO switched: Apple ProRAW is turned on in the output only while it is wanted.
     func zeroChanged() {
+        updateUltraWide()   // never the ultra-wide with RAW
         let on = settings.digiZero
         sessionQueue.async {
             guard self.photoOutput.isAppleProRAWSupported, self.photoOutput.isAppleProRAWEnabled != on else { return }
@@ -1024,10 +1241,10 @@ final class CameraModel: NSObject, ObservableObject {
         preparePhotos()
     }
 
-    /// The RAW format ZERO shoots: Apple ProRAW where there is one, else the sensor's Bayer RAW.
+    /// The RAW format ZERO shoots: Apple ProRAW only. (A sensor's Bayer RAW needs zoom 1× and the
+    /// fastest capture, and threw otherwise; without ProRAW the setting is hidden.)
     private var zeroFormat: OSType? {
-        let all = photoOutput.availableRawPhotoPixelFormatTypes
-        return all.first(where: { AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }) ?? all.first
+        photoOutput.availableRawPhotoPixelFormatTypes.first(where: { AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) })
     }
 
     /// Called when the flash setting changes.
@@ -1041,120 +1258,143 @@ final class CameraModel: NSObject, ObservableObject {
         preparePhotos()
     }
 
-    private struct Shot { let mode: CaptureMode; let develop: DevelopSettings; let crunch: Double; let date: Date; var zero = false; var pressed: Double = 0; var booth: (session: Int, index: Int)? = nil; var front = false }
+    private struct Shot {
+        let mode: CaptureMode; let develop: DevelopSettings; let crunch: Double; let date: Date
+        var zero = false; var pressed: Double = 0; var booth: (session: Int, index: Int)? = nil; var front = false
+        /// The Lock Screen camera's file name for this shot (its camera file, recipe and result).
+        var name = ""
+
+        var lock: LockShot {
+            LockShot(mode: mode, stack: develop.stack, megapixels: develop.megapixels, noise: develop.noise, date: develop.date,
+                     recipe: develop.recipe, film: develop.film, filmRecipe: develop.filmRecipe, crunch: crunch, taken: date, front: front)
+        }
+
+        init(mode: CaptureMode, develop: DevelopSettings, crunch: Double, date: Date, zero: Bool = false, pressed: Double = 0,
+             booth: (session: Int, index: Int)? = nil, front: Bool = false) {
+            self.mode = mode; self.develop = develop; self.crunch = crunch; self.date = date
+            self.zero = zero; self.pressed = pressed; self.booth = booth; self.front = front
+        }
+
+        init(_ l: LockShot) {
+            var d = DevelopSettings()
+            d.stack = l.stack; d.megapixels = l.megapixels; d.noise = l.noise; d.date = l.date
+            d.recipe = l.recipe; d.film = l.film; d.filmRecipe = l.filmRecipe
+            self.init(mode: l.mode, develop: d, crunch: l.crunch, date: l.taken, front: l.front)
+        }
+    }
     private var pending: [Int64: Shot] = [:]
     /// Shots whose system click was dropped, so XA plays its own when the picture is really taken.
     private var quietShots: Set<Int64> = []
 
+    /// What a shot's develop hands back: the file, its type, a small picture for the roll
+    /// button, and BOOTH's copy for its sheet.
+    fileprivate struct Developed { let out: Data; let type: UTType; let thumb: CGImage?; let booth: UIImage? }
+
+    /// The camera's file, developed into the picture that is saved. Any queue.
+    private func produce(_ data: Data, _ shot: Shot) -> Developed? {
+        // DIGI and FILM expand the photo's HDR gain map, so a lamp is brighter than white paper and
+        // only real light sources bloom and halate. PRO keeps the file untouched anyway.
+        #if CAPTURE_EXTENSION
+        let opts: [CIImageOption: Any] = [.applyOrientationProperty: true]
+        #else
+        let opts: [CIImageOption: Any] = shot.mode == .pro ? [.applyOrientationProperty: true] : [.applyOrientationProperty: true, .expandToHDR: true]
+        #endif
+        guard var src = CIImage(data: data, options: opts) ?? CIImage(data: data, options: [.applyOrientationProperty: true]) else { return nil }
+        #if CAPTURE_EXTENSION
+        // The Lock Screen camera develops at a lab scan's size, well inside its memory.
+        if shot.mode != .pro { src = Darkroom.scaled(src, longEdge: shot.develop.film ? 3088 : 2600) }
+        #endif
+        // ZERO: the RAW developed flat, no boost, no local tone mapping, no HDR: only the
+        // film shapes the picture. The metadata still comes from the file.
+        let fileProps = src.properties
+        var demo: DigicamFX.Conditions? = nil
+        if shot.zero, let raw = CIRAWFilter(imageData: data, identifierHint: nil) {
+            raw.boostAmount = 0
+            raw.localToneMapAmount = 0
+            raw.extendedDynamicRangeAmount = 0
+            if let o = raw.outputImage { src = o; demo = DigicamFX.Conditions(properties: fileProps) }
+        }
+        // The selfie camera: upright and mirrored, as the viewfinder showed it (PRO too: its
+        // picture is shot at the sensor's angle, so it needs the same turn).
+        if shot.front { src = Self.upright(src, mirror: true) }
+        // What the camera wrote, for PRO: HEIF or JPEG as it came out.
+        var fileType: UTType = .jpeg
+        if let s = CGImageSourceCreateWithData(data as CFData, nil), let t = CGImageSourceGetType(s), let u = UTType(t as String) { fileType = u }
+        if shot.mode == .pro && !shot.front {
+            // Saved exactly as the camera made it.
+            return Developed(out: data, type: fileType, thumb: Self.quickThumb(data), booth: nil)
+        }
+        if shot.mode == .pro {
+            // The selfie camera in PRO: turned upright and mirrored, nothing else.
+            guard let cg = Encoder.render(src, reference: nil) else { return nil }
+            var props = fileProps
+            props[kCGImagePropertyOrientation as String] = 1
+            if var tiff = props[kCGImagePropertyTIFFDictionary as String] as? [String: Any] {
+                tiff[kCGImagePropertyTIFFOrientation as String] = 1
+                props[kCGImagePropertyTIFFDictionary as String] = tiff
+            }
+            var type = fileType
+            var out = Encoder.encode(cg, type: type, quality: 0.95, properties: props)
+            if out == nil { type = .jpeg; out = Encoder.encode(cg, type: .jpeg, quality: 0.95, properties: props) }
+            guard let out else { return nil }
+            return Developed(out: out, type: type, thumb: Self.downsizedCG(cg, longEdge: 200), booth: nil)
+        }
+        let (developed, alpha) = Darkroom.develop(src, shot.develop, date: shot.date, preview: false, demo: demo)
+        let recipe = shot.develop.booth.map { "XA BOOTH · \($0.title)" } ?? Recipe.describe(shot.develop.stack, megapixels: shot.develop.megapixels, film: shot.develop.film)
+        // The thumbnail first: it is the reference the full render is checked against, cell by
+        // cell, so a render that came back with black tiles is redone on the CPU. It is also the
+        // roll button's picture.
+        let e0 = developed.extent
+        let k0: CGFloat = 200 / max(e0.width, 1)
+        let small = developed.transformed(by: CGAffineTransform(scaleX: k0, y: k0))
+        let reference = Encoder.gpu.createCGImage(small, from: small.extent.integral)
+        guard let cg = Encoder.render(developed, reference: reference) else { return nil }
+        let props = Recipe.properties(from: fileProps, recipe: recipe)
+        // FILM keeps everything: HEIC at a high quality. DIGI saves the crunch you chose.
+        let full = shot.develop.film || shot.develop.booth != nil
+        var type: UTType = full ? .heic : (alpha ? .png : .jpeg)
+        var out = Encoder.encode(cg, type: type, quality: full ? 0.95 : CGFloat(shot.crunch), properties: props)
+        if out == nil && type == .heic {
+            type = .jpeg
+            out = Encoder.encode(cg, type: .jpeg, quality: 0.95, properties: props)
+        }
+        guard let out else { return nil }
+        let booth = shot.booth != nil ? Self.downsized(cg, longEdge: 1400) : nil
+        return Developed(out: out, type: type, thumb: reference, booth: booth)
+    }
+
     private func develop(_ data: Data, _ shot: Shot) {
         developQueue.async {
             defer { DispatchQueue.main.async { self.developing = max(0, self.developing - 1) } }
-            // DIGI expands the photo's HDR gain map, so a lamp is brighter than white paper and
-            // only real light sources bloom. PRO keeps the file untouched anyway.
-            #if CAPTURE_EXTENSION
-            // The Lock Screen camera: the camera's own file goes into the session folder first, so
-            // a picture is kept even if developing it runs out of the extension's small memory or
-            // time; the developed one replaces it.
-            let backup = self.writeBackup(data)
-            let opts: [CIImageOption: Any] = [.applyOrientationProperty: true]
-            #else
-            let opts: [CIImageOption: Any] = shot.mode == .pro ? [.applyOrientationProperty: true] : [.applyOrientationProperty: true, .expandToHDR: true]
-            #endif
-            guard var src = CIImage(data: data, options: opts) ?? CIImage(data: data, options: [.applyOrientationProperty: true]) else { return }
-            #if CAPTURE_EXTENSION
-            // ...and develops at a lab scan's size, well inside its memory.
-            if shot.mode != .pro {
-                let long = max(src.extent.width, src.extent.height)
-                if long > 2600 {
-                    let k = 2600 / long
-                    src = src.transformed(by: CGAffineTransform(scaleX: k, y: k))
-                    src = src.cropped(to: src.extent.integral)
-                }
+            let made = self.produce(data, shot)
+            if let b = shot.booth {
+                let small = made?.booth
+                DispatchQueue.main.async { self.boothCollect(b.session, b.index, small, date: shot.date) }
             }
-            #endif
-            // ZERO: the RAW developed flat, no boost, no local tone mapping, no HDR: only the
-            // film shapes the picture. The metadata still comes from the file.
-            let fileProps = src.properties
-            var demo: DigicamFX.Conditions? = nil
-            if shot.zero, let raw = CIRAWFilter(imageData: data, identifierHint: nil) {
-                raw.boostAmount = 0
-                raw.localToneMapAmount = 0
-                raw.extendedDynamicRangeAmount = 0
-                if let o = raw.outputImage { src = o; demo = DigicamFX.Conditions(properties: fileProps) }
-            }
-            // The selfie camera: upright and mirrored, as the viewfinder showed it.
-            if shot.front && shot.mode != .pro { src = Self.upright(src, mirror: true) }
-            var out: Data?
-            var type: UTType = .jpeg
-            var thumbSource = src
-            if shot.mode == .pro && !shot.front {
-                // Saved exactly as the camera made it.
-                out = data
-                type = self.settings.proFormat == .heif ? .heic : .jpeg
-            } else if shot.mode == .pro {
-                // The selfie camera in PRO: turned upright and mirrored, nothing else.
-                type = self.settings.proFormat == .heif ? .heic : .jpeg
-                if let cg = Encoder.render(src, reference: nil) {
-                    var props = fileProps
-                    props[kCGImagePropertyOrientation as String] = 1
-                    if var tiff = props[kCGImagePropertyTIFFDictionary as String] as? [String: Any] {
-                        tiff[kCGImagePropertyTIFFOrientation as String] = 1
-                        props[kCGImagePropertyTIFFDictionary as String] = tiff
-                    }
-                    out = Encoder.encode(cg, type: type, quality: 0.95, properties: props)
-                }
-            } else {
-                let (developed, alpha) = Darkroom.develop(src, shot.develop, date: shot.date, preview: false, demo: demo)
-                let recipe = shot.develop.booth.map { "XA BOOTH · \($0.title)" } ?? Recipe.describe(shot.develop.stack, megapixels: shot.develop.megapixels, film: shot.develop.film)
-                thumbSource = developed
-                // The thumbnail first: it is the reference the full render is checked against,
-                // cell by cell, so a render that came back with black tiles is redone on the CPU.
-                let e0 = developed.extent
-                let k0: CGFloat = 200 / max(e0.width, 1)
-                let small = developed.transformed(by: CGAffineTransform(scaleX: k0, y: k0))
-                let reference = Encoder.gpu.createCGImage(small, from: small.extent.integral)
-                guard let cg = Encoder.render(developed, reference: reference) else { return }
-                let props = Recipe.properties(from: fileProps, recipe: recipe)
-                // FILM keeps everything: HEIC at a high quality. DIGI saves the crunch you chose.
-                let full = shot.develop.film || shot.develop.booth != nil
-                type = full ? .heic : (alpha ? .png : .jpeg)
-                out = Encoder.encode(cg, type: type, quality: full ? 0.95 : CGFloat(shot.crunch), properties: props)
-                if let b = shot.booth {
-                    let small = Self.downsized(cg, longEdge: 1400)
-                    DispatchQueue.main.async { self.boothCollect(b.session, b.index, small, date: shot.date) }
-                }
-                if out == nil && type == .heic {
-                    type = .jpeg
-                    out = Encoder.encode(cg, type: .jpeg, quality: 0.95, properties: props)
-                }
-            }
-            guard let out else { return }
+            guard let made else { return }
             #if CAPTURE_EXTENSION
-            self.writeFallback(out, type)
-            if let backup { try? FileManager.default.removeItem(at: backup) }
+            self.lockSave(made, name: shot.name)
             #endif
-            let e = thumbSource.extent
-            let k: CGFloat = 200 / max(e.width, 1)
-            let small = thumbSource.transformed(by: CGAffineTransform(scaleX: k, y: k))
-            let thumb = Looks.context.createCGImage(small, from: small.extent)
             let done = CACurrentMediaTime() - shot.pressed
             DispatchQueue.main.async {
                 func ms(_ t: Double) -> String { t < 1 ? "\(Int(t * 1000)) ms" : String(format: "%.1f s", t) }
                 self.lastTiming = "taken \(ms(self.timing.taken)) · photo \(ms(self.timing.photo)) · saved \(ms(done))"
-                if let thumb { self.lastShot = UIImage(cgImage: thumb) }
+                if let thumb = made.thumb { self.lastShot = UIImage(cgImage: thumb) }
                 #if !CAPTURE_EXTENSION
-                if let lib = self.library {
-                    lib.save(data: out, type: type) { ok in
-                        if !ok { self.writeFallback(out, type) }
-                    }
-                } else {
-                    self.writeFallback(out, type)
-                }
+                self.save(made.out, made.type)
                 #endif
             }
         }
     }
 
+    /// The app develops a shot the Lock Screen camera didn't get to (its recipe and camera file
+    /// were left in the session folder). Any queue; nil if it can't be developed.
+    func developLeftover(_ data: Data, recipe: LockShot) -> (Data, UTType)? {
+        guard let made = produce(data, Shot(recipe)) else { return nil }
+        return (made.out, made.type)
+    }
+
+    /// Into Photos, or into the pending folder for later when Photos won't take it now.
     private func save(_ out: Data, _ type: UTType) {
         if let lib = library {
             lib.save(data: out, type: type) { ok in if !ok { self.writeFallback(out, type) } }
@@ -1164,20 +1404,25 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     @discardableResult
-    private func writeFallback(_ data: Data, _ type: UTType, prefix: String = "XA") -> URL? {
+    private func writeFallback(_ data: Data, _ type: UTType, name: String? = nil) -> URL? {
         guard let dir = fallbackFolder else { return nil }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let ext = type.preferredFilenameExtension ?? "jpg"
-        let url = dir.appendingPathComponent("\(prefix)-\(Int(Date().timeIntervalSince1970 * 1000))-\(Int.random(in: 0..<10000)).\(ext)")
+        let stem = name ?? "XA-\(Int(Date().timeIntervalSince1970 * 1000))-\(Int.random(in: 0..<10000))"
+        let url = dir.appendingPathComponent("\(stem).\(ext)")
         do { try data.write(to: url, options: .atomic); return url } catch { return nil }
     }
 
-    /// The camera's file as it came, kept until the developed picture is written.
-    private func writeBackup(_ data: Data) -> URL? {
-        var type: UTType = .jpeg
-        if let src = CGImageSourceCreateWithData(data as CFData, nil), let t = CGImageSourceGetType(src), let u = UTType(t as String) { type = u }
-        return writeFallback(data, type, prefix: "XA-camera")
+    /// A small picture straight from the camera's file (the full one isn't decoded for it).
+    static func quickThumb(_ data: Data, side: Int = 200) -> CGImage? {
+        guard let s = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let o: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                  kCGImageSourceThumbnailMaxPixelSize: side,
+                                  kCGImageSourceCreateThumbnailWithTransform: true]
+        return CGImageSourceCreateThumbnailAtIndex(s, 0, o as CFDictionary)
     }
+
+    static func downsizedCG(_ cg: CGImage, longEdge: CGFloat) -> CGImage? { downsized(cg, longEdge: longEdge)?.cgImage }
 
     // MARK: instant review
 
@@ -1200,6 +1445,20 @@ final class CameraModel: NSObject, ObservableObject {
         reviewToken += 1
         lock.lock(); _reviewUntil = 0; lock.unlock()
         reviewing = false
+    }
+
+    /// The meter, for the PRO panel, DIGI's screen and FILM's needle: published only when it
+    /// moves (every publish redraws every view that watches the camera).
+    private func publishMeter() {
+        sessionQueue.async {
+            guard let dev = self.device else { return }
+            let d = dev.exposureDuration.seconds, iso = dev.iso
+            guard d.isFinite, d > 0, iso.isFinite, iso > 0 else { return }
+            DispatchQueue.main.async {
+                if abs(log2(d / max(self.meterShutter, 1e-6))) > 0.1 { self.meterShutter = d }
+                if abs(self.meterISO - iso) > 1 { self.meterISO = iso }
+            }
+        }
     }
 
     // MARK: histogram
@@ -1261,18 +1520,24 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         }
         // Cleaned at the door: a sensor pixel below the legal video range decodes to NaN, and every
         // blur and resize downstream would spread it into a black square.
-        let raw = Self.upright(Sanitize.apply(CIImage(cvPixelBuffer: pb), floor: 0), mirror: frontFlag)
+        lock.lock(); let mirror = frontFlag; lock.unlock()
+        let raw = Self.upright(Sanitize.apply(CIImage(cvPixelBuffer: pb), floor: 0), mirror: mirror)
         let e = raw.extent
         let width: CGFloat = !mNow.developed || mNow == .video ? 1080 : (lowPower ? 640 : 810)
         let k: CGFloat = min(1, width / max(e.width, 1))
         let src = raw.transformed(by: CGAffineTransform(scaleX: k, y: k))
         let (m, dev) = frameState()
         frameCount += 1
-        if m != .video && frameCount % 6 == 3 && settings.afArea == .eye { trackEye(pb) }
+        // Eye AF on the rear camera, off this queue (Vision here stalled the viewfinder).
+        if m != .video && !mirror && frameCount % 6 == 3 && settings.afArea == .eye { trackEye(src) }
         if frameCount % 10 == 0 {
+            // a small copy for the editors' previews, baked so it doesn't hold the camera's buffer
             let s: CGFloat = 640 / max(src.extent.width, 1)
             let small = src.transformed(by: CGAffineTransform(scaleX: s, y: s))
-            lock.lock(); _latest = small; lock.unlock()
+            if let cg = Looks.context.createCGImage(small, from: small.extent.integral) {
+                let img = CIImage(cgImage: cg)
+                lock.lock(); _latest = img; lock.unlock()
+            }
         }
         lock.lock()
         if _switchPending { _switchPending = false; _switchStart = CACurrentMediaTime() }
@@ -1312,19 +1577,13 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                 let s: CGFloat = 160 / max(src.extent.width, 1)
                 updateHistogram(src.transformed(by: CGAffineTransform(scaleX: s, y: s)))
             }
-            if m == .pro && frameCount % 15 == 0, let dev = device {
-                let d = dev.exposureDuration.seconds, iso = dev.iso
-                DispatchQueue.main.async { self.meterShutter = d; self.meterISO = iso }
-            }
+            if m == .pro && frameCount % 15 == 0 { publishMeter() }
         } else {
             // Develop the frame the way the photograph will be turned, so the date back and the
             // shape sit where they will on the print, then turn it back for the viewfinder.
-            if frameCount % 15 == 0, let dev = device {
-                let d = dev.exposureDuration.seconds, iso = dev.iso
-                DispatchQueue.main.async { self.meterShutter = d; self.meterISO = iso }
-            }
-            // DIGI's screen shows a histogram too (a few times a second is plenty).
-            if m == .digi && frameCount % 10 == 0 {
+            if frameCount % 15 == 0 { publishMeter() }
+            // DIGI's screen shows a histogram too (a few times a second is plenty), only when it's on.
+            if m == .digi && dev.screenDate && frameCount % 10 == 0 {
                 let s: CGFloat = 160 / max(src.extent.width, 1)
                 updateHistogram(src.transformed(by: CGAffineTransform(scaleX: s, y: s)))
             }
@@ -1332,8 +1591,14 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             let upright = Self.rotated(src, clockwise: t)
             var dev = dev
             if dev.booth != nil {
-                lock.lock(); dev.eyes = _boothEyes; let busy = eyesBusy; if !busy { eyesBusy = true }; lock.unlock()
-                if !busy { findEyes(upright) }
+                // faces and the person are looked for about ten times a second, off this queue
+                let now = CACurrentMediaTime()
+                lock.lock()
+                dev.eyes = _boothEyes; dev.boothMask = _boothMask
+                let go = !eyesBusy && now - lastEyesAt > 0.1
+                if go { eyesBusy = true; lastEyesAt = now }
+                lock.unlock()
+                if go { findEyes(upright) }
             }
             // FILM: plain finder, with a peek at the film after each change (see syncFrameSettings).
             var peek: CGFloat = 1
@@ -1478,6 +1743,10 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
         let id = photo.resolvedSettings.uniqueID
         let data = photo.fileDataRepresentation()
         let now = CACurrentMediaTime()
+        #if CAPTURE_EXTENSION
+        // On the Lock Screen the camera's file is kept right away, before anything else.
+        if error == nil, let data { lockKeep(data, id: id) }
+        #endif
         DispatchQueue.main.async {
             guard let shot = self.pending.removeValue(forKey: id) else { return }
             self.timing.photo = now - shot.pressed
@@ -1486,7 +1755,79 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
             self.develop(data, shot)
         }
     }
+
+    /// The capture is over. A shot that never got its picture is let go here (otherwise it
+    /// stayed pending and the roll button's spinner never stopped).
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
+        let id = resolvedSettings.uniqueID
+        DispatchQueue.main.async { self.abandon(id) }
+    }
 }
+
+#if CAPTURE_EXTENSION
+/// The Lock Screen camera's saving. Apple's design: the extension adds pictures straight to
+/// Photos (it may, even while locked, with the app's permission), and anything it can't finish
+/// waits in the session folder, which the system hands to the app when the camera is put away.
+/// Per shot, in that folder:
+/// - `<name>.camera.<ext>` + `<name>.json`: the camera's file and the recipe, the moment the photo arrives
+/// - `<name>.asset`: the picture went into Photos (its id, for the app's roll and album)
+/// - `<name>.<ext>`: developed, but Photos wouldn't take it here
+/// The app (XAApp.ingest) finishes whatever is left.
+extension CameraModel {
+    fileprivate func lockKeep(_ data: Data, id: Int64) {
+        lock.lock(); let entry = _lockShots.removeValue(forKey: id); lock.unlock()
+        guard let entry, let dir = fallbackFolder else { return }
+        let ext = Self.fileExtension(of: data)
+        ioQueue.async {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? data.write(to: dir.appendingPathComponent("\(entry.name).camera.\(ext)"), options: .atomic)
+            if let j = try? JSONEncoder().encode(entry.recipe) {
+                try? j.write(to: dir.appendingPathComponent("\(entry.name).json"), options: .atomic)
+            }
+        }
+    }
+
+    fileprivate func lockSave(_ made: Developed, name: String) {
+        guard let dir = fallbackFolder, !name.isEmpty else { return }
+        let marker = dir.appendingPathComponent("\(name).asset")
+        let finish: (Bool) -> Void = { inPhotos in
+            self.ioQueue.async {
+                let fm = FileManager.default
+                if !inPhotos {
+                    try? fm.removeItem(at: marker)
+                    let ext = made.type.preferredFilenameExtension ?? "jpg"
+                    guard (try? made.out.write(to: dir.appendingPathComponent("\(name).\(ext)"), options: .atomic)) != nil else { return }
+                }
+                // the camera's copy and the recipe are done with
+                for u in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+                where u.lastPathComponent.hasPrefix(name + ".camera.") || u.lastPathComponent == name + ".json" {
+                    try? fm.removeItem(at: u)
+                }
+            }
+        }
+        let rw = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard rw == .authorized || rw == .limited || PHPhotoLibrary.authorizationStatus(for: .addOnly) == .authorized else {
+            finish(false); return
+        }
+        PHPhotoLibrary.shared().performChanges({
+            let req = PHAssetCreationRequest.forAsset()
+            let o = PHAssetResourceCreationOptions()
+            o.uniformTypeIdentifier = made.type.identifier
+            req.addResource(with: .photo, data: made.out, options: o)
+            // written before the change commits: a marker whose picture never arrived is just
+            // dropped by the app, a picture with no marker would come in twice
+            if let id = req.placeholderForCreatedAsset?.localIdentifier {
+                try? Data(id.utf8).write(to: marker, options: .atomic)
+            }
+        }, completionHandler: { ok, _ in finish(ok) })
+    }
+
+    static func fileExtension(of data: Data) -> String {
+        guard let s = CGImageSourceCreateWithData(data as CFData, nil), let t = CGImageSourceGetType(s) else { return "jpg" }
+        return UTType(t as String)?.preferredFilenameExtension ?? "jpg"
+    }
+}
+#endif
 
 extension CameraModel: AVCaptureSessionControlsDelegate {
     func sessionControlsDidBecomeActive(_ session: AVCaptureSession) {}
@@ -1540,7 +1881,9 @@ extension CameraModel {
 
     /// A developed shot arrives; with all four in, the sheet is laid out and saved.
     fileprivate func boothCollect(_ session: Int, _ index: Int, _ img: UIImage?, date: Date) {
-        guard let img, boothFrames[session] != nil else { return }
+        // a shot that couldn't be developed ends its sheet (the other three aren't held forever)
+        guard let img else { boothFrames[session] = nil; return }
+        guard boothFrames[session] != nil else { return }
         boothFrames[session]?[index] = img
         guard let got = boothFrames[session], got.count == Booth.shots else { return }
         boothFrames[session] = nil
@@ -1566,9 +1909,15 @@ extension CameraModel {
         // Big enough that the faces at the back of a group are still found.
         let k: CGFloat = min(1, 720 / max(frame.extent.width, 1))
         let small = frame.transformed(by: CGAffineTransform(scaleX: k, y: k))
+        let full = frame.extent
         eyeQueue.async {
             let found = Booth.scaled(Booth.eyes(in: small), 1 / k)
-            self.lock.lock(); self._boothEyes = found; self.eyesBusy = false; self.lock.unlock()
+            // the person, for the backdrop: on the small frame, scaled back to the frame's own size
+            var mask: CIImage?
+            if let m = Booth.segment(small, quality: .balanced, request: self.segmentation) {
+                mask = m.transformed(by: CGAffineTransform(scaleX: 1 / k, y: 1 / k)).cropped(to: full)
+            }
+            self.lock.lock(); self._boothEyes = found; self._boothMask = mask; self.eyesBusy = false; self.lock.unlock()
         }
     }
 
@@ -1615,8 +1964,9 @@ extension CameraModel {
     func updateUltraWide() {
         let want = wantsUltraWide
         sessionQueue.async {
-            guard self.authorized == true || self.input != nil else { return }
-            if want != self.multiCam { self.rebuildSession(multi: want) }
+            guard self.input != nil else { return }
+            // a phone that couldn't run both cameras isn't asked again
+            if want != self.multiCam && !(want && self.multiCamFailed) { self.rebuildSession(multi: want) }
         }
     }
 
@@ -1631,6 +1981,8 @@ extension CameraModel {
         if multi && configureMulti() {
             multiCam = true
         } else {
+            if multi { multiCamFailed = true }
+            input = nil; device = nil; uwInput = nil
             session = AVCaptureSession()
             configure()
         }
@@ -1681,12 +2033,14 @@ extension CameraModel {
         }
         photoOutput.maxPhotoQualityPrioritization = .quality
         applyCapturePolicy(flash: settings.flash != .off)
-        device = wide; input = wIn; uwInput = uIn
-        let m = mode
+        let m = frameState().0
         setupPhotoOutput(wide, m)
         ms.commitConfiguration()
         // Too much for this phone at this quality: drop the ultra-wide rather than the photo.
+        // (The cameras are only taken on once the session is known to run: set before this,
+        // a failed check left `input` set and the plain session that follows never opened.)
         guard ms.hardwareCost <= 1, ms.systemPressureCost <= 1 else { detach(ms); return false }
+        device = wide; input = wIn; uwInput = uIn
         let fovW = Double(wide.activeFormat.videoFieldOfView), fovU = Double(uw.activeFormat.videoFieldOfView)
         let ratio = tan(fovU / 2 * .pi / 180) / tan(fovW / 2 * .pi / 180)
         lock.lock(); _uwRatio = CGFloat(ratio.isFinite && ratio > 1 ? ratio : 2); _uwGain = CIVector(x: 1, y: 1, z: 1); lock.unlock()

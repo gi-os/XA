@@ -59,11 +59,11 @@ enum FilmPreview {
         let gr = stock.grain * (r?.grain ?? 1) * max(0.5, 1 + 0.3 * Double(push))
         if gr > 0, let tex = grainTexture(), let k = grainKernel {
             var g = SeededRandom(seed)
-            let dx = CGFloat(g.next() * 512), dy = CGFloat(g.next() * 512)
+            let dx = CGFloat(Int(g.next() * 512)), dy = CGFloat(Int(g.next() * 512))   // whole pixels: no resampling flicker
             // the grain clumps are ~7 µm on the negative: as big as the texture's when a pixel is ~4 µm
             let s = max(1, min(4, 4 / um * 7))
             let noise = tex.applyingFilter("CIAffineTile", parameters: [kCIInputTransformKey: CGAffineTransform(scaleX: s, y: s)])
-                .transformed(by: CGAffineTransform(translationX: -dx * s, y: -dy * s)).cropped(to: full)
+                .transformed(by: CGAffineTransform(translationX: (-dx * s).rounded(), y: (-dy * s).rounded())).cropped(to: full)
             let amp = Float(gr * 2.3 * 3.2 * min(1.6, max(0.6, 12 / um)))
             if let out = k.apply(extent: full, arguments: [img, noise, amp, Float(stock.mono ? 0 : 0.25)]) { img = out }
         }
@@ -127,7 +127,7 @@ enum FilmPreview {
             "inputRVector": CIVector(x: 3.2, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: 3.2, z: 0, w: 0),
             "inputBVector": CIVector(x: 0, y: 0, z: 3.2, w: 0), "inputBiasVector": CIVector(x: -1.1, y: -1.1, z: -1.1, w: 0)])
         guard let cg = context.createCGImage(stretched, from: box, format: .RGBA8, colorSpace: nil) else { return nil }
-        let t = CIImage(cgImage: cg)
+        let t = CIImage(cgImage: cg, options: [.colorSpace: NSNull()])   // raw values, not colour-managed
         lock.lock(); texture = t; lock.unlock()
         return t
     }
@@ -138,7 +138,7 @@ enum FilmPreview {
     kernel vec4 xaFastGrain(__sample c, __sample n, float amp, float chroma) {
         float l = max(max(c.r, max(c.g, c.b)), 1e-4);
         float mid = sqrt(clamp(1.0 - l, 0.04, 1.0));
-        vec3 d = vec3(n.r - 0.5) + chroma * (n.gbr - vec3(0.5));
+        vec3 d = vec3(n.r - 0.5) + chroma * (vec3(0.0, n.g, n.b) - vec3(0.0, 0.5, 0.5));
         return vec4(c.rgb * pow(vec3(10.0), d * amp * mid * 0.25), 1.0);
     }
     """)

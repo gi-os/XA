@@ -15,6 +15,10 @@ struct XAContext: Codable, Sendable {
     var dateFormat: String = "own"
     var dateTime: Bool = false
     var front: Bool = false
+    /// Everything else that shapes a picture (LockSettings, as JSON): the FILM and DIGI recipes,
+    /// both date backs, both loaded films, flash, sounds, favorites. Optional, so a context saved
+    /// by an older build still loads.
+    var settings: String? = nil
 }
 
 /// Launches XA from the camera button, the Lock Screen, Control Center and the Action button.

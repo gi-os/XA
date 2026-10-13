@@ -8,6 +8,9 @@ struct CameraView: View {
     var onCustomize: () -> Void
     var onFilm: () -> Void
     var modes: [CaptureMode] = CaptureMode.allCases
+    /// The Lock Screen camera: swipes that would open the roll (and ask for Face ID) are off;
+    /// the roll button still opens it on purpose.
+    var lockScreen = false
     /// The film rows are open; folded, the loaded film sits in the mode row as a little box.
     @State private var filmOpen = false
     /// Which way up the phone is held, so the film box can turn with it.
@@ -26,6 +29,14 @@ struct CameraView: View {
             // swallowed every touch and the pinch and swipes never arrived.
             viewfinder
                 .overlay { FocusTapLayer(camera: camera, filmOpen: $filmOpen) }
+                // above the tap layer, or a tap on it only aimed focus
+                .overlay(alignment: .bottom) {
+                    if camera.mode == .pro, !lockScreen, let code = camera.qrCode {
+                        QRChip(code: code).id(code).padding(.bottom, 14)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(.snappy, value: camera.qrCode)
                 .onReceive(NotificationCenter.default.publisher(for: .xaBackToCamera)) { _ in filmOpen = false }
                 .contentShape(Rectangle())
                 .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded(swipe))
@@ -72,7 +83,7 @@ struct CameraView: View {
                 }
                 .onEnded { v in
                     let dx = v.translation.width, dy = v.translation.height
-                    if dy < -60 && abs(dy) > abs(dx) { onRoll() }
+                    if dy < -60 && abs(dy) > abs(dx) { if !lockScreen { onRoll() } }
                     else if !camera.recording && abs(dx) > abs(dy) * 1.3 { ModeRibbon.land(drag: dx, modes, camera) }
                     withAnimation(.snappy(duration: 0.28)) { ribbonDrag = 0 }
                 })
@@ -98,7 +109,7 @@ struct CameraView: View {
                 .frame(width: 80, height: 52, alignment: .center)
                 .rotationEffect(.degrees(tilt.angle))
                 .animation(.spring(response: 0.35, dampingFraction: 0.8), value: tilt.angle)
-                .modifier(SwipeToStep(step: { camera.stack.push = 0; camera.stepSim($0) },
+                .modifier(SwipeToStep(step: { camera.stepSim($0) },
                                       vertical: camera.mode == .film ? { camera.stepPush($0) } : nil))
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
         } else if camera.mode == .booth {
@@ -130,7 +141,7 @@ struct CameraView: View {
         let horizontal = abs(dx) > abs(dy)
         guard max(abs(dx), abs(dy)) > 50 else { return }
         if camera.mode == .pro {
-            if !horizontal && dy < 0 { onRoll() }
+            if !horizontal && dy < 0 && !lockScreen { onRoll() }
             return
         }
         if camera.mode == .booth {
@@ -221,12 +232,6 @@ struct CameraView: View {
                             else { VStack { DigiOSD(camera: camera); Spacer() }.allowsHitTesting(false).transition(.opacity) }
                         }
                     }
-                    .overlay(alignment: .bottom) {
-                        if camera.mode == .pro, let code = camera.qrCode {
-                            QRChip(code: code).padding(.bottom, 14).transition(.move(edge: .bottom).combined(with: .opacity))
-                        }
-                    }
-                    .animation(.snappy, value: camera.qrCode)
                     .overlay { ShutterBlinkView(camera: camera, settings: settings) }
             }
         }
@@ -354,6 +359,8 @@ struct FilmStrip: View {
     @ObservedObject var camera: CameraModel
     var row: Int
     var onPick: () -> Void = {}
+    /// The film a long-press just starred: the button's tap that ends that touch is not a load.
+    @State private var starred: (id: String, at: Date)?
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
@@ -380,6 +387,8 @@ struct FilmStrip: View {
                 }
                 .padding(.vertical, 3).padding(.horizontal, 2)
             }
+            // scrolling through the boxes keeps the rows from folding away under the finger
+            .onScrollPhaseChange { _, p in if p != .idle { onPick() } }
             .onAppear { scroll(proxy) }
             .onChange(of: camera.stack) { _, _ in withAnimation { scroll(proxy) } }
         }
@@ -399,14 +408,19 @@ struct FilmStrip: View {
         let on = FilmCatalog.sim(camera.stack.simID)?.id == s.id
         let fav = camera.isFavorite(s.id)
         return tile(.sim(on ? (camera.stack.shownSim ?? s) : s), on: on) {
-            if !on { camera.stack.push = 0 }
-            camera.stack.simID = s.id
+            if let st = starred, st.id == s.id, Date().timeIntervalSince(st.at) < 2 { starred = nil; return }
+            var next = camera.stack
+            if !on { next.push = 0 }
+            next.simID = s.id
+            camera.stack = next
         }
         .rotationEffect(.degrees(fav ? -2 : 0))
         .overlay(alignment: .topTrailing) { if fav { FavoriteStar().offset(x: 6, y: -6) } }
         .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+            starred = (s.id, Date())
             withAnimation(.snappy) { camera.toggleFavorite(s.id) }
         })
+        .accessibilityAction(named: fav ? "Unstar" : "Star") { camera.toggleFavorite(s.id) }
     }
 
     private func tile(_ item: FilmItem, on: Bool, _ action: @escaping () -> Void) -> some View {
@@ -418,6 +432,7 @@ struct FilmStrip: View {
         .buttonStyle(.plain)
         .id(item.id)
         .accessibilityLabel(item.title)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 

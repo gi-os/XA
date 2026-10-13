@@ -2,6 +2,7 @@ import SwiftUI
 import LockedCameraCapture
 import AppIntents
 import UniformTypeIdentifiers
+import Photos
 
 @main
 struct XAApp: App {
@@ -31,7 +32,9 @@ struct RootView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let wide = geo.size.width > geo.size.height * 0.8
+            // Side by side only on an iPad. On an iPhone the window turns only for the photo
+            // viewer, and the layout must not change under it (that closed the viewer).
+            let wide = UIDevice.current.userInterfaceIdiom == .pad && geo.size.width > geo.size.height * 0.8
             if wide {
                 HStack(spacing: 0) {
                     camView.frame(width: geo.size.width * 0.55)
@@ -40,17 +43,18 @@ struct RootView: View {
             } else {
                 // The roll is a layer above the camera: swipe up for it, swipe down to put it away.
                 ZStack {
-                    camView
+                    camView.accessibilityHidden(showRoll)
                     ContactSheet(library: library, onClose: closeRoll, onDrag: { pull = $0 })
                         .offset(y: showRoll ? max(0, pull) : geo.size.height + 40)
                         .allowsHitTesting(showRoll)
+                        .accessibilityHidden(!showRoll)
                 }
             }
         }
         .background(Color.black.ignoresSafeArea())
         .statusBarHidden()
-        .sheet(isPresented: $showCustomize) { CustomizeView(settings: settings, camera: camera) }
-        .sheet(isPresented: $showFilm, onDismiss: { camera.rebuildControls() }) { FilmPicker(camera: camera) }
+        .sheet(isPresented: $showCustomize, onDismiss: { pushContext() }) { CustomizeView(settings: settings, camera: camera) }
+        .sheet(isPresented: $showFilm, onDismiss: { camera.rebuildControls(); pushContext() }) { FilmPicker(camera: camera) }
         .onAppear {
             CameraSounds.shared.prepare()
             camera.library = library
@@ -64,8 +68,13 @@ struct RootView: View {
         }
         .onChange(of: phase) { _, p in
             // Back from Settings with Photos access changed: the roll picks it up.
-            if p == .active { camera.resume(); library.refresh(); library.flushPending() }
-            else if p == .background {
+            if p == .active {
+                if !showRoll { camera.resume() }
+                library.refresh(); library.flushPending()
+                // pictures the Lock Screen camera left while the app wasn't running
+                Task { await ingestAll() }
+            } else if p == .background {
+                pushContext()   // the Lock Screen camera opens with exactly this
                 camera.stop()
                 // Coming back always lands on the camera: roll, viewer, pickers and settings close.
                 showRoll = false; showCustomize = false; showFilm = false; pull = 0
@@ -73,16 +82,37 @@ struct RootView: View {
             }
         }
         .onChange(of: settings.date) { _, _ in camera.syncFrameSettings(); pushContext() }
-        .onChange(of: settings.filmDate) { _, _ in camera.syncFrameSettings() }
-        .onChange(of: settings.recipe) { _, _ in camera.syncFrameSettings() }
-        .onChange(of: settings.digiOSD) { _, _ in camera.syncFrameSettings() }
-        .onChange(of: settings.filmAlwaysOn) { _, _ in camera.syncFrameSettings() }
-        .onChange(of: settings.filmRecipe) { _, _ in camera.syncFrameSettings(); camera.updateUltraWide() }
+        .onChange(of: settings.filmDate) { _, _ in camera.syncFrameSettings(); pushContext() }
+        .onChange(of: settings.recipe) { _, _ in camera.syncFrameSettings(); pushContext() }
+        .onChange(of: settings.digiOSD) { _, _ in camera.syncFrameSettings(); pushContext() }
+        .onChange(of: settings.filmAlwaysOn) { _, _ in camera.syncFrameSettings(); pushContext() }
+        .onChange(of: settings.filmRecipe) { _, _ in camera.syncFrameSettings(); camera.updateUltraWide(); pushContext() }
         .onChange(of: settings.digiMegapixels) { _, _ in camera.applyResolution(); pushContext() }
         .onChange(of: settings.proMegapixels) { _, _ in camera.applyResolution() }
+        .onChange(of: settings.crunch) { _, _ in pushContext() }
+        .onChange(of: settings.noise) { _, _ in camera.syncFrameSettings(); pushContext() }
+        .onChange(of: settings.flash) { _, _ in pushContext() }
+        .onChange(of: settings.sounds) { _, _ in pushContext() }
+        .onChange(of: camera.favorites) { _, _ in pushContext() }
+        // The camera sleeps under the roll: no capture, no develop, no hardware shutter.
+        .onChange(of: showRoll) { _, open in
+            camera.captureButtonsEnabled = !open && !showCustomize && !showFilm
+            if open { camera.stop() } else if phase == .active { camera.resume() }
+        }
+        .onChange(of: showCustomize) { _, open in camera.captureButtonsEnabled = !open && !showRoll && !showFilm }
+        .onChange(of: showFilm) { _, open in camera.captureButtonsEnabled = !open && !showRoll && !showCustomize }
         .task { await ingestLockScreenShots() }
         .onChange(of: library.assets.first?.localIdentifier) { _, _ in syncThumb() }
         .onChange(of: library.authorized) { _, _ in syncThumb() }
+        // The Lock Screen camera opened the app (its roll, settings or film buttons).
+        .onContinueUserActivity(NSUserActivityTypeLockedCameraCapture) { a in
+            switch a.userInfo?["open"] as? String {
+            case "roll": openRoll()
+            case "customize": showCustomize = true
+            case "film": showFilm = true
+            default: break
+            }
+        }
     }
 
     private var camView: some View {
@@ -90,7 +120,7 @@ struct RootView: View {
     }
 
     private func syncThumb() {
-        guard let first = library.assets.first else { return }
+        guard let first = library.assets.first else { camera.showThumb(nil); return }
         library.thumbnail(first, side: 150) { camera.showThumb($0) }
     }
 
@@ -110,59 +140,132 @@ struct RootView: View {
         c.datePlacement = settings.date.placement.rawValue
         c.dateFormat = settings.date.format.rawValue
         c.dateTime = settings.date.time
-        Task { try? await XACaptureIntent.updateAppContext(c) }
+        c.settings = LockSettings.current(settings, camera: camera).encoded()
+        Task { await ContextPusher.shared.push(c) }
     }
 
-    /// Pictures the Lock Screen camera took wait in its session folders (it may not use Photos):
-    /// each goes into Photos, and a folder is let go only once all of its pictures are in.
+    // MARK: the Lock Screen camera's pictures
+
+    /// The session folders the Lock Screen camera left, as the system hands them over.
     private func ingestLockScreenShots() async {
         for await update in LockedCameraCaptureManager.shared.sessionContentUpdates {
             switch update {
-            case .initial(let urls): for u in urls { ingest(u) }
-            case .added(let u):
-                // a new folder: give the camera a moment to finish writing into it
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-                ingest(u)
+            case .initial(let urls): for u in urls { await ingest(u) }
+            case .added(let u): await ingest(u)
             default: break
             }
         }
     }
 
-    private func ingest(_ dir: URL) {
+    /// Every folder there is now (in case an update was missed).
+    private func ingestAll() async {
+        for u in LockedCameraCaptureManager.shared.sessionContentURLs { await ingest(u) }
+    }
+
+    /// One session folder: pictures the camera put in Photos are adopted onto the roll, developed
+    /// pictures go into Photos, shots it didn't get to develop are developed here with their own
+    /// recipe. Each file is removed once it's safely in; the folder is let go when it's empty.
+    @MainActor private static var inFlight = Set<String>()
+    private func ingest(_ dir: URL) async {
+        let key = dir.standardizedFileURL.path
+        guard !Self.inFlight.contains(key) else { return }
+        Self.inFlight.insert(key)
+        defer { Self.inFlight.remove(key) }
         let fm = FileManager.default
-        var files: [URL] = []
-        if let walk = fm.enumerator(at: dir, includingPropertiesForKeys: [.isRegularFileKey]) {
-            for case let f as URL in walk where (try? f.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
-                files.append(f)
-            }
+        let pictures: Set<String> = ["heic", "heif", "jpg", "jpeg", "png", "dng"]
+        let movies: Set<String> = ["mov", "mp4"]
+        func list() -> [URL] {
+            ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [])
+                .sorted { $0.lastPathComponent < $1.lastPathComponent }
         }
-        guard !files.isEmpty else { return }
-        // A developed picture and the camera's own copy of the same shot: keep the developed one.
-        let developed = files.filter { !$0.lastPathComponent.hasPrefix("XA-camera-") }
-        let keep = developed.isEmpty ? files : developed + files.filter { $0.lastPathComponent.hasPrefix("XA-camera-") && !hasDeveloped($0, in: developed) }
-        let group = DispatchGroup()
-        var allOK = true
-        for f in keep.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-            guard let data = try? Data(contentsOf: f) else { allOK = false; continue }
-            let type = UTType(filenameExtension: f.pathExtension.lowercased()) ?? .jpeg
-            group.enter()
-            if type.conforms(to: .movie) {
-                library.save(video: f) { id in if id == nil { allOK = false }; group.leave() }
+        func stem(_ u: URL) -> String { String(u.lastPathComponent.split(separator: ".").first ?? "") }
+        // 1. already in Photos: onto the roll, and the shot's leftovers go
+        for m in list() where m.pathExtension == "asset" {
+            let s = stem(m)
+            if let id = try? String(contentsOf: m, encoding: .utf8),
+               PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).count > 0 || !Self.canRead {
+                library.adopt(id)
+                for f in list() where stem(f) == s { try? fm.removeItem(at: f) }
             } else {
-                library.save(data: data, type: type) { ok in if !ok { allOK = false }; group.leave() }
+                try? fm.removeItem(at: m)   // never committed: the files below bring it in
             }
         }
-        group.notify(queue: .main) {
-            if allOK { Task { try? await LockedCameraCaptureManager.shared.invalidateSessionContent(at: dir) } }
+        // 2. what's left, one picture at a time
+        let files = list()
+        let developed = Set(files.filter { pictures.contains($0.pathExtension.lowercased()) && !$0.lastPathComponent.contains(".camera.") }.map(stem))
+        for f in files {
+            let ext = f.pathExtension.lowercased()
+            let name = f.lastPathComponent
+            if movies.contains(ext) {
+                let id = await withCheckedContinuation { c in library.save(video: f) { c.resume(returning: $0) } }
+                if id == nil { continue }
+            } else if pictures.contains(ext) {
+                if name.contains(".camera.") {
+                    let s = stem(f)
+                    if developed.contains(s) { try? fm.removeItem(at: f); continue }   // its developed picture is here
+                    // never developed: develop it now with its recipe, else keep the camera's picture
+                    let recipeURL = dir.appendingPathComponent("\(s).json")
+                    let made: (Data, UTType)? = await Task.detached(priority: .userInitiated) { [camera] in
+                        guard let data = try? Data(contentsOf: f) else { return nil }
+                        if let j = try? Data(contentsOf: recipeURL), let r = try? JSONDecoder().decode(LockShot.self, from: j),
+                           let out = camera.developLeftover(data, recipe: r) { return out }
+                        return (data, UTType(filenameExtension: ext) ?? .jpeg)
+                    }.value
+                    guard let made else { continue }
+                    let ok = await withCheckedContinuation { c in library.save(data: made.0, type: made.1) { c.resume(returning: $0) } }
+                    guard ok else { continue }
+                    try? fm.removeItem(at: f); try? fm.removeItem(at: recipeURL)
+                } else if name.hasPrefix("XA-camera-") {
+                    // an older build's backup: dropped when a developed picture of the same moment is here
+                    if Self.legacyHasDeveloped(f, in: files) { try? fm.removeItem(at: f); continue }
+                    let ok = await withCheckedContinuation { c in library.save(file: f, type: UTType(filenameExtension: ext) ?? .jpeg) { c.resume(returning: $0) } }
+                    if ok { try? fm.removeItem(at: f) }
+                } else {
+                    let ok = await withCheckedContinuation { c in library.save(file: f, type: UTType(filenameExtension: ext) ?? .jpeg) { c.resume(returning: $0) } }
+                    if ok { try? fm.removeItem(at: f) }
+                }
+            }
+        }
+        // 3. nothing worth keeping left: the folder goes
+        let left = list().filter { pictures.contains($0.pathExtension.lowercased()) || movies.contains($0.pathExtension.lowercased()) }
+        if left.isEmpty {
+            try? await LockedCameraCaptureManager.shared.invalidateSessionContent(at: dir)
         }
     }
 
-    /// The camera's copy is left over only when its shot never finished developing; a developed
-    /// picture written within a few seconds of it is the same shot.
-    private func hasDeveloped(_ camera: URL, in developed: [URL]) -> Bool {
+    /// Whether XA may look in Photos (with add-only access a marker is trusted as it is).
+    private static var canRead: Bool {
+        let s = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        return s == .authorized || s == .limited
+    }
+
+    /// An older build's backup (XA-camera-<ms>-<n>) next to its developed picture (XA-<ms>-<n>,
+    /// written within a minute after it).
+    private static func legacyHasDeveloped(_ camera: URL, in files: [URL]) -> Bool {
         func stamp(_ u: URL) -> Int? { u.deletingPathExtension().lastPathComponent.split(separator: "-").compactMap { Int($0) }.first { $0 > 1_000_000_000_000 } }
         guard let t = stamp(camera) else { return false }
-        return developed.contains { (stamp($0) ?? 0) >= t && (stamp($0) ?? 0) - t < 60_000 }
+        return files.contains { f in
+            let n = f.lastPathComponent
+            guard !n.hasPrefix("XA-camera-"), !n.contains(".camera."), let s = stamp(f) else { return false }
+            return s >= t && s - t < 60_000
+        }
     }
 }
 
+/// The app context is written one at a time, the newest winning (a burst of changes each
+/// started its own write, and an older one could land last).
+actor ContextPusher {
+    static let shared = ContextPusher()
+    private var latest: XAContext?
+    private var busy = false
+    func push(_ c: XAContext) async {
+        latest = c
+        guard !busy else { return }
+        busy = true
+        while let next = latest {
+            latest = nil
+            try? await XACaptureIntent.updateAppContext(next)
+        }
+        busy = false
+    }
+}
