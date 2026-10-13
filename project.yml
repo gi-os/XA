@@ -36,8 +36,10 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         NSCameraUsageDescription: XA is a camera. It needs the camera to take pictures.
         NSMicrophoneUsageDescription: XA records sound with your videos.
-        NSPhotoLibraryAddUsageDescription: XA saves your pictures to the XA album in Photos.
-        NSPhotoLibraryUsageDescription: XA shows the pictures in its album as a contact sheet.
+        NSPhotoLibraryAddUsageDescription: XA saves the pictures and videos you take to Photos.
+        NSPhotoLibraryUsageDescription: XA files your pictures in an XA album and shows them as its roll.
+        PHPhotoLibraryPreventAutomaticLimitedAccessAlert: true
+        UIUserInterfaceStyle: Dark
         NSUserActivityTypes:
           - NSUserActivityTypeLockedCameraCapture
         UIStatusBarHidden: true
@@ -118,8 +120,9 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSCameraUsageDescription: XA is a camera. It needs the camera to take pictures.
         NSMicrophoneUsageDescription: XA records sound with your videos.
-        NSPhotoLibraryAddUsageDescription: XA saves your pictures to the XA album in Photos.
-        NSPhotoLibraryUsageDescription: XA shows the pictures in its album as a contact sheet.
+        NSPhotoLibraryAddUsageDescription: XA saves the pictures and videos you take to Photos.
+        NSPhotoLibraryUsageDescription: XA files your pictures in an XA album and shows them as its roll.
+        UIUserInterfaceStyle: Dark
         UIAppFonts:
           - Anton-400.ttf
           - Archivo-800.ttf

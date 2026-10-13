@@ -472,6 +472,7 @@ private struct VideoRows: View {
                             .buttonStyle(.plain)
                             .id(l)
                             .accessibilityLabel(l.title)
+                            .accessibilityAddTraits(on ? .isSelected : [])
                         }
                     }
                     .padding(.vertical, 3).padding(.horizontal, 2)

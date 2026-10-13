@@ -35,7 +35,7 @@ struct ModeRibbon: View {
                     .frame(width: 70, height: 22)
                     .contentShape(Rectangle())
                     .onTapGesture { ModeRibbon.set(m, camera) }
-                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAddTraits(m == camera.mode ? [.isButton, .isSelected] : .isButton)
                     .offset(x: (CGFloat(k) - i) * pitch)
             }
             Circle().fill(target.lamp).frame(width: 5, height: 5).offset(y: 14)
