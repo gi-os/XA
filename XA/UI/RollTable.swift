@@ -6,6 +6,8 @@ import Photos
 /// Shots of the same moment go on the table as one pile, held with a clip. Grouping is plain
 /// and predictable: pictures (not videos) taken within `window` seconds of the one before,
 /// facing the same way. Which print sits on top, and which piles were unclipped, is kept.
+/// An unclipped pile lies flat for good: every shot that was in it is a print of its own, even
+/// after its newest one is deleted.
 enum RollPiles {
     struct Item: Equatable {
         let id: String
@@ -25,15 +27,17 @@ enum RollPiles {
                 let prev = items[j]
                 let near = abs(prev.date.timeIntervalSince(it.date)) <= window
                 let sameWay = (prev.width >= prev.height) == (it.width >= it.height)
-                let key = items[last[0]].id
-                if near && sameWay && !it.isVideo && !prev.isVideo && !unclipped.contains(key) {
+                if near && sameWay && !it.isVideo && !prev.isVideo {
                     out[out.count - 1].append(i)
                     continue
                 }
             }
             out.append([i])
         }
-        return out
+        guard !unclipped.isEmpty else { return out }
+        // A pile any of whose shots was unclipped lies flat. (Unclipping only the newest shot
+        // used to leave the rest to clip themselves back together as a new pile.)
+        return out.flatMap { g in g.contains { unclipped.contains(items[$0].id) } ? g.map { [$0] } : [g] }
     }
 
     // Remembered choices, keyed by the pile's first (newest) shot.
@@ -44,7 +48,8 @@ enum RollPiles {
         m[key] = id; d.set(m, forKey: "pileTops")
     }
     static var unclipped: Set<String> { Set(d.stringArray(forKey: "unclippedPiles") ?? []) }
-    static func unclip(_ key: String) { d.set(Array(unclipped.union([key])), forKey: "unclippedPiles") }
+    /// Every shot in the pile, so it stays flat whichever of them is deleted later.
+    static func unclip(_ ids: [String]) { d.set(Array(unclipped.union(ids)), forKey: "unclippedPiles") }
 }
 
 /// A pile on the table, or a single print.
@@ -105,7 +110,7 @@ struct RollTable: View {
                                     withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { _ = fanned.remove(k); version += 1 }
                                 }
                             case .unclip:
-                                RollPiles.unclip(pile.fanOf ?? pile.id); fanned.remove(pile.fanOf ?? pile.id)
+                                RollPiles.unclip(pile.assets.map(\.localIdentifier)); fanned.remove(pile.fanOf ?? pile.id)
                                 withAnimation(.snappy) { version += 1 }
                             case .deleteRest:
                                 library.delete(pile.others); withAnimation(.snappy) { version += 1 }
@@ -185,9 +190,11 @@ struct RollTable: View {
 
     static func tapeText(_ d: Date?) -> String {
         guard let d else { return "" }
-        let f = DateFormatter(); f.dateFormat = "EEE · MMM d"
-        return f.string(from: d).lowercased()
+        return tapeFormat.string(from: d).lowercased()
     }
+    private static let tapeFormat: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "EEE · MMM d"; return f
+    }()
 }
 
 /// OLED black: the prints float on nothing, and the screen's pixels are off between them.
@@ -234,40 +241,45 @@ private struct Masonry: View {
     var onAction: (Pile, PileAction) -> Void = { _, _ in }
     var onStep: (Pile, Int) -> Void = { _, _ in }
     @Namespace private var table
+    /// The table's width, measured. (Inside a GeometryReader the piles had no height of their
+    /// own in the scroll view, so it was guessed, and a guess off by a print cut the day short
+    /// or left a hole under it.)
+    @State private var width: CGFloat = UIScreen.main.bounds.width - 24
 
     var body: some View {
-        GeometryReader { g in
-            let gap: CGFloat = columns == 2 ? 16 : (columns == 3 ? 12 : 9)
-            let cw = (g.size.width - gap * CGFloat(columns - 1)) / CGFloat(columns)
-            let cols = layout(width: cw, gap: gap)
-            HStack(alignment: .top, spacing: gap) {
-                ForEach(0..<columns, id: \.self) { c in
-                    VStack(spacing: gap + 8) {
-                        ForEach(cols.items[c], id: \.id) { p in
-                            PileView(pile: p, width: cw, library: library, onStep: onStep, onRestack: { onAction(p, .restack) })
-                                // Every print is the same print wherever it lies: fanning a pile
-                                // slides its prints out of it into their places, and restacking
-                                // slides them back in, across columns.
-                                .matchedGeometryEffect(id: p.id, in: table)
-                                .background {
-                                    if p.fanOf == nil && p.assets.count > 1 {
-                                        ZStack {
-                                            ForEach(p.assets.dropFirst(), id: \.localIdentifier) { a in
-                                                Color.clear.matchedGeometryEffect(id: a.localIdentifier, in: table)
-                                            }
+        let gap: CGFloat = columns == 2 ? 16 : (columns == 3 ? 12 : 9)
+        let cw = max(1, (width - gap * CGFloat(columns - 1)) / CGFloat(columns))
+        let cols = layout(width: cw, gap: gap)
+        HStack(alignment: .top, spacing: gap) {
+            ForEach(0..<columns, id: \.self) { c in
+                VStack(spacing: gap + 8) {
+                    ForEach(cols.items[c], id: \.id) { p in
+                        PileView(pile: p, width: cw, library: library, onStep: onStep, onRestack: { onAction(p, .restack) })
+                            // Every print is the same print wherever it lies: fanning a pile
+                            // slides its prints out of it into their places, and restacking
+                            // slides them back in, across columns.
+                            .matchedGeometryEffect(id: p.id, in: table)
+                            .background {
+                                if p.fanOf == nil && p.assets.count > 1 {
+                                    ZStack {
+                                        ForEach(p.assets.dropFirst(), id: \.localIdentifier) { a in
+                                            Color.clear.matchedGeometryEffect(id: a.localIdentifier, in: table)
                                         }
                                     }
                                 }
-                                .onTapGesture { onTap(p) }
-                                .contextMenu { menu(p) }
-                                .transition(.asymmetric(insertion: .identity, removal: .opacity.animation(.easeIn(duration: 0.12).delay(0.25))))
-                        }
+                            }
+                            .onTapGesture { onTap(p) }
+                            .contextMenu { menu(p) }
+                            .transition(.asymmetric(insertion: .identity, removal: .opacity.animation(.easeIn(duration: 0.12).delay(0.25))))
                     }
-                    .frame(width: cw)
                 }
+                .frame(width: cw)
             }
         }
-        .frame(height: layout(width: approxWidth, gap: 12).height)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { w in
+            if w > 0 && abs(w - width) > 0.5 { width = w }
+        }
     }
 
     @ViewBuilder private func menu(_ p: Pile) -> some View {
@@ -280,20 +292,14 @@ private struct Masonry: View {
         }
     }
 
-    /// The table is the phone's width minus its margins.
-    private var approxWidth: CGFloat {
-        let w = UIScreen.main.bounds.width - 24
-        let gap: CGFloat = columns == 2 ? 16 : (columns == 3 ? 12 : 9)
-        return (w - gap * CGFloat(columns - 1)) / CGFloat(columns)
-    }
-
+    /// Each pile under the shortest column so far.
     private func layout(width cw: CGFloat, gap: CGFloat) -> (items: [[Pile]], height: CGFloat) {
         var items = Array(repeating: [Pile](), count: columns)
         var h = Array(repeating: CGFloat(0), count: columns)
         for p in piles {
             let c = h.firstIndex(of: h.min() ?? 0) ?? 0
             items[c].append(p)
-            h[c] += PrintView.height(for: p.top, width: cw) + gap + 8 + (p.assets.count > 1 || p.fanOf != nil ? 8 : 0)
+            h[c] += PrintView.height(for: p.top, width: cw, library: library) + gap + 8 + (p.assets.count > 1 || p.fanOf != nil ? 8 : 0)
         }
         return (items, (h.max() ?? 0) + 12)
     }
@@ -401,8 +407,8 @@ struct PrintView: View {
         return [1.12 / 1.276, 54.0 / 86.0, 108.0 / 86.0].contains { abs($0 - r) < 0.012 }
     }
     static func bordered(_ a: PHAsset, _ library: Library) -> Bool { !isInstant(a) && !library.isTransparentCached(a) }
-    static func height(for a: PHAsset, width: CGFloat) -> CGFloat {
-        let b = isInstant(a) ? 0 : max(3, width * 0.035)
+    static func height(for a: PHAsset, width: CGFloat, library: Library) -> CGFloat {
+        let b = bordered(a, library) ? max(3, width * 0.035) : 0
         return (width - 2 * b) / aspect(a) + 2 * b
     }
 

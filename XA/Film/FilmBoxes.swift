@@ -709,16 +709,16 @@ private struct InstantShapeBox: View {
     var body: some View {
         switch shape {
         case .polaroid:
-            pack(bg: Color(hex: "#F7F5F0"), fg: Color(hex: "#1A1A1A"), font: "Nunito-Black", title: "POLAROID", sub: "XA INSTANT · 600",
+            pack(bg: Color(hex: "#F7F5F0"), fg: Color(hex: "#1A1A1A"), font: "Nunito-Black", title: "INSTANT", sub: "XA INSTANT · SQUARE",
                  stripe: true, print: CGSize(width: 52, height: 62), window: CGSize(width: 44, height: 44), round: false)
         case .polaRound:
-            pack(bg: Color(hex: "#1A1A1A"), fg: Color(hex: "#F7F5F0"), font: "Fredoka-Bold", title: "POLA ROUND", sub: "XA INSTANT · ROUND",
+            pack(bg: Color(hex: "#1A1A1A"), fg: Color(hex: "#F7F5F0"), font: "Fredoka-Bold", title: "ROUND", sub: "XA INSTANT · ROUND",
                  stripe: false, print: CGSize(width: 52, height: 62), window: CGSize(width: 44, height: 44), round: true)
         case .instax:
-            pack(bg: Color(hex: "#F4D6E0"), fg: Color(hex: "#3A2233"), font: "Fredoka-Bold", title: "INSTAX", sub: "MINI · 54 x 86",
+            pack(bg: Color(hex: "#F4D6E0"), fg: Color(hex: "#3A2233"), font: "Fredoka-Bold", title: "MINI", sub: "XA INSTANT · 54 x 86",
                  stripe: false, print: CGSize(width: 40, height: 64), window: CGSize(width: 34, height: 46), round: false)
         default:
-            pack(bg: Color(hex: "#CFE3EE"), fg: Color(hex: "#15303F"), font: "Fredoka-Bold", title: "INSTAX WIDE", sub: "WIDE · 108 x 86",
+            pack(bg: Color(hex: "#CFE3EE"), fg: Color(hex: "#15303F"), font: "Fredoka-Bold", title: "WIDE", sub: "XA INSTANT · 108 x 86",
                  stripe: false, print: CGSize(width: 70, height: 56), window: CGSize(width: 64, height: 40), round: false)
         }
     }
@@ -798,10 +798,20 @@ struct StockBox: View {
         .clipShape(RoundedRectangle(cornerRadius: 1))
     }
 
+    /// Faces read and decoded once: the boxes are drawn again every time the camera changes
+    /// anything, and reading the JPEG each time kept the processor busy for nothing.
+    private static let faces: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>(); c.countLimit = 48; return c
+    }()
+
     private var face: Image {
-        if let url = FilmLab.bundle.url(forResource: "box_\(stock.id)_\(ei)", withExtension: "jpg"),
+        let key = "box_\(stock.id)_\(ei)" as NSString
+        if let ui = Self.faces.object(forKey: key) { return Image(uiImage: ui) }
+        if let url = FilmLab.bundle.url(forResource: key as String, withExtension: "jpg"),
            let ui = UIImage(contentsOfFile: url.path) {
-            return Image(uiImage: ui)
+            let ready = ui.preparingForDisplay() ?? ui
+            Self.faces.setObject(ready, forKey: key)
+            return Image(uiImage: ready)
         }
         return Image(systemName: "film")
     }

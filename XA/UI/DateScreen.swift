@@ -41,7 +41,7 @@ struct DateScreen: View {
                 }
                 HStack(spacing: 8) {
                     Rectangle().fill(XA.orange).frame(width: 6, height: 6)
-                    Text("Sunday 600 and Sunday Round write it by hand on the print instead.").font(.system(size: 13)).foregroundStyle(XA.dim)
+                    Text("Instant shapes write the date by hand on the print's frame instead.").font(.system(size: 13)).foregroundStyle(XA.dim)
                 }
                 SectionLabel(text: "PLACEMENT")
                 Segmented(items: [(DatePlacement.off, "Off"), (.corner, "Corner"), (.follow, "Follow frame")], selection: cfgB.placement)

@@ -15,10 +15,10 @@ enum FrameShape: Int, CaseIterable, Codable, Identifiable {
         case .window: return "WINDOW"
         case .crush: return "CRUSH"
         case .nova: return "NOVA"
-        case .polaroid: return "POLAROID"
-        case .polaRound: return "POLA ROUND"
-        case .instax: return "INSTAX"
-        case .instaxWide: return "INSTAX WIDE"
+        case .polaroid: return "INSTANT"
+        case .polaRound: return "INSTANT ROUND"
+        case .instax: return "INSTANT MINI"
+        case .instaxWide: return "INSTANT WIDE"
         }
     }
 

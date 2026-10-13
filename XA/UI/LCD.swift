@@ -153,10 +153,10 @@ private struct FilmLCD: View {
             .lineLimit(1).minimumScaleFactor(0.6)
     }
 
-    static func dateText() -> String {
-        let f = DateFormatter(); f.dateFormat = "''yy MM dd"
-        return f.string(from: Date())
-    }
+    static func dateText() -> String { dateFormat.string(from: Date()) }
+    private static let dateFormat: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "''yy MM dd"; return f
+    }()
 }
 
 // MARK: DIGI

@@ -30,7 +30,12 @@ struct RootView: View {
         _camera = StateObject(wrappedValue: CameraModel(settings: s))
     }
 
+    // In pieces: as one chain of modifiers it was too much for the compiler to type-check.
     var body: some View {
+        lifecycle(pictureHooks(settingsHooks(layout)))
+    }
+
+    private var layout: some View {
         GeometryReader { geo in
             // Side by side only on an iPad. On an iPhone the window turns only for the photo
             // viewer, and the layout must not change under it (that closed the viewer).
@@ -55,6 +60,11 @@ struct RootView: View {
         .statusBarHidden()
         .sheet(isPresented: $showCustomize, onDismiss: { pushContext() }) { CustomizeView(settings: settings, camera: camera) }
         .sheet(isPresented: $showFilm, onDismiss: { camera.rebuildControls(); pushContext() }) { FilmPicker(camera: camera) }
+    }
+
+    /// Launch, coming and going, the roll, and the Lock Screen camera handing over.
+    private func lifecycle<V: View>(_ v: V) -> some View {
+        v
         .onAppear {
             CameraSounds.shared.prepare()
             camera.library = library
@@ -66,34 +76,7 @@ struct RootView: View {
             pushContext()
             syncThumb()
         }
-        .onChange(of: phase) { _, p in
-            // Back from Settings with Photos access changed: the roll picks it up.
-            if p == .active {
-                if !showRoll { camera.resume() }
-                library.refresh(); library.flushPending()
-                // pictures the Lock Screen camera left while the app wasn't running
-                Task { await ingestAll() }
-            } else if p == .background {
-                pushContext()   // the Lock Screen camera opens with exactly this
-                camera.stop()
-                // Coming back always lands on the camera: roll, viewer, pickers and settings close.
-                showRoll = false; showCustomize = false; showFilm = false; pull = 0
-                NotificationCenter.default.post(name: .xaBackToCamera, object: nil)
-            }
-        }
-        .onChange(of: settings.date) { _, _ in camera.syncFrameSettings(); pushContext() }
-        .onChange(of: settings.filmDate) { _, _ in camera.syncFrameSettings(); pushContext() }
-        .onChange(of: settings.recipe) { _, _ in camera.syncFrameSettings(); pushContext() }
-        .onChange(of: settings.digiOSD) { _, _ in camera.syncFrameSettings(); pushContext() }
-        .onChange(of: settings.filmAlwaysOn) { _, _ in camera.syncFrameSettings(); pushContext() }
-        .onChange(of: settings.filmRecipe) { _, _ in camera.syncFrameSettings(); camera.updateUltraWide(); pushContext() }
-        .onChange(of: settings.digiMegapixels) { _, _ in camera.applyResolution(); pushContext() }
-        .onChange(of: settings.proMegapixels) { _, _ in camera.applyResolution() }
-        .onChange(of: settings.crunch) { _, _ in pushContext() }
-        .onChange(of: settings.noise) { _, _ in camera.syncFrameSettings(); pushContext() }
-        .onChange(of: settings.flash) { _, _ in pushContext() }
-        .onChange(of: settings.sounds) { _, _ in pushContext() }
-        .onChange(of: camera.favorites) { _, _ in pushContext() }
+        .onChange(of: phase) { _, p in phaseChanged(p) }
         // The camera sleeps under the roll: no capture, no develop, no hardware shutter.
         .onChange(of: showRoll) { _, open in
             camera.captureButtonsEnabled = !open && !showCustomize && !showFilm
@@ -102,8 +85,6 @@ struct RootView: View {
         .onChange(of: showCustomize) { _, open in camera.captureButtonsEnabled = !open && !showRoll && !showFilm }
         .onChange(of: showFilm) { _, open in camera.captureButtonsEnabled = !open && !showRoll && !showCustomize }
         .task { await ingestLockScreenShots() }
-        .onChange(of: library.assets.first?.localIdentifier) { _, _ in syncThumb() }
-        .onChange(of: library.authorized) { _, _ in syncThumb() }
         // The Lock Screen camera opened the app (its roll, settings or film buttons).
         .onContinueUserActivity(NSUserActivityTypeLockedCameraCapture) { a in
             switch a.userInfo?["open"] as? String {
@@ -113,6 +94,46 @@ struct RootView: View {
             default: break
             }
         }
+    }
+
+    private func phaseChanged(_ p: ScenePhase) {
+        // Back from Settings with Photos access changed: the roll picks it up.
+        if p == .active {
+            if !showRoll { camera.resume() }
+            library.refresh(); library.flushPending()
+            // pictures the Lock Screen camera left while the app wasn't running
+            Task { await ingestAll() }
+        } else if p == .background {
+            pushContext()   // the Lock Screen camera opens with exactly this
+            camera.stop()
+            // Coming back always lands on the camera: roll, viewer, pickers and settings close.
+            showRoll = false; showCustomize = false; showFilm = false; pull = 0
+            NotificationCenter.default.post(name: .xaBackToCamera, object: nil)
+        }
+    }
+
+    /// Every setting the Lock Screen camera needs goes to it the moment it changes.
+    private func settingsHooks<V: View>(_ v: V) -> some View {
+        v
+        .onChange(of: settings.date) { _, _ in camera.syncFrameSettings(); pushContext() }
+        .onChange(of: settings.filmDate) { _, _ in camera.syncFrameSettings(); pushContext() }
+        .onChange(of: settings.recipe) { _, _ in camera.syncFrameSettings(); pushContext() }
+        .onChange(of: settings.digiOSD) { _, _ in camera.syncFrameSettings(); pushContext() }
+        .onChange(of: settings.filmAlwaysOn) { _, _ in camera.syncFrameSettings(); pushContext() }
+        .onChange(of: settings.filmRecipe) { _, _ in camera.syncFrameSettings(); camera.updateUltraWide(); pushContext() }
+        .onChange(of: settings.digiMegapixels) { _, _ in camera.applyResolution(); pushContext() }
+    }
+
+    private func pictureHooks<V: View>(_ v: V) -> some View {
+        v
+        .onChange(of: settings.proMegapixels) { _, _ in camera.applyResolution() }
+        .onChange(of: settings.crunch) { _, _ in pushContext() }
+        .onChange(of: settings.noise) { _, _ in camera.syncFrameSettings(); pushContext() }
+        .onChange(of: settings.flash) { _, _ in pushContext() }
+        .onChange(of: settings.sounds) { _, _ in pushContext() }
+        .onChange(of: camera.favorites) { _, _ in pushContext() }
+        .onChange(of: library.assets.first?.localIdentifier) { _, _ in syncThumb() }
+        .onChange(of: library.authorized) { _, _ in syncThumb() }
     }
 
     private var camView: some View {

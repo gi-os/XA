@@ -93,15 +93,22 @@ struct LockSettings: Codable {
     }
 
     /// As JSON for the app context, made to fit: the custom sims and favorites go first if needed.
-    func encoded(limit: Int = 3000) -> String? {
+    /// Measured as it will sit inside the context's own JSON, where every quote, backslash and
+    /// slash is escaped (one more byte each), with room left for the context's other fields.
+    func encoded(limit: Int = 3600) -> String? {
         let e = JSONEncoder()
         var me = self
         for step in 0..<3 {
             if step == 1 { me.customSims = [] }
             if step == 2 { me.favoritesDigi = []; me.favoritesFilm = [] }
-            if let d = try? e.encode(me), d.count <= limit { return String(data: d, encoding: .utf8) }
+            guard let d = try? e.encode(me) else { continue }
+            if Self.escapedSize(d) <= limit { return String(data: d, encoding: .utf8) }
         }
         return nil
+    }
+
+    static func escapedSize(_ d: Data) -> Int {
+        d.count + d.reduce(0) { $0 + ($1 == 0x22 || $1 == 0x5C || $1 == 0x2F ? 1 : 0) }
     }
 
     static func decode(_ s: String?) -> LockSettings? {

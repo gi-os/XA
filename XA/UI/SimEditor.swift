@@ -124,7 +124,7 @@ struct SimEditor: View {
         FlatSlider(label: "Bloom · white glow", value: $sim.bloom, format: pct)
         FlatSlider(label: "Halation · red ring", value: $sim.halation, format: pct)
         FlatSlider(label: "Vignette", value: $sim.vignette, format: pct)
-        Text("Instant prints (Polaroid, Pola Round, Instax, Instax Wide) live under SHAPE now.")
+        Text("Instant prints (square, round, mini and wide) are under SHAPES.")
             .font(.system(size: 12)).foregroundStyle(XA.faint).padding(.top, 8)
     }
 
@@ -173,7 +173,7 @@ struct SimEditor: View {
         var list = FilmCatalog.custom
         if s.isPreset {
             // A preset is never overwritten: edits become a film of your own.
-            s.id = "custom-\(Int(Date().timeIntervalSince1970))"
+            s.id = "custom-" + UUID().uuidString.prefix(8).lowercased()
             s.name = s.name + " II"
             list.append(s)
         } else if let i = list.firstIndex(where: { $0.id == s.id }) {

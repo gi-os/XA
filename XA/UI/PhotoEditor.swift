@@ -66,9 +66,14 @@ struct PhotoEditor: View {
     @State private var source: CIImage?
     @State private var preview: UIImage?
     @State private var original: UIImage?
-    @State private var holding = false
+    /// Resets itself when the touch is taken away, so the original can't stay stuck on screen.
+    @GestureState private var holding = false
     @State private var saving = false
     @State private var hasAlpha = false
+    @State private var failed = false
+    /// One preview render at a time; a change made during it renders once more when it's done.
+    @State private var rendering = false
+    @State private var dirty = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -88,7 +93,7 @@ struct PhotoEditor: View {
                 if let img = holding ? original : preview { Image(uiImage: img).resizable().scaledToFit() } else { ProgressView().tint(.white) }
             }
             .frame(maxHeight: 330)
-            .gesture(DragGesture(minimumDistance: 0).onChanged { _ in holding = true }.onEnded { _ in holding = false })
+            .gesture(DragGesture(minimumDistance: 0).updating($holding) { _, h, _ in h = true })
             .overlay(alignment: .bottomLeading) {
                 Text(holding ? "ORIGINAL" : "HOLD TO COMPARE").font(XA.display(10)).padding(8).foregroundStyle(XA.dim)
             }
@@ -127,6 +132,11 @@ struct PhotoEditor: View {
         .preferredColorScheme(.dark)
         .onAppear(perform: load)
         .onChange(of: adjust) { _, _ in render() }
+        .alert("Couldn't save the copy", isPresented: $failed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Photos didn't take it. Check that XA can add to your photos in Settings, then try again.")
+        }
     }
 
     private func sgn(_ v: Double) -> String { String(format: "%+d", Int((v * 100).rounded())) }
@@ -166,13 +176,21 @@ struct PhotoEditor: View {
 
     @State private var fullData: Data?
 
+    /// Dragging a slider asks for a render on every step: they used to all run at once, piling
+    /// up behind each other. Now one runs, and the latest settings follow it.
     private func render() {
         guard let src = source else { return }
+        if rendering { dirty = true; return }
+        rendering = true
         let a = adjust
         DispatchQueue.global(qos: .userInitiated).async {
             let out = a.apply(to: src)
             let cg = Looks.context.createCGImage(out, from: out.extent)
-            DispatchQueue.main.async { if a == adjust, let cg { preview = UIImage(cgImage: cg) } }
+            DispatchQueue.main.async {
+                if let cg { preview = UIImage(cgImage: cg) }
+                rendering = false
+                if dirty || a != adjust { dirty = false; render() }
+            }
         }
     }
 
@@ -187,7 +205,10 @@ struct PhotoEditor: View {
             let note = "XA EDIT" + simPart + (a.look != .none ? " + \(a.look.title)" : "")
             props = Recipe.properties(from: props, recipe: note)
             out = out.settingProperties(props)
-            guard let cs = CGColorSpace(name: CGColorSpace.sRGB) else { return }
+            guard let cs = CGColorSpace(name: CGColorSpace.sRGB) else {
+                DispatchQueue.main.async { saving = false; failed = true }
+                return
+            }
             let data: Data?
             let type: UTType
             if alpha {
@@ -198,8 +219,12 @@ struct PhotoEditor: View {
                 type = .jpeg
             }
             DispatchQueue.main.async {
-                guard let data else { saving = false; return }
-                library.save(data: data, type: type) { _ in saving = false; dismiss() }
+                guard let data else { saving = false; failed = true; return }
+                // closes only once the copy is in; otherwise it says so and keeps the edit
+                library.save(data: data, type: type) { ok in
+                    saving = false
+                    if ok { dismiss() } else { failed = true }
+                }
             }
         }
     }

@@ -28,7 +28,7 @@ struct DigiRecipe: Codable, Equatable {
         }
         var detail: String {
             switch self {
-            case .ccd: return "A 2005 pocket Sony's color: deep cyan-blue skies, reds a touch hot, punchy contrast and highlights that clip hard. Also in the viewfinder."
+            case .ccd: return "A 2005 pocket CCD camera's color: deep cyan-blue skies, reds a touch hot, punchy contrast and highlights that clip hard. Also in the viewfinder."
             case .sharpen: return "The camera's own sharpening: crunchy edges with a thin halo."
             case .fringe: return "Red and blue edges toward the corners, from a tiny zoom lens."
             case .flash: return "Hot faces, warm whites, green shadows. Only when the flash fires."
