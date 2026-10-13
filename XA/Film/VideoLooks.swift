@@ -142,7 +142,7 @@ final class VideoFX {
     func apply(_ look: VideoLook, to src: CIImage, time: Double, date: Date) -> CIImage {
         let e = src.extent
         let outRect = look.nativeSize.map { CGRect(origin: .zero, size: $0) } ?? e
-        let fps = fps(look)
+        let fps = self.fps(look)
         if let fps {
             let same = heldLook == look
             if let held, same, held.extent == outRect, nextTick >= 0, time < nextTick - 0.004 {
