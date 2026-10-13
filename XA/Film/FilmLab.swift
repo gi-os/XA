@@ -224,6 +224,9 @@ enum FilmLab {
     static func develop(_ input: CIImage, stock: FilmStock, push: Int, preview: Bool, seed: Int, shot: FilmShot? = nil, flat: Bool = false) -> CIImage {
         // The viewfinder: the film baked into one cube (FilmPreview), not the whole lab per frame.
         if preview && !flat, let fast = FilmPreview.develop(input, stock: stock, push: push, seed: seed, shot: shot) { return fast }
+        // A flat develop (the scanner's small proxy, the finder's cube) is no stage of the picture
+        // being traced: its stages would stand in for the picture's own.
+        let trace = flat ? nil : Self.trace
         guard let t = tables(stock.id) else { return input }
         let e = input.extent
         guard e.width > 1, e.height > 1, e.width.isFinite, e.height.isFinite else { return input }
