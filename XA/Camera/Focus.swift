@@ -1,6 +1,7 @@
 import AVFoundation
 import Vision
 import CoreGraphics
+import CoreImage
 
 /// AF-S locks on the half-press; AF-C keeps tracking while held.
 enum AFMode: String, CaseIterable, Codable { case single, continuous

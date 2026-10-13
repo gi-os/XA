@@ -1205,8 +1205,9 @@ final class CameraModel: NSObject, ObservableObject {
         if let b = shot.booth { boothCollect(b.session, b.index, nil, date: shot.date) }
     }
 
-    /// How long the last shot took, for Customize: press → taken → photo → developed.
-    @Published private(set) var lastTiming = ""
+    /// How long the last shot took: press → taken → photo → developed. Kept for debugging, not
+    /// published (a change re-draws everything watching the camera).
+    private(set) var lastTiming = ""
     private var timing: (taken: Double, photo: Double) = (0, 0)
     /// Shots that already clicked and blinked at the press.
     private var answered: Set<Int64> = []

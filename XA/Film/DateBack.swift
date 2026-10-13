@@ -14,6 +14,8 @@ enum DateStyle: String, CaseIterable, Codable, Identifiable {
     case quartz, dots, camcorder, lcd, stamp, marker, edge, digicam
     var id: String { rawValue }
     var title: String { rawValue.uppercased() }
+    /// The name in a sentence or a settings row: "Quartz", "LCD".
+    var name: String { self == .lcd ? "LCD" : rawValue.capitalized }
     var note: String {
         switch self {
         case .quartz: return "From Roll · 7-segment"

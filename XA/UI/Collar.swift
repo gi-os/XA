@@ -46,7 +46,8 @@ struct ModeRibbon: View {
         .contentShape(Rectangle())
         // Slide along the names, as in the iPhone camera: the ribbon follows the finger and you
         // land on the name under the dot.
-        .highPriorityGesture(DragGesture(minimumDistance: 3)
+        // (10 points before it counts as a slide: a tap on a name that wobbles is still a tap)
+        .highPriorityGesture(DragGesture(minimumDistance: 10)
             .onChanged { v in if !camera.recording { drag = v.translation.width } }
             .onEnded { v in
                 if !camera.recording { ModeRibbon.land(drag: v.translation.width, modes, camera) }
@@ -64,7 +65,9 @@ struct ModeRibbon: View {
 
     /// The mode a drag of `drag` points would land on.
     static func target(_ from: CaptureMode, drag: CGFloat, _ modes: [CaptureMode]) -> CaptureMode {
-        guard let i = modes.firstIndex(of: from), !modes.isEmpty else { return from }
+        guard !modes.isEmpty else { return from }
+        // a mode this ribbon doesn't offer (the Lock Screen's) counts as its first
+        let i = modes.firstIndex(of: from) ?? 0
         let j = Int((CGFloat(i) - drag / pitch).rounded())
         return modes[min(modes.count - 1, max(0, j))]
     }
@@ -77,7 +80,10 @@ struct ModeRibbon: View {
 
     /// Swipe left for the mode to the right, as on the iPhone.
     static func step(_ by: Int, _ modes: [CaptureMode], _ camera: CameraModel) {
-        guard let i = modes.firstIndex(of: camera.mode) else { return }
+        guard let i = modes.firstIndex(of: camera.mode) else {
+            if let m = modes.first { set(m, camera) }
+            return
+        }
         let j = i + by
         if modes.indices.contains(j) { set(modes[j], camera) }
     }

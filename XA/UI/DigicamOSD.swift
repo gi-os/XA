@@ -46,8 +46,20 @@ struct DigicamOSD: View {
             UIDevice.current.isBatteryMonitoringEnabled = true
             refresh()
         }
-        .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in refresh() }
-        .onChange(of: camera.lastShot) { _, _ in fileNo += 1; refresh() }
+        // Battery and card space every half minute while the screen is up (a timer made in the
+        // body restarts every time the body does, so it seldom fired)
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                if !Task.isCancelled { refresh() }
+            }
+        }
+        // One file number per picture taken (the thumbnail changes for other reasons too:
+        // the roll loading, a picture deleted)
+        .onChange(of: camera.developing) { old, new in
+            if new > old { fileNo = fileNo % 9999 + (new - old) }
+            refresh()
+        }
     }
 
     // MARK: rows
@@ -112,7 +124,7 @@ struct DigicamOSD: View {
         VStack(spacing: 6 * k) {
             HStack(spacing: 20 * k) {
                 HStack(spacing: 4 * k) { Arrows(kind: .sideways, k: k); OSDText("SIM", 10.5 * k, color: OSD.cyan, edge: OSD.cyanEdge) }
-                HStack(spacing: 4 * k) { Arrows(kind: .up, k: k); OSDText("ROLL", 10.5 * k, color: OSD.cyan, edge: OSD.cyanEdge) }
+                HStack(spacing: 4 * k) { Arrows(kind: .vertical, k: k); OSDText("LOOK", 10.5 * k, color: OSD.cyan, edge: OSD.cyanEdge) }
             }
             TimelineView(.everyMinute) { t in
                 HStack(alignment: .lastTextBaseline) {
@@ -207,6 +219,9 @@ struct OSDText: View {
             t.foregroundStyle(color)
         }
         .fixedSize()
+        // one reading of the text, not nine
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text)
     }
 }
 
@@ -432,11 +447,11 @@ private struct Scanlines: View {
 
 /// The button guide's arrows, drawn (the text arrows turn into emoji on iOS).
 private struct Arrows: View {
-    enum Kind { case sideways, up }
+    enum Kind { case sideways, up, vertical }
     let kind: Kind
     let k: CGFloat
     var body: some View {
-        let h = 8 * k
+        let h = kind == .vertical ? 15 * k : 8 * k
         let w = kind == .sideways ? 18 * k : 9 * k
         Keylined(color: OSD.cyan, line: 0.1) {
             var f = Path()
@@ -446,6 +461,10 @@ private struct Arrows: View {
                 f.move(to: CGPoint(x: w, y: h / 2)); f.addLine(to: CGPoint(x: w - h * 0.85, y: 0)); f.addLine(to: CGPoint(x: w - h * 0.85, y: h)); f.closeSubpath()
             case .up:
                 f.move(to: CGPoint(x: w / 2, y: 0)); f.addLine(to: CGPoint(x: w, y: h)); f.addLine(to: CGPoint(x: 0, y: h)); f.closeSubpath()
+            case .vertical:
+                let t = w * 0.85
+                f.move(to: CGPoint(x: w / 2, y: 0)); f.addLine(to: CGPoint(x: w, y: t)); f.addLine(to: CGPoint(x: 0, y: t)); f.closeSubpath()
+                f.move(to: CGPoint(x: w / 2, y: h)); f.addLine(to: CGPoint(x: w, y: h - t)); f.addLine(to: CGPoint(x: 0, y: h - t)); f.closeSubpath()
             }
             return (Path(), f)
         }

@@ -2,21 +2,24 @@ import MetalKit
 import CoreImage
 import SwiftUI
 import AVKit
+import Combine
 
 /// The viewfinder: developed Core Image frames drawn straight into a Metal layer. Frames are
 /// rendered on the camera's frame queue, not the main thread, so the viewfinder keeps moving
 /// while SwiftUI is busy (a mode switch, the film rows opening).
 final class PreviewView: MTKView {
-    private let ci: CIContext
-    private let queue: MTLCommandQueue?
+    /// One context and queue for every viewfinder the app makes (a context is slow to make and
+    /// holds its own caches; the viewfinder is rebuilt when the screen around it changes).
+    private static let device = MTLCreateSystemDefaultDevice()
+    private static let sharedCI: CIContext = device.map { CIContext(mtlDevice: $0, options: [.cacheIntermediates: false, .priorityRequestLow: false]) } ?? CIContext()
+    private static let sharedQueue = device?.makeCommandQueue()
+    private var ci: CIContext { Self.sharedCI }
+    private var queue: MTLCommandQueue? { Self.sharedQueue }
     private let sizeLock = NSLock()
     private var _size: CGSize = .zero
 
     init() {
-        let dev = MTLCreateSystemDefaultDevice()
-        ci = dev.map { CIContext(mtlDevice: $0, options: [.cacheIntermediates: false, .priorityRequestLow: false]) } ?? CIContext()
-        queue = dev?.makeCommandQueue()
-        super.init(frame: .zero, device: dev)
+        super.init(frame: .zero, device: Self.device)
         framebufferOnly = false
         isPaused = true
         enableSetNeedsDisplay = false
@@ -76,17 +79,39 @@ final class PreviewView: MTKView {
 struct Viewfinder: UIViewRepresentable {
     let camera: CameraModel
 
+    final class Coordinator {
+        weak var camera: CameraModel?
+        var enabled: AnyCancellable?
+        init(_ camera: CameraModel) { self.camera = camera }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(camera) }
+
     func makeUIView(context: Context) -> PreviewView {
         let v = PreviewView()
         camera.preview = v
         // Two-stage button: Camera Control's light press is the first stage (the system's own);
         // the full press fires the instant it goes down, not when the button comes back up.
-        let shutter = AVCaptureEventInteraction { event in
-            if event.phase == .began { camera.fullPress() }
+        let shutter = AVCaptureEventInteraction { [weak camera] event in
+            if event.phase == .began { camera?.fullPress() }
         }
         v.addInteraction(shutter)
+        // Off while the roll or a sheet covers the camera: the volume buttons are volume again,
+        // and a press can't take a picture nobody is looking at (or one with the camera stopped).
+        context.coordinator.enabled = camera.$captureButtonsEnabled.removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak shutter] on in shutter?.isEnabled = on }
         return v
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: PreviewView, coordinator: Coordinator) {
+        coordinator.enabled = nil
+        if let camera = coordinator.camera, camera.preview === uiView { camera.preview = nil }
+        // The frame queue may be drawing into this view right now (waiting for a drawable can
+        // take up to a second). Hold it here so its last reference goes away on the main thread,
+        // never on the frame queue: a view torn down off the main thread can crash.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { withExtendedLifetime(uiView) {} }
+    }
 }

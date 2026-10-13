@@ -600,14 +600,20 @@ private struct ShutterRow: View {
 private struct ShutterKey<Label: View>: View {
     @ObservedObject var camera: CameraModel
     @ViewBuilder var label: () -> Label
-    @State private var down = false
+    /// Resets itself when the touch ends or is taken away (a system swipe, a sheet), so a
+    /// cancelled touch can never leave the key stuck down and swallow the next press.
+    @GestureState private var down = false
     var body: some View {
         label().contentShape(Rectangle())
             .scaleEffect(down ? 0.95 : 1)
             .animation(.snappy(duration: 0.1), value: down)
             .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { _ in if !down { down = true; camera.fullPress() } }
-                .onEnded { _ in down = false })
+                .updating($down) { _, isDown, _ in
+                    guard !isDown else { return }
+                    isDown = true
+                    // out of the gesture's update, where publishing a change isn't allowed
+                    DispatchQueue.main.async { camera.fullPress() }
+                })
     }
 }
 

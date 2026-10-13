@@ -14,6 +14,10 @@ struct PhotoViewer: View {
     @State private var info = false
     @State private var editing: PHAsset?
     @State private var file: URL?
+    /// The copy of the open photo written for Send, removed when the next one is written.
+    @State private var written: URL?
+    /// Where the photo just deleted sat, so the viewer stays there instead of jumping to the start.
+    @State private var deletedAt: Int?
 
     private var assets: [PHAsset] { library.assets }
     private var asset: PHAsset? { assets.first { $0.localIdentifier == current } }
@@ -44,25 +48,45 @@ struct PhotoViewer: View {
         .foregroundStyle(.white)
         .preferredColorScheme(.dark)
         .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded { v in
-            if !zoomed && v.translation.height > 140 && abs(v.translation.height) > abs(v.translation.width) * 1.5 { dismiss() }
+            if !zoomed && v.translation.height > 140 && abs(v.translation.height) > abs(v.translation.width) * 1.5 { close() }
         })
         .sheet(isPresented: $info) { if let asset { PhotoInfo(asset: asset, library: library) } }
         .sheet(item: Binding(get: { editing.map { EditTarget(asset: $0) } }, set: { editing = $0?.asset })) { t in
             PhotoEditor(asset: t.asset, library: library)
         }
-        .onChange(of: current) { _, _ in prepareFile() }
-        .onAppear(perform: prepareFile)
+        // The file for Send, once the photo has been settled on for a moment: sliding along the
+        // thumbnails doesn't read and write every full-size photo it passes.
+        .task(id: current) {
+            file = nil
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            if !Task.isCancelled { prepareFile() }
+        }
         // Turn the phone to see a landscape picture big; the camera underneath stays upright.
         .onAppear { Orientation.allow(.allButUpsideDown) }
-        .onDisappear { Orientation.allow(.portrait) }
-        .onChange(of: library.assets.count) { _, _ in
-            if asset == nil { if let first = library.assets.first { current = first.localIdentifier } else { dismiss() } }
+        .onDisappear {
+            Orientation.allow(.portrait)
+            if let written { try? FileManager.default.removeItem(at: written) }
         }
+        .onChange(of: library.assets.count) { _, _ in
+            guard asset == nil else { return }
+            // the photo on screen went away (deleted here or in Photos): its neighbor takes its place
+            if assets.isEmpty { close(); return }
+            let i = min(max(deletedAt ?? 0, 0), assets.count - 1)
+            deletedAt = nil
+            current = assets[i].localIdentifier
+        }
+    }
+
+    /// Back to the camera, upright first: turned back only after the viewer has gone, the camera
+    /// showed sideways for a moment.
+    private func close() {
+        Orientation.allow(.portrait)
+        dismiss()
     }
 
     private var top: some View {
         HStack {
-            RoundButton(action: { dismiss() }) { Image(systemName: "xmark").font(.system(size: 16, weight: .semibold)) }
+            RoundButton(action: { close() }) { Image(systemName: "xmark").font(.system(size: 16, weight: .semibold)) }
                 .accessibilityLabel("Close")
             Spacer()
             VStack(spacing: 2) {
@@ -86,7 +110,11 @@ struct PhotoViewer: View {
             Spacer()
             Button { info = true } label: { icon("info.circle", "Info") }
             Spacer()
-            Button { if let asset { library.delete(asset) } } label: { icon("trash", "Delete") }
+            Button {
+                guard let asset else { return }
+                deletedAt = assets.firstIndex(where: { $0.localIdentifier == asset.localIdentifier })
+                library.delete(asset)
+            } label: { icon("trash", "Delete") }
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 28).padding(.top, 10).padding(.bottom, 12)
@@ -111,15 +139,20 @@ struct PhotoViewer: View {
         guard let d = asset?.creationDate else { return "" }
         if Calendar.current.isDateInToday(d) { return "TODAY" }
         if Calendar.current.isDateInYesterday(d) { return "YESTERDAY" }
-        let f = DateFormatter(); f.dateFormat = "EEE d MMM yyyy"
-        return f.string(from: d).uppercased()
+        return Self.dayFormat.string(from: d).uppercased()
     }
 
     private var timeTitle: String {
         guard let d = asset?.creationDate else { return "" }
-        let f = DateFormatter(); f.timeStyle = .short
-        return f.string(from: d)
+        return Self.timeFormat.string(from: d)
     }
+
+    private static let dayFormat: DateFormatter = {
+        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("EEE MMM d yyyy"); return f
+    }()
+    private static let timeFormat: DateFormatter = {
+        let f = DateFormatter(); f.timeStyle = .short; return f
+    }()
 
     private func prepareFile() {
         file = nil
@@ -134,8 +167,16 @@ struct PhotoViewer: View {
             let ext = (uti.flatMap { UTType($0)?.preferredFilenameExtension }) ?? "jpg"
             let safe = id.replacingOccurrences(of: "/", with: "-").prefix(12)
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("XA-\(safe).\(ext)")
-            try? d.write(to: url)
-            DispatchQueue.main.async { if id == current { file = url } }
+            DispatchQueue.global(qos: .utility).async {
+                try? d.write(to: url, options: .atomic)
+                DispatchQueue.main.async {
+                    guard id == current else { try? FileManager.default.removeItem(at: url); return }
+                    // one full-size copy in the temporary folder at a time
+                    if let old = written, old != url { try? FileManager.default.removeItem(at: old) }
+                    written = url
+                    file = url
+                }
+            }
         }
     }
 }
@@ -169,6 +210,12 @@ private struct PhotoPage: View {
             if asset.mediaType == .video {
                 if player == nil { library.playerItem(asset) { item in if let item { player = AVPlayer(playerItem: item) } } }
             } else if img == nil { load(tries: 4) }
+        }
+        // A full-size photo is tens of megabytes decoded: let it go once it's swiped away
+        // (the pager keeps pages it has shown), and load it again if it comes back.
+        .onDisappear {
+            img = nil
+            player?.pause(); player = nil
         }
         .onChange(of: asset.modificationDate) { _, _ in load(tries: 4) }
     }
