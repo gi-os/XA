@@ -2122,6 +2122,9 @@ extension CameraModel: AVCaptureMetadataOutputObjectsDelegate {
     /// Only PRO looks for codes: the reader is on the session only while in PRO (VIDEO, with the
     /// mic, and the other modes never carry it). Runs on the session queue.
     func updateQR(_ m: CaptureMode) {
+        #if CAPTURE_EXTENSION
+        return   // a code can't be opened from the Lock Screen, so it isn't looked for there
+        #endif
         let on = session.outputs.contains(qrOutput)
         if m == .pro && !on && !(session is AVCaptureMultiCamSession) {
             session.beginConfiguration()

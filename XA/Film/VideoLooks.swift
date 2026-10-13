@@ -352,10 +352,17 @@ enum VHSOverlay {
 
     static func glyph(_ ch: Character) -> [String]? { rom[ch] ?? DateBack.glyphs[ch] }
 
+    /// Made once: this runs for every frame of a take, and a formatter is slow to make.
+    private static let dayFormat: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "MMM. d yyyy"; return f
+    }()
+    private static let timeFormat: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "a h:mm"; return f
+    }()
+
     static func image(size: CGSize, date: Date) -> CIImage? {
-        let df = DateFormatter(); df.locale = Locale(identifier: "en_US_POSIX")
-        df.dateFormat = "MMM. d yyyy"; let day = df.string(from: date).uppercased()
-        df.dateFormat = "a h:mm"; let time = df.string(from: date).uppercased()
+        let day = dayFormat.string(from: date).uppercased()
+        let time = timeFormat.string(from: date).uppercased()
         let k = "\(Int(size.width))x\(Int(size.height))|\(day)|\(time)"
         lock.lock(); if k == key, let c = cached { lock.unlock(); return c }; lock.unlock()
         let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 1; fmt.opaque = false
@@ -402,9 +409,12 @@ enum CCTVOverlay {
     private static var key = ""
     private static var cached: CIImage?
 
+    private static let stamp: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yy-MM-dd  HH:mm:ss"; return f
+    }()
+
     static func image(size: CGSize, date: Date) -> CIImage? {
-        let f = DateFormatter(); f.dateFormat = "yy-MM-dd  HH:mm:ss"
-        let text = f.string(from: date)
+        let text = stamp.string(from: date)
         let k = "\(Int(size.width))x\(Int(size.height))|\(text)"
         lock.lock(); if k == key, let c = cached { lock.unlock(); return c }; lock.unlock()
         let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 1; fmt.opaque = false
