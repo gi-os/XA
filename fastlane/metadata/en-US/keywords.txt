@@ -1,1 +1,1 @@
-film,retro,vintage,digicam,grain,date stamp,point and shoot,disposable,camcorder,photo booth,analog
+retro,vintage,camcorder,photo,2000s,digital,35mm,8mm,analog,filter,grain,date,stamp,half,frame,cam
