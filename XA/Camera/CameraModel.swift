@@ -2377,7 +2377,10 @@ extension CameraModel {
     final class Demo {
         let photos: [URL]
         var index = 0
+        /// The picture at full size (for a press) and small (for the frames), each decoded once:
+        /// drawn lazily from the file, a 24 MP JPEG was decoded again for every frame.
         var still: CIImage?
+        var small: CIImage?
         var timer: DispatchSourceTimer?
         var pool: CVPixelBufferPool?
         var started: CFTimeInterval = 0
@@ -2401,16 +2404,27 @@ extension CameraModel {
 
         /// The picture as the camera would hold it: upright, 3:4 portrait, cropped from the middle.
         func load() {
-            guard !photos.isEmpty, let img = CIImage(contentsOf: photos[index % photos.count], options: [.applyOrientationProperty: true]) else { still = nil; return }
+            still = nil; small = nil
+            guard !photos.isEmpty, let src = CGImageSourceCreateWithURL(photos[index % photos.count] as CFURL, nil),
+                  let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, [
+                      kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 8064,
+                      kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: true,
+                  ] as CFDictionary) else { return }
+            let img = CIImage(cgImage: cg)
             let e = img.extent
             let w = min(e.width, e.height * 3 / 4), h = w * 4 / 3
             let crop = CGRect(x: e.midX - w / 2, y: e.midY - h / 2, width: w, height: h).integral
-            still = img.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+            let full = img.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+            still = full
+            let k = 1600 / full.extent.width
+            let s = full.transformed(by: CGAffineTransform(scaleX: k, y: k))
+            if let c = context.createCGImage(s, from: s.extent.integral) { small = CIImage(cgImage: c) }
         }
 
-        /// What the camera sees at time `t`: a 92% window drifting a little, as a hand holds a camera.
-        func window(_ t: CFTimeInterval) -> CIImage? {
-            guard let s = still else { return nil }
+        /// What the camera sees at time `t`: a 92% window drifting a little, as a hand holds a
+        /// camera. From the small copy for the frames, from the full picture for a press.
+        func window(_ t: CFTimeInterval, full: Bool = false) -> CIImage? {
+            guard let s = full ? still : small else { return nil }
             let e = s.extent
             let k: CGFloat = 0.92
             let dx = CGFloat(sin(t * 0.37)) * e.width * (1 - k) / 2
@@ -2432,6 +2446,10 @@ extension CameraModel {
         proOptions = [12, 48]
         publishPhotoSize(mode)
         if mode == .film { beginFinderIntro() }
+        // XA_DEMO_SHOOT=1: one picture by itself once the finder has settled (to fill the roll)
+        if ProcessInfo.processInfo.environment["XA_DEMO_SHOOT"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { self.shoot() }
+        }
         frameQueue.async {
             d.load()
             d.started = CACurrentMediaTime()
@@ -2477,7 +2495,7 @@ extension CameraModel {
         let dims = settingsP.maxPhotoDimensions
         frameQueue.async {
             let d = Self.demo
-            guard let win = d.window(CACurrentMediaTime() - d.started) else {
+            guard let win = d.window(CACurrentMediaTime() - d.started, full: true) else {
                 DispatchQueue.main.async { self.developing = max(0, self.developing - 1) }; return
             }
             // the photo at the size the camera would have taken (portrait: the short side across)
