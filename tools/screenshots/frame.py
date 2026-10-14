@@ -3,10 +3,13 @@
 
     python3 tools/screenshots/frame.py spec.json
 
-spec.json: {"out": dir, "fonts": {"headline": ttf, "subline": ttf} (optional),
-            "shots": [{"raw": png, "headline": str, "subline": str, "file": "01-digi.png"}, ...]}
+spec.json: {"out": dir, "fonts": {"headline": ttf or PostScript name, "subline": ...} (optional),
+            "upper": true (Latin headlines in capitals), "quality": 92,
+            "shots": [{"raw": png, "headline": str, "subline": str, "file": "01_digi.jpg"}, ...]}
 
-1320 x 2868 (6.9-inch iPhone), black like the app, the headline in XA orange. Needs ImageMagick.
+1320 x 2868 (6.9-inch iPhone), black like the app, the headline in XA orange. The text is drawn
+by caption.swift (Core Text: any system font, e.g. HiraginoSans-W8, PingFangSC-Semibold), the
+rest with ImageMagick.
 """
 import json, os, subprocess, sys
 
@@ -22,6 +25,15 @@ BEZEL = 16
 
 def run(*a):
     subprocess.run(a, check=True)
+
+
+CAPTION = os.environ.get("XA_CAPTION") or os.path.join(os.environ.get("TMPDIR", "/tmp"), "xa-caption")
+
+
+def caption_tool():
+    if not os.path.exists(CAPTION):
+        run("swiftc", "-O", os.path.join(HERE, "caption.swift"), "-o", CAPTION)
+    return CAPTION
 
 
 def frame(shot, out, fonts):
@@ -53,21 +65,27 @@ def frame(shot, out, fonts):
     final = os.path.join(out, shot["file"])
     head = fonts.get("headline", os.path.join(FONTS, "Anton-400.ttf"))
     sub = fonts.get("subline", os.path.join(FONTS, "IBMPlexSansCondensed-700.ttf"))
+    upper = fonts.get("upper", True)
+    htxt, stxt = os.path.join(tmp, "head.png"), os.path.join(tmp, "sub.png")
+    run(caption_tool(), head, "150", str(W - 140), "250", ORANGE, htxt, shot["headline"].upper() if upper else shot["headline"])
+    run(caption_tool(), sub, "56", str(W - 200), "130", DIM, stxt, shot["subline"])
     run("magick", canvas,
         shadow, "-geometry", f"+{x - 70}+{PHONE_TOP - BEZEL - 70 + 30}", "-compose", "over", "-composite",
         phone, "-geometry", f"+{x}+{PHONE_TOP - BEZEL}", "-compose", "over", "-composite",
-        "(", "-background", "none", "-fill", ORANGE, "-font", head, "-size", f"{W - 140}x250", "-gravity", "center",
-        f"caption:{shot['headline'].upper() if shot.get('upper', True) else shot['headline']}", ")",
-        "-gravity", "north", "-geometry", "+0+120", "-compose", "over", "-composite",
-        "(", "-background", "none", "-fill", DIM, "-font", sub, "-size", f"{W - 200}x110", "-gravity", "center",
-        f"caption:{shot['subline']}", ")",
-        "-gravity", "north", "-geometry", "+0+385", "-compose", "over", "-composite",
-        "-alpha", "off", "-strip", final)
+        htxt, "-geometry", "+70+120", "-compose", "over", "-composite",
+        stxt, "-geometry", "+100+375", "-compose", "over", "-composite",
+        "-alpha", "off", "-strip", "-quality", str(fonts.get("quality", 92)), "-sampling-factor", "4:4:4", final)
     print(final)
 
 
 if __name__ == "__main__":
     spec = json.load(open(sys.argv[1]))
     os.makedirs(spec["out"], exist_ok=True)
+    opts = dict(spec.get("fonts", {}))
+    for k in ("upper", "quality"):
+        if k in spec:
+            opts[k] = spec[k]
     for s in spec["shots"]:
-        frame(s, spec["out"], spec.get("fonts", {}))
+        frame(s, spec["out"], opts)
+    tmp = spec["out"].rstrip("/") + ".tmp"
+    subprocess.run(["rm", "-rf", tmp])
