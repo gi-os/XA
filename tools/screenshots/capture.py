@@ -8,8 +8,11 @@ the picture and takes a screenshot.
 
     python3 tools/screenshots/capture.py <XA.app> <photos dir> <out dir> [scene ...]
 
+    python3 tools/screenshots/capture.py --roll <photos dir>     (shoots the pictures for the roll)
+
 Build the app first (Debug, iPhone simulator). Use a 6.9-inch simulator (iPhone 17 Pro Max:
 1320 x 2868) for the App Store's required size. Swap the photos for your own and run it again.
+Installing the app again resets its Photos access: allow it once before filling the roll.
 """
 import json, os, subprocess, sys, time
 
@@ -116,7 +119,8 @@ def fill_roll(photos):
 
 if __name__ == "__main__":
     if sys.argv[1] == "--roll":
-        sh("xcrun", "simctl", "privacy", DEVICE, "grant", "photos", BUNDLE, check=False)
+        # Photos access must be allowed in the simulator first (open the app, tap the roll,
+        # Allow Full Access): asked for while this runs, the prompt stays up and nothing is saved.
         fill_roll(sys.argv[2])
         sys.exit(0)
     app, photos, out = sys.argv[1:4]

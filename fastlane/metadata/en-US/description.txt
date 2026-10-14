@@ -19,6 +19,6 @@ Always ready
 • Point at a QR code in DIGI, FILM or PRO and tap the chip to open the link.
 
 Your roll
-XA saves to Photos, in an XA album. Pull down on the viewfinder to see your roll.
+XA saves to Photos, in an XA album. Tap the roll button or swipe up to see your roll.
 
 No account, no ads, no tracking. XA is free and open source.

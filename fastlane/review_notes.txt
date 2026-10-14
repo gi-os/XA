@@ -6,7 +6,7 @@ To try it:
 1. Allow Camera, Microphone and Photos when XA asks. The microphone records sound for videos.
 2. Pick DIGI, FILM, PRO, VIDEO or BOOTH in the mode row under the viewfinder.
 3. Tap the shutter or press a volume button to take a picture. XA saves it to Photos, in an XA album.
-4. Pull down on the viewfinder to open the roll.
+4. Tap the square roll button left of the shutter (or swipe up from the shutter row) to open the roll. Drag the roll down to close it.
 
 Lock Screen camera: XA includes a Lock Screen camera extension and a Control Center control. On iPhone 16 and later, Settings > Camera > Camera Control > Launch Camera can open XA.
 
