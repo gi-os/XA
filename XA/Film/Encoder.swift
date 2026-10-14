@@ -33,10 +33,35 @@ enum Encoder {
 
     static func render(_ img: CIImage, reference: CGImage?) -> CGImage? {
         let e = img.extent.integral
-        if let cg = gpu.createCGImage(img, from: e, format: .RGBA8, colorSpace: sRGB), verified(cg, reference: reference) {
+        if let cg = draw(img, e, gpu), verified(cg, reference: reference) {
             return cg
         }
-        return cpu.createCGImage(img, from: e, format: .RGBA8, colorSpace: sRGB)
+        return draw(img, e, cpu)
+    }
+
+    /// Past 16 MP the picture is drawn in tiles. Core Image refuses a render whose buffers pass its
+    /// memory limit (a 40 MP drum scan asked for 860 MB at once) and leaves it black; a tile
+    /// needs only its own part of every stage.
+    private static func draw(_ img: CIImage, _ e: CGRect, _ ctx: CIContext) -> CGImage? {
+        let w = Int(e.width), h = Int(e.height)
+        guard w > 0, h > 0 else { return nil }
+        if w * h <= 16_000_000 { return ctx.createCGImage(img, from: e, format: .RGBA8, colorSpace: sRGB) }
+        let rowBytes = w * 4
+        guard let c = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: rowBytes, space: sRGB,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue), let base = c.data else { return nil }
+        let tile = 2048
+        for ty in stride(from: 0, to: h, by: tile) {
+            for tx in stride(from: 0, to: w, by: tile) {
+                let tw = min(tile, w - tx), th = min(tile, h - ty)
+                // the bitmap's rows go down from the top, Core Image's y goes up from the bottom
+                let bounds = CGRect(x: e.minX + CGFloat(tx), y: e.minY + CGFloat(h - ty - th), width: CGFloat(tw), height: CGFloat(th))
+                autoreleasepool {
+                    ctx.render(img, toBitmap: base.advanced(by: ty * rowBytes + tx * 4), rowBytes: rowBytes,
+                               bounds: bounds, format: .RGBA8, colorSpace: sRGB)
+                }
+            }
+        }
+        return c.makeImage()
     }
 
     /// The render is only trusted if every part of it agrees with the thumbnail. A full-size

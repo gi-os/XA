@@ -580,7 +580,8 @@ enum DateBack {
         guard let cg = overlay(size: size, date: date, config: cfg, shape: shape, mono: mono, instant: instant) else { return nil }
         var img = CIImage(cgImage: cg)
         if cfg.style == .camcorder { img = videoResolution(img) }
-        cacheLock.lock(); cacheKey = key; cached = img; cacheLock.unlock()
+        // kept only at the viewfinder's size: a drum scan's overlay is well over 100 MB
+        if size.width * size.height <= 4_000_000 { cacheLock.lock(); cacheKey = key; cached = img; cacheLock.unlock() }
         return img
     }
 

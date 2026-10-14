@@ -90,6 +90,11 @@ final class AppSettings: ObservableObject {
         boothSkin = BoothSkin(rawValue: d.string(forKey: "boothSkin") ?? "") ?? .doll
         boothDeco = BoothDeco(rawValue: d.string(forKey: "boothDeco") ?? "") ?? .stars
         boothLayout = BoothLayout(rawValue: d.string(forKey: "boothLayout") ?? "") ?? .sheet
+        // FILM saved at a lab scan's size by default before the drum scan: the new default, once.
+        if !d.bool(forKey: "scanDefault.drum") {
+            if filmRecipe.scan == .lab { filmRecipe.scan = .drum; save(filmRecipe, "filmRecipe") }
+            d.set(true, forKey: "scanDefault.drum")
+        }
     }
 
     private func save<T: Encodable>(_ v: T, _ key: String) {

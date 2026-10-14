@@ -159,8 +159,8 @@ struct CustomizeView: View {
             Text("The size of the negative. Smaller formats show bigger grain and glow: 110 is tiny and gritty, 120 is big, smooth and square. 35mm is cut 2:3. Default 35MM.")
                 .font(.system(size: 12)).foregroundStyle(XA.faint)
             Text("LAB").font(XA.display(11)).foregroundStyle(XA.faint).padding(.top, 4)
-            Segmented(items: [(FilmScan.lab, "Lab scan"), (.full, "Full size")], selection: $settings.filmRecipe.scan)
-            Text("Lab scan saves at a minilab scanner's size (3088 px on the long side), where grain looks the way it does on real scans. Full size keeps every pixel. Default Lab scan.")
+            Segmented(items: [(FilmScan.drum, "Drum scan"), (.lab, "Lab scan"), (.full, "Camera size")], selection: $settings.filmRecipe.scan)
+            Text("Drum scan scans the negative at about 5600 dpi (up to 48 MP), so zooming in shows the grain's dye clouds, not pixels; on a 48 MP iPhone it uses the whole sensor. Lab scan is a minilab's size (3088 px on the long side), small files. Camera size keeps the camera's own pixels. The Lock Screen camera always saves a lab scan. Default Drum scan.")
                 .font(.system(size: 12)).foregroundStyle(XA.faint)
             FlatSlider(label: "Lab auto-correct", value: $settings.filmRecipe.labAuto, format: { "\(Int(($0 * 100).rounded()))" },
                        note: "What the lab's machine does to every frame: prints a dim or gray day brighter, sets the black and white points so a flat scene still has punch, adds color to a pale frame and warms a cold one. Night stays night. 0 prints the negative as it is.", standard: 0.7)

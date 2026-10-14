@@ -145,7 +145,10 @@ struct RootView: View {
         .onChange(of: settings.recipe) { _, _ in camera.syncFrameSettings(); pushContext() }
         .onChange(of: settings.digiOSD) { _, _ in camera.syncFrameSettings(); pushContext() }
         .onChange(of: settings.filmAlwaysOn) { _, _ in camera.syncFrameSettings(); pushContext() }
-        .onChange(of: settings.filmRecipe) { _, _ in camera.syncFrameSettings(); camera.updateUltraWide(); pushContext() }
+        .onChange(of: settings.filmRecipe) { old, new in
+            camera.syncFrameSettings(); camera.updateUltraWide(); pushContext()
+            if old.scan != new.scan { camera.applyResolution() }   // a drum scan takes the whole sensor
+        }
         .onChange(of: settings.digiMegapixels) { _, _ in camera.applyResolution(); pushContext() }
     }
 

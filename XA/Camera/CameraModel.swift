@@ -244,6 +244,8 @@ final class CameraModel: NSObject, ObservableObject {
     private var introPatchDone = true
     private let eyeQueue = DispatchQueue(label: "xa.eyes", qos: .userInitiated)
     private var proDims = CMVideoDimensions(width: 4032, height: 3024)
+    /// FILM's drum and full scans: the biggest photo the sensor makes.
+    private var filmDims = CMVideoDimensions(width: 4032, height: 3024)
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -553,14 +555,27 @@ final class CameraModel: NSObject, ObservableObject {
         var pro = largest
         let want = settings.proMegapixels
         if want > 0, let chosen = dims.filter({ mp($0) <= want }).max(by: { px($0) < px($1) }) { pro = chosen }
-        lock.lock(); digiDims = digi; proDims = pro; lock.unlock()
+        lock.lock(); digiDims = digi; proDims = pro; filmDims = largest; lock.unlock()
         // the mode as it is by now (it can change while the camera is still opening)
         DispatchQueue.main.async { self.proOptions = options; self.publishPhotoSize(self.mode) }
     }
 
+    /// On the main thread (it reads the settings).
     private func shotDims(_ m: CaptureMode) -> CMVideoDimensions {
+        let big = m == .film && filmTakesFullSensor
         lock.lock(); defer { lock.unlock() }
-        return m == .pro ? proDims : digiDims
+        return m == .pro ? proDims : (big ? filmDims : digiDims)
+    }
+
+    /// FILM's drum and full scans take the biggest photo the sensor makes, for real detail under
+    /// the grain (a 48 MP sensor's whole picture). A lab scan, ZERO's RAW and the Lock Screen
+    /// camera's small memory keep to 12 MP.
+    private var filmTakesFullSensor: Bool {
+        #if CAPTURE_EXTENSION
+        return false
+        #else
+        return settings.filmRecipe.scan != .lab && !settings.digiZero
+        #endif
     }
 
     private func publishPhotoSize(_ m: CaptureMode) {
@@ -577,6 +592,8 @@ final class CameraModel: NSObject, ObservableObject {
             // Only the per-shot size changes; the session is left alone.
             self.setupPhotoOutput(dev, m)
         }
+        // the next shot's buffers, at the size and quality it will now be taken at
+        preparePhotos()
     }
 
     private func setupLenses(_ dev: AVCaptureDevice) {
@@ -1177,7 +1194,11 @@ final class CameraModel: NSObject, ObservableObject {
         }
         // PRO's held shutter or ISO is only honoured at .speed (the camera may override it otherwise).
         let manual = m == .pro && (shutterIndex != nil || isoIndex != nil)
-        let want: AVCapturePhotoOutput.QualityPrioritization = manual ? .speed : (settings.flash != .off && m != .pro ? .balanced : m.prioritization)
+        // FILM at the whole sensor is asked for the way PRO asks for it (quality), the combination
+        // the biggest photos are known to come back from.
+        let fullSensor = m == .film && filmTakesFullSensor && !zero
+        let want: AVCapturePhotoOutput.QualityPrioritization = manual ? .speed
+            : (fullSensor ? .quality : (settings.flash != .off && m != .pro ? .balanced : m.prioritization))
         settingsP.photoQualityPrioritization = want.rawValue <= photoOutput.maxPhotoQualityPrioritization.rawValue ? want : photoOutput.maxPhotoQualityPrioritization
         settingsP.maxPhotoDimensions = shotDims(m)
         let fm: AVCaptureDevice.FlashMode = settings.flash == .on ? .on : (settings.flash == .auto ? .auto : .off)
@@ -1429,9 +1450,21 @@ final class CameraModel: NSObject, ObservableObject {
         // cell, so a render that came back with black tiles is redone on the CPU. It is also the
         // roll button's picture.
         let e0 = developed.extent
-        let k0: CGFloat = 200 / max(e0.width, 1)
-        let small = developed.transformed(by: CGAffineTransform(scaleX: k0, y: k0))
-        let reference = Encoder.gpu.createCGImage(small, from: small.extent.integral)
+        var reference: CGImage?
+        if shot.develop.film && e0.width * e0.height > 16_000_000, let meter = Darkroom.reduced(src, longEdge: 1024) {
+            // A drum scan can't be shrunk to a thumbnail in one go (it would be read whole): the
+            // same recipe on the meter's small copy, at its own size, stands in.
+            var d = shot.develop
+            d.filmRecipe.scan = .full
+            let sm = Darkroom.develop(meter, d, date: shot.date, preview: false, demo: demo).0
+            let k = 200 / max(sm.extent.width, 1)
+            let s = sm.transformed(by: CGAffineTransform(scaleX: k, y: k))
+            reference = Encoder.gpu.createCGImage(s, from: s.extent.integral)
+        } else {
+            let k0: CGFloat = 200 / max(e0.width, 1)
+            let small = developed.transformed(by: CGAffineTransform(scaleX: k0, y: k0))
+            reference = Encoder.gpu.createCGImage(small, from: small.extent.integral)
+        }
         guard let cg = Encoder.render(developed, reference: reference) else { return nil }
         let props = Recipe.properties(from: fileProps, recipe: recipe)
         // FILM keeps everything: HEIC at a high quality. DIGI saves the crunch you chose.
