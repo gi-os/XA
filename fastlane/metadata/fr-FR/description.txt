@@ -1,0 +1,67 @@
+Photographiez comme en 2003 : flash de soirée qui crame tout, couleurs CCD franches, date orange dans le coin. Et de la pellicule à charger et à développer, douze cassettes vidéo, une cabine photo à stickers.
+Cinq appareils, tout inclus : DIGI, FILM, VIDEO, BOOTH et PRO. Sans abonnement, sans pub, sans compte. Les pourboires, facultatifs, ne débloquent rien.
+
+DIGI
+• 1, 2, 3, 5, 8 ou 12 mégapixels.
+• Traitement bas de gamme assumé : hautes lumières cramées, halo d'accentuation, bruit chromatique, artefacts JPEG.
+• Couleur CCD : ciels cyan profond, rouges un peu trop chauds.
+• Le flash de soirée : visages brillants, blancs chauds.
+• Les lumières vives bavent en ligne verticale, comme un vieux CCD.
+• Chaque défaut se dose ou se coupe.
+• L'écran devient celui d'une digicam, icône de batterie comprise.
+
+FILM
+• Onze pellicules modélisées d'après les fiches techniques : huit couleur (de la 100 grain fin à la 1600, dont une 500T tungstène) et trois noir et blanc jusqu'à 3200.
+• Grain et halation calculés en microns sur le négatif : le petit 110 est granuleux, le grand 120 tout doux.
+• Visée télémétrique : cadre lumineux, aiguille du posemètre, double image de mise au point.
+• Devant la pellicule : objectif bon marché, flash qui faiblit au loin, fuites de lumière, filtre diffuseur. La pellicule colore tout.
+• Glissez une pellicule vers le haut pour la pousser d'un diaph, vers le bas pour la retenir.
+• Au labo : correction auto du minilab, chaleur et teinte du tirage, préflashage.
+• Scan au tambour par défaut, environ 5600 dpi : au zoom, on voit le grain, pas les pixels. En HEIC.
+• Sur iPhone compatible RAW, FILM peut développer le RAW, sans le traitement de l'iPhone.
+
+VIDEO : DOUZE CASSETTES
+• VHS : couleurs douces, lignes de balayage, bande de tracking, affichage PLAY.
+• Un film de famille 8 mm qui scintille et flotte.
+• CCTV : vidéosurveillance vert-gris, horloge incrustée.
+• Cassettes Pocket basse définition : pixels verts, pixels couleur, format large 480×240.
+• Slit-scan, traînées, Motion, stop motion, datamosh et une cassette neutre.
+
+BOOTH
+• Quatre poses avec compte à rebours, caméra avant.
+• Grands yeux, peau lumineuse : Glow, Doll ou Alien.
+• Un fond et des dessins au feutre fluo par pose : étoiles, cœurs, roses, oreilles de chat.
+• Planche de stickers, grille ou bande.
+
+PRO
+• La résolution maximale du capteur, en HEIF ou JPEG.
+• Choix de l'objectif, histogramme en direct, molettes : balance des blancs, exposition, vitesse, ISO, mise au point.
+• Auto, priorité vitesse, priorité ISO ou tout manuel.
+
+À VOTRE IMAGE
+• En DIGI, chaque simulation s'édite : couleur, courbe, virage partiel, grain, halation, vignetage. Enregistrez les vôtres.
+• Looks : Clean, Grain, Sixteen, Pocket, Pocket Color, 1-Bit, Press, Heat et Booth.
+• Formes : Capsule, Porthole, Window, Crush, Nova et quatre tirages instantanés.
+• Huit dos dateurs : quartz sept segments, matrice de points, caméscope, LCD, digicam à pixels rouges, tampon rouge, feutre sur adhésif, bord de film.
+• Combinez simulation, look, forme et dos dateur.
+
+TOUJOURS PRÊT
+• Un appareil sur l'écran verrouillé, une commande au Centre de contrôle.
+• Commande de l'appareil photo : choisissez XA dans Réglages.
+• Elle fait défiler simulations et looks (DIGI), pellicules (FILM), cassettes (VIDEO), exposition et zoom (PRO). Un clic, ou un bouton de volume, déclenche.
+• Codes QR : visez en DIGI, FILM ou PRO, touchez pour ouvrir le lien.
+
+VOS PHOTOS
+• Tout va dans un album XA de Photos, sauvegardé si vous utilisez Photos iCloud.
+• Planche-contact : balayez vers le haut sous le viseur, ou touchez le bouton pellicule.
+• Aucun filigrane.
+
+RIEN N'EST COLLECTÉ
+• Aucun pistage : ni serveur, ni statistiques, ni données collectées.
+• Les pourboires, à la fin de Customize, soutiennent XA.
+• XA est open source (GPLv3) : le code est lisible et vérifiable par tous.
+• Rendu argentique : spektrafilm, la simulation libre d'Andrea Volpato.
+
+BON À SAVOIR
+• iPhone uniquement, iOS 18 minimum.
+• Interface en anglais.

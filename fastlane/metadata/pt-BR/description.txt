@@ -1,0 +1,71 @@
+Fotografe como em 2003: flash de festa estourado, cor de CCD saturada e a data laranja no canto. E mais: filme para carregar e revelar, doze fitas de vídeo e cabine de fotos com adesivos.
+Tudo vem incluso. Sem assinatura, sem anúncios, sem conta. As gorjetas são opcionais e não desbloqueiam nada.
+
+Cinco câmeras em um app: DIGI, FILM, VIDEO, BOOTH e PRO.
+
+DIGI
+• Escolha 1, 2, 3, 5, 8 ou 12 megapixels.
+• Processamento barato, no bom sentido: altas luzes estouradas, halo de nitidez, ruído de cor e compressão JPEG pesada.
+• Cor de CCD: céu ciano profundo e vermelhos quentes demais.
+• Flash de festa: rostos estourados e brancos quentes.
+• Luz forte risca o quadro na vertical, como num CCD antigo.
+• Aumente, diminua ou desligue cada defeito.
+• A tela vira um display de digicam, com bateria e tudo.
+
+FILM
+• Onze filmes baseados em datasheets publicados: oito coloridos, de um 100 de grão fino a um 500T e um 1600, e três P&B até 3200.
+• Grão e halation medidos em mícrons no negativo: o 110 sai áspero, o 120 liso.
+• Enquadre pela moldura luminosa de uma telemétrica de bolso, com agulha do fotômetro e imagem dupla de foco.
+• Na frente do filme: lente barata, queda de luz do flash, vazamento de luz e filtro de névoa. O filme dá cor a tudo.
+• Deslize o filme: para cima, push de um ponto; para baixo, pull.
+• No laboratório: correção automática de minilab, temperatura e matiz da cópia, e pré-flash.
+• Scanner de tambor por padrão, a cerca de 5600 dpi: no zoom aparece grão, não pixel. Salvo em HEIC.
+• Em iPhones com RAW, o FILM pode revelar do RAW, sem o processamento do iPhone.
+
+VIDEO: DOZE FITAS
+• VHS: cor suave, linhas de varredura, faixa de tracking e o PLAY na tela.
+• Um filme caseiro de 8mm que tremula e oscila.
+• CCTV: câmera de segurança verde-acinzentada, com o relógio gravado.
+• Fitas de bolso em baixa resolução: pixel verde, colorido e uma faixa larga 480×240.
+• Slit-scan, trails, motion, stop motion e datamosh para experimentar; clean para vídeo comum.
+
+BOOTH
+• Quatro fotos com contagem regressiva, na câmera frontal.
+• Olhos grandes e pele iluminada: Glow, Doll ou Alien.
+• A cada foto, um fundo novo e rabiscos neon: estrelas, corações, rosas, orelhas de gato.
+• Sai em cartela de adesivos, grade ou tira.
+
+PRO
+• A maior foto que o sensor faz, salva em HEIF ou JPEG.
+• Botões de lente, histograma ao vivo e controles de balanço de branco, exposição, obturador, ISO e foco.
+• Automático, prioridade de obturador ou de ISO, ou todo manual.
+
+DO SEU JEITO
+• No DIGI, edite qualquer sim (simulação de filme): cor, curva de tons, split tone, grão, halation e vinheta. Salve as suas.
+• Looks: Clean, Grain, Sixteen, Pocket, Pocket Color, 1-Bit, Press, Heat e Booth.
+• Formas: Capsule, Porthole, Window, Crush, Nova e quatro molduras instantâneas.
+• Oito estilos de data: quartzo de 7 segmentos, matriz de pontos, filmadora, LCD, digicam de pixel vermelho, carimbo vermelho, caneta em fita e borda de filme.
+• Combine uma sim, um look, uma forma e uma data.
+
+SEMPRE PRONTA
+• Uma câmera na Tela Bloqueada e um controle na Central de Controle.
+• Com o Controle da Câmera, faça do XA a câmera do botão em Ajustes.
+• O botão passa por sims e looks no DIGI, filmes no FILM, fitas no VIDEO, e exposição e zoom no PRO. Clique para fotografar.
+• Os botões de volume também disparam.
+• Aponte para um QR code no DIGI, FILM ou PRO e toque para abrir.
+
+SUAS FOTOS
+• Toda foto e todo vídeo vão para o app Fotos, num álbum XA.
+• Com as Fotos do iCloud, entram no backup com a sua biblioteca.
+• Deslize para cima sob o visor, ou toque no rolo, para ver a folha de contato.
+• Sem marca d'água.
+
+NADA É COLETADO
+• Sem rastreamento: sem servidor, sem analytics, nenhum dado coletado.
+• Gorjetas opcionais, no fim de Customize, ajudam a manter o XA.
+• O XA é código aberto (GPLv3): qualquer um pode ler o código e conferir.
+• Filme modelado com o spektrafilm, simulação aberta de Andrea Volpato.
+
+BOM SABER
+• Só para iPhone, iOS 18 ou posterior.
+• A interface do app é em inglês.

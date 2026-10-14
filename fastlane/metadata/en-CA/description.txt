@@ -1,0 +1,71 @@
+Shoot like it's 2003. Blown-out party flash, crunchy CCD colour and an orange date in the corner, plus film you load and print, twelve video tapes and a photo-sticker booth.
+Every camera, stock, sim, look, shape, date back and tape is included. No subscription, no ads, no account. Optional tips unlock nothing.
+
+Five cameras in one app: DIGI, FILM, VIDEO, BOOTH and PRO.
+
+DIGI
+• Pick 1, 2, 3, 5, 8 or 12 megapixels.
+• Cheap processing, the good kind: clipped highlights, a sharpening halo, colour noise and a hard JPEG crunch.
+• CCD colour: deep cyan skies and reds a little too hot.
+• Pop the flash for the party look: hot faces and warm whites.
+• Bright lights smear a line down the frame, like an old CCD.
+• Turn each flaw up, down or off.
+• The screen is a live digicam display, battery icon and all.
+
+FILM
+• Eleven stocks modelled on published datasheets: eight colour, from a fine-grain 100 to a tungsten 500T and a 1600, and three black-and-white films up to 3200.
+• Grain and halation are sized in microns on the negative, so the format changes them: 110 is tiny and gritty, 120 big and smooth.
+• Compose in a pocket rangefinder's bright frame, with its meter needle and focusing patch.
+• In front of the film: a cheap lens, flash falloff, light leaks and a mist filter. The stock colours them all.
+• Swipe a stock up to push it a stop, down to pull it.
+• In the lab: minilab auto-correction, print warmth and tint, and preflash.
+• Drum-scanned by default at about 5600 dpi, so zooming in shows grain, not pixels. Saved as HEIC.
+• On iPhones that shoot RAW, FILM can develop from RAW and skip the iPhone's own processing.
+
+VIDEO: TWELVE TAPES
+• VHS: soft colour, scanlines, a tracking band and the PLAY display.
+• An 8mm home movie that flickers and weaves.
+• CCTV: green-grey security footage with the clock burned in.
+• Low-res pocket tapes: green pixels, colour pixels and a wide 480×240 band.
+• Slit-scan, trails, motion, stop motion and datamosh for the weird stuff, and a clean tape for plain video.
+
+BOOTH
+• Four shots on a countdown, with the front camera.
+• Big eyes and glowing skin: Glow, Doll or Alien.
+• A new backdrop and neon-pen doodles for every shot: stars, hearts, roses, cat ears.
+• Print it as a sticker sheet, a grid or a strip.
+
+PRO
+• The biggest photo the sensor makes, saved as HEIF or JPEG.
+• Lens buttons, a live histogram and dials for white balance, exposure, shutter, ISO and focus.
+• Auto, shutter priority, ISO priority or fully manual.
+
+MAKE IT YOURS
+• In DIGI, open any film sim in the editor: colour, tone curve, split tone, grain, halation and vignette. Save your own.
+• Looks: Clean, Grain, Sixteen, Pocket, Pocket Color, 1-Bit, Press, Heat and Booth.
+• Shapes: Capsule, Porthole, Window, Crush, Nova and four instant prints.
+• Eight date backs: seven-segment quartz, dot matrix, camcorder, LCD, red-pixel digicam, red ink stamp, marker on tape and film edge print.
+• Stack a sim, a look, a shape and a date back.
+
+ALWAYS READY
+• A Lock Screen camera and a Control Center control.
+• On an iPhone with Camera Control, make XA the button's camera in Settings.
+• Camera Control slides through sims and looks in DIGI, stocks in FILM, tapes in VIDEO, and exposure and zoom in PRO. Click it to shoot.
+• The volume buttons shoot too.
+• Point at a QR code in DIGI, FILM or PRO and tap to open the link.
+
+YOUR PHOTOS
+• Every picture and video goes to Photos, in an XA album.
+• With iCloud Photos, they're backed up with the rest of your library.
+• Swipe up under the viewfinder, or tap the roll button, for a contact sheet of your roll.
+• No watermark.
+
+NOTHING COLLECTED
+• No tracking: no server, no analytics, no data collected.
+• Optional tips, at the end of Customize, help keep XA going.
+• XA is open source under the GPLv3. Anyone can read the code and check what it does.
+• Film modelling powered by spektrafilm, Andrea Volpato's open film simulation.
+
+GOOD TO KNOW
+• iPhone only, iOS 18 or later.
+• The app's interface is in English.
