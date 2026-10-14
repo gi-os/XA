@@ -3,6 +3,7 @@ import LockedCameraCapture
 import AppIntents
 import UniformTypeIdentifiers
 import Photos
+import StoreKit
 
 @main
 struct XAApp: App {
@@ -29,6 +30,7 @@ struct RootView: View {
     @State private var pendingLink: URL?
     @Environment(\.scenePhase) private var phase
     @Environment(\.openURL) private var openURL
+    @Environment(\.requestReview) private var requestReview
 
     init() {
         let s = AppSettings()
@@ -103,6 +105,8 @@ struct RootView: View {
         .task {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             rollMounted = true
+            // the tip jar listens for tips that finish later (Ask to Buy), once the camera is up
+            _ = TipJar.shared
         }
         // The Lock Screen camera opened the app (its roll, settings or film buttons).
         .onContinueUserActivity(NSUserActivityTypeLockedCameraCapture) { a in
@@ -186,7 +190,15 @@ struct RootView: View {
         guard rollMounted else { rollMounted = true; DispatchQueue.main.async { openRoll() }; return }
         withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { showRoll = true }
     }
-    private func closeRoll() { withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { showRoll = false; pull = 0 } }
+    private func closeRoll() {
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { showRoll = false; pull = 0 }
+        // Back from looking at the pictures: the moment to ask for a rating, once XA has been
+        // used for a while (see ReviewPrompt), never in the middle of shooting.
+        if ReviewPrompt.due {
+            ReviewPrompt.asked()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { requestReview() }
+        }
+    }
 
     /// The Lock Screen camera cannot read the app's settings; they travel in the intent context.
     private func pushContext() {

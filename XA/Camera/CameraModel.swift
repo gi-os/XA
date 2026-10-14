@@ -1531,7 +1531,12 @@ final class CameraModel: NSObject, ObservableObject {
     /// Into Photos, or into the pending folder for later when Photos won't take it now.
     private func save(_ out: Data, _ type: UTType) {
         if let lib = library {
-            lib.save(data: out, type: type) { ok in if !ok { self.writeFallback(out, type) } }
+            lib.save(data: out, type: type) { ok in
+                if !ok { self.writeFallback(out, type) }
+                #if !CAPTURE_EXTENSION
+                if ok { ReviewPrompt.noteShot() }
+                #endif
+            }
         } else {
             writeFallback(out, type)
         }

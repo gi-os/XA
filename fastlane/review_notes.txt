@@ -12,4 +12,6 @@ Lock Screen camera: XA includes a Lock Screen camera extension and a Control Cen
 
 QR codes: in DIGI, FILM or PRO, point the camera at a QR code. Tap the chip to open the link in the browser.
 
+Tips: Customize (the sliders button) > Support XA offers three optional tips (consumable in-app purchases com.gios.xa.tip.small, .medium, .large). They unlock nothing: every feature is free for everyone.
+
 Contact: gio@gi-os.com

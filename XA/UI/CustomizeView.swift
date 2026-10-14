@@ -54,6 +54,7 @@ struct CustomizeView: View {
                         Text("Make XA the camera: Settings › Camera › Camera Control › Launch Camera › XA. Add the XA control to Control Center or the Lock Screen to open it while locked.")
                             .font(.system(size: 13)).foregroundStyle(XA.dim)
                     }
+                    TipJarView()
                 }
                 .padding(16)
             }
