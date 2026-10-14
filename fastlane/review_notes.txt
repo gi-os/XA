@@ -1,0 +1,15 @@
+XA is a camera app. Test it on an iPhone. The simulator has no camera.
+
+There is no account and no sign-in. XA has no server, analytics or ads. Photos and videos stay on the iPhone.
+
+To try it:
+1. Allow Camera, Microphone and Photos when XA asks. The microphone records sound for videos.
+2. Pick DIGI, FILM, PRO, VIDEO or BOOTH in the mode row under the viewfinder.
+3. Tap the shutter or press a volume button to take a picture. XA saves it to Photos, in an XA album.
+4. Pull down on the viewfinder to open the roll.
+
+Lock Screen camera: XA includes a Lock Screen camera extension and a Control Center control. On iPhone 16 and later, Settings > Camera > Camera Control > Launch Camera can open XA.
+
+QR codes: in DIGI, FILM or PRO, point the camera at a QR code. Tap the chip to open the link in the browser.
+
+Contact: gio@gi-os.com

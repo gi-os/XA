@@ -1,0 +1,24 @@
+XA is a camera that's fun to use, and serious when you want it to be. What you see in the viewfinder is what you get in the photo.
+
+Five cameras
+• DIGI is a 2003 point-and-shoot. Pick 1, 2, 3 or 5 megapixels and get its low-end processing on purpose: clipped highlights, a sharpening halo, color noise and a JPEG squeezed hard.
+• FILM loads a roll. Pick a stock and a format, add flash, a light leak or a mist filter, then time the print the way a lab does.
+• PRO is the iPhone at full quality. It saves the biggest photo the sensor makes as HEIF or JPEG, with lens buttons, a live histogram and manual white balance, exposure, shutter, ISO and focus.
+• VIDEO has twelve tapes, from a clean picture to camcorder, home movie, security camera, slit-scan and datamosh.
+• BOOTH is a photo-sticker booth. Four shots, big eyes and a sticker sheet.
+
+Make it yours
+• Film sims you can edit, down to color, tone curve, split tone, grain, halation and vignette. Save your own.
+• Looks: Clean, Grain, Sixteen, Pocket, Pocket Color, 1-Bit, Press, Heat and Booth.
+• Shapes: Capsule, Porthole, Window, Crush, Nova and four instant prints.
+• Date backs: seven-segment quartz, dot matrix, camcorder, LCD, red ink stamp, marker on tape and film edge print.
+
+Always ready
+• A Lock Screen camera and a Control Center control. On iPhone 16 and later, set XA as the Camera Control button's camera in Settings.
+• The Camera Control button slides through sims and looks. Click it or press a volume button to shoot.
+• Point at a QR code in DIGI, FILM or PRO and tap the chip to open the link.
+
+Your roll
+XA saves to Photos, in an XA album. Pull down on the viewfinder to see your roll.
+
+No account, no ads, no tracking. XA is free and open source.

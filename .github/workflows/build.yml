@@ -9,6 +9,11 @@ on:
     paths-ignore:
       - '**.md'
       - '.github/workflows/check.yml'
+      - '.github/workflows/release.yml'
+      - 'docs/**'
+      - 'fastlane/metadata/**'
+      - 'fastlane/screenshots/**'
+      - 'fastlane/review_notes.txt'
   # TEMPORARY, until this app is on the App Store: TestFlight builds expire after 90 days, so
   # main is rebuilt as-is on the 1st of every month and a fresh build is always on the phone.
   # Delete this block (and the keepalive step below) once it's published.

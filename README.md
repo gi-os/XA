@@ -60,6 +60,9 @@ open XA.xcodeproj
 
 CI: `check.yml` builds and tests every branch unsigned. A push to `main` runs `build.yml`,
 which signs with fastlane match (`gi-os/ios-certs`) and uploads to TestFlight.
+`release.yml` (run by hand) uploads the App Store text in `fastlane/metadata`, the screenshots in
+`fastlane/screenshots/en-US` and the App Review details; ticking **submit** sends the newest build to
+App Review. The support and privacy pages are `docs/`, served at https://gi-os.github.io/XA/.
 
 Fonts are bundled open-licence faces from Google Fonts (SIL OFL 1.1, Apache 2.0 for Roboto
 Condensed and Yellowtail).

@@ -93,3 +93,62 @@ platform :ios do
     )
   end
 end
+
+# ---- App Store ----
+
+def api_key_from_env
+  app_store_connect_api_key(key_id: ENV["ASC_KEY_ID"], issuer_id: ENV["ASC_ISSUER_ID"], key_content: ENV["ASC_KEY_P8"], in_house: false)
+end
+
+def marketing_version
+  File.read(File.expand_path("../project.yml", __dir__))[/MARKETING_VERSION:\s*"([^"]+)"/, 1]
+end
+
+platform :ios do
+  # Store text (fastlane/metadata), screenshots (fastlane/screenshots/en-US, taken on a phone:
+  # the simulator has no camera) and review details. With SUBMIT=true it also sends the newest
+  # TestFlight build of this version to App Review, once that build has finished processing.
+  lane :release do
+    env = app_env
+    api_key = api_key_from_env
+    version = marketing_version
+    bundle = env["TARGETS"].split(",").first.split(":").last
+    shots = File.expand_path("screenshots", __dir__)
+    have_shots = !Dir[File.join(shots, "**", "*.{png,jpg,jpeg}")].empty?
+    # App Review contact: App Store Connect needs all four before it takes review notes.
+    review = nil
+    if %w[REVIEW_FIRST_NAME REVIEW_LAST_NAME REVIEW_EMAIL REVIEW_PHONE].all? { |k| !ENV[k].to_s.empty? }
+      review = {
+        first_name: ENV["REVIEW_FIRST_NAME"], last_name: ENV["REVIEW_LAST_NAME"],
+        email_address: ENV["REVIEW_EMAIL"], phone_number: ENV["REVIEW_PHONE"],
+        notes: File.read(File.expand_path("review_notes.txt", __dir__))
+      }
+    else
+      UI.important("Review contact secrets not set: leaving App Review information as it is in App Store Connect.")
+    end
+    UI.user_error!("No screenshots in fastlane/screenshots/en-US: App Review won't take the app without them.") if ENV["SUBMIT"] == "true" && !have_shots
+    deliver(
+      api_key: api_key,
+      app_identifier: bundle,
+      app_version: version,
+      build_number: "latest",
+      skip_binary_upload: true,
+      metadata_path: File.expand_path("metadata", __dir__),
+      screenshots_path: shots,
+      skip_screenshots: !have_shots,
+      overwrite_screenshots: true,
+      force: true,
+      app_review_information: review,
+      submit_for_review: ENV["SUBMIT"] == "true",
+      automatic_release: false,
+      run_precheck_before_submit: false,
+      submission_information: {
+        add_id_info_uses_idfa: false,
+        export_compliance_uses_encryption: false,
+        content_rights_contains_third_party_content: env["THIRD_PARTY_CONTENT"] == "true",
+        content_rights_has_rights: true
+      }
+    )
+    attach unless ENV["SUBMIT"] == "true"
+  end
+end
