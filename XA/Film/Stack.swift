@@ -57,7 +57,11 @@ enum FilmCatalog {
     /// No sim is Neutral: there is always a film loaded.
     static func sim(_ id: String?) -> Sim? {
         guard let id else { return Sim.neutral }
-        return sims.first { $0.id == id } ?? Sim.neutral
+        // Looked up several times a frame: the presets, then the custom films, without copying
+        // the two into one new list each time.
+        if let s = Sim.presets.first(where: { $0.id == id }) { return s }
+        lock.lock(); defer { lock.unlock() }
+        return _custom.first { $0.id == id } ?? Sim.neutral
     }
 
     static func setCustom(_ list: [Sim]) {

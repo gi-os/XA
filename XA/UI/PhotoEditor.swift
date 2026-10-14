@@ -158,18 +158,25 @@ struct PhotoEditor: View {
 
     private func load() {
         library.data(asset) { d, uti in
-            guard let d, let full = CIImage(data: d, options: [.applyOrientationProperty: true]) else { return }
-            let alpha = uti == UTType.png.identifier
-            let e = full.extent
-            let k: CGFloat = min(1, 1080 / max(e.width, e.height))
-            let small = full.transformed(by: CGAffineTransform(scaleX: k, y: k))
-            let o = Looks.context.createCGImage(small, from: small.extent)
-            DispatchQueue.main.async {
-                hasAlpha = alpha
-                source = small
-                fullData = d
-                if let o { original = UIImage(cgImage: o) }
-                render()
+            // Off the main thread (Photos answers on it): decoding a 48MP original froze the editor
+            // as it opened.
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let d, let full = CIImage(data: d, options: [.applyOrientationProperty: true]) else { return }
+                let alpha = uti == UTType.png.identifier
+                let e = full.extent
+                let k: CGFloat = min(1, 1080 / max(e.width, e.height))
+                let small = full.transformed(by: CGAffineTransform(scaleX: k, y: k))
+                // The previews work from this small copy, baked once at half-float: from `small`
+                // itself, every slider step decoded the whole original again.
+                let o = Looks.context.createCGImage(small, from: small.extent.integral, format: .RGBAh,
+                                                    colorSpace: CGColorSpace(name: CGColorSpace.extendedSRGB))
+                DispatchQueue.main.async {
+                    hasAlpha = alpha
+                    source = o.map { CIImage(cgImage: $0) } ?? small
+                    fullData = d
+                    if let o { original = UIImage(cgImage: o) }
+                    render()
+                }
             }
         }
     }

@@ -8,3 +8,7 @@ fastlane/report.xml
 fastlane/README.md
 vendor/
 .bundle/
+# written by xcodegen from project.yml
+XA/Info.plist
+Capture/Info.plist
+Control/Info.plist

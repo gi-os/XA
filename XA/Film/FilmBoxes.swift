@@ -1,4 +1,5 @@
 import SwiftUI
+import ImageIO
 
 /// Something that has a box: a sim, a look or a shape.
 enum FilmItem: Hashable, Identifiable {
@@ -822,18 +823,27 @@ struct StockBox: View {
 
     /// Faces read and decoded once: the boxes are drawn again every time the camera changes
     /// anything, and reading the JPEG each time kept the processor busy for nothing.
+    /// Kept by size, not just count: the Lock Screen camera has little memory to spare.
     private static let faces: NSCache<NSString, UIImage> = {
-        let c = NSCache<NSString, UIImage>(); c.countLimit = 48; return c
+        let c = NSCache<NSString, UIImage>(); c.countLimit = 48; c.totalCostLimit = 24 << 20; return c
     }()
 
     private var face: Image {
         let key = "box_\(stock.id)_\(ei)" as NSString
         if let ui = Self.faces.object(forKey: key) { return Image(uiImage: ui) }
+        // Decoded at the size it's shown (240 points at most), not the file's 960 px: about half
+        // the memory and the time.
         if let url = FilmLab.bundle.url(forResource: key as String, withExtension: "jpg"),
-           let ui = UIImage(contentsOfFile: url.path) {
-            let ready = ui.preparingForDisplay() ?? ui
-            Self.faces.setObject(ready, forKey: key)
-            return Image(uiImage: ready)
+           let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+           let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, [
+               kCGImageSourceCreateThumbnailFromImageAlways: true,
+               kCGImageSourceThumbnailMaxPixelSize: 720,
+               kCGImageSourceCreateThumbnailWithTransform: true,
+               kCGImageSourceShouldCacheImmediately: true,
+           ] as CFDictionary) {
+            let ui = UIImage(cgImage: cg)
+            Self.faces.setObject(ui, forKey: key, cost: cg.bytesPerRow * cg.height)
+            return Image(uiImage: ui)
         }
         return Image(systemName: "film")
     }

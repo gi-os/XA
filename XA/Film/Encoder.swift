@@ -17,10 +17,15 @@ enum Encoder {
     static func brightness(_ cg: CGImage) -> Double {
         let n = 16
         var px = [UInt8](repeating: 0, count: n * n * 4)
-        guard let ctx = CGContext(data: &px, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4, space: sRGB,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return 0 }
-        ctx.interpolationQuality = .low
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: n, height: n))
+        // drawn inside the buffer's scope: `&px` handed to CGContext is only valid for that call
+        let drawn = px.withUnsafeMutableBytes { buf -> Bool in
+            guard let ctx = CGContext(data: buf.baseAddress, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4, space: sRGB,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.interpolationQuality = .low
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: n, height: n))
+            return true
+        }
+        guard drawn else { return 0 }
         var total = 0
         for i in 0..<(n * n) { total += Int(max(px[i * 4], px[i * 4 + 1], px[i * 4 + 2])) }
         return Double(total) / Double(n * n)
@@ -52,11 +57,15 @@ enum Encoder {
     /// cell even when the rest of the frame is bright.
     private static func cells(_ cg: CGImage, cols: Int = 32, rows: Int = 24) -> [Double]? {
         var px = [UInt8](repeating: 0, count: cols * rows * 4)
-        guard let ctx = CGContext(data: &px, width: cols, height: rows, bitsPerComponent: 8,
-                                  bytesPerRow: cols * 4, space: sRGB,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        ctx.interpolationQuality = .low
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cols, height: rows))
+        let drawn = px.withUnsafeMutableBytes { buf -> Bool in
+            guard let ctx = CGContext(data: buf.baseAddress, width: cols, height: rows, bitsPerComponent: 8,
+                                      bytesPerRow: cols * 4, space: sRGB,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.interpolationQuality = .low
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cols, height: rows))
+            return true
+        }
+        guard drawn else { return nil }
         return (0..<(cols * rows)).map { i in Double(max(px[i * 4], px[i * 4 + 1], px[i * 4 + 2])) }
     }
 

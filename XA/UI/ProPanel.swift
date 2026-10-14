@@ -114,7 +114,7 @@ struct ProPanel: View {
                     }
                 }
                 Spacer(minLength: 0)
-                PanelHisto(bins: camera.histogram, ink: ink).frame(width: 54, height: 22)
+                LivePanelHisto(meters: camera.meters, ink: ink).frame(width: 54, height: 22)
             }
             .frame(height: 34)
             rule
@@ -213,6 +213,13 @@ private struct EVScale: View {
             }
         }
     }
+}
+
+/// PRO's histogram, redrawn on its own as the meter moves.
+private struct LivePanelHisto: View {
+    @ObservedObject var meters: LiveMeters
+    let ink: Color
+    var body: some View { PanelHisto(bins: meters.histogram, ink: ink) }
 }
 
 private struct PanelHisto: View {

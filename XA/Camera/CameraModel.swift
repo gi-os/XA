@@ -30,7 +30,7 @@ final class CameraModel: NSObject, ObservableObject {
     // VIDEO
     @Published var videoLook: VideoLook = .clean { didSet { UserDefaults.standard.set(videoLook.rawValue, forKey: "videoLook"); lock.lock(); frameVideoLook = videoLook; lock.unlock() } }
     /// Whether the phone can shoot Apple ProRAW (Customize hides Develop from RAW otherwise).
-    @Published private(set) var rawSupported = false
+    @Published private(set) var rawSupported = UserDefaults.standard.bool(forKey: "rawSupported")
     @Published private(set) var recording = false
     @Published private(set) var recordSeconds: Double = 0
     // FOCUS
@@ -69,7 +69,9 @@ final class CameraModel: NSObject, ObservableObject {
     /// Device zoom factor x this = the number iOS shows (0.5 when there's an ultra wide).
     @Published private(set) var zoomMultiplier: CGFloat = 1
     @Published private(set) var photoSize: CGSize = .zero
-    @Published private(set) var histogram: [Float] = []
+    /// The live histogram, in its own object: its five updates a second redraw only the
+    /// histograms, not every view that watches the camera.
+    let meters = LiveMeters()
     /// What the camera is metering right now, for the PRO panel.
     @Published private(set) var meterShutter: Double = 1.0 / 60
     @Published private(set) var meterISO: Float = 100
@@ -110,7 +112,13 @@ final class CameraModel: NSObject, ObservableObject {
     private var _lockedTurn: CGFloat?
     private var frameSegments: [TakeSegment] = []
     private var _recorder: VideoRecorder?
-    private let fx = VideoFX()
+    /// VIDEO's tapes, made the first time VIDEO draws a frame (they bring their own Metal
+    /// context, which the other modes and the Lock Screen camera never need). The frame queue's.
+    private var fx: VideoFX {
+        if let f = _fx { return f }
+        let f = VideoFX(); _fx = f; return f
+    }
+    private var _fx: VideoFX?
     /// POCKET 3D's sound (the 3DS's microphone and its 4-bit, 16 kHz code). The audio queue's.
     private let pocketAudio = Pocket3DAudio()
     private var recordTimer: Timer?
@@ -190,6 +198,10 @@ final class CameraModel: NSObject, ObservableObject {
     private var configureTries = 0
     /// The ultra-wide couldn't run alongside the main camera on this phone: not tried again.
     private var multiCamFailed = false
+    /// Frames aren't shown yet (see holdViewfinder). Read on the frame queue, under the lock.
+    private var _holdFrames = false
+    /// The first configure opens FILM's two-camera session directly (set on the main thread).
+    private var _launchMulti = false
     /// The PRO dials, read on the session queue (kept under the lock).
     private var _dials: (shutter: Int?, iso: Int?, wb: Int, focus: Int?, ev: Float) = (nil, nil, 0, nil, 0)
     #if CAPTURE_EXTENSION
@@ -273,7 +285,18 @@ final class CameraModel: NSObject, ObservableObject {
         stack = m == .film ? l.filmStack : l.digiStack
         loadFavorites()
         syncFrameSettings()
-        if input != nil { applyResolution(); flashChanged() }
+        // on the session queue, after the camera has opened (it may still be opening)
+        applyResolution(); flashChanged()
+    }
+
+    /// The Lock Screen camera holds the viewfinder while the app's settings come in, so the
+    /// camera can open at the same time instead of after them. Let go, it opens already in its
+    /// mode: no fade from the mode it started in.
+    func holdViewfinder(_ hold: Bool) {
+        lock.lock()
+        _holdFrames = hold
+        if !hold { _switchPending = false; _switchStart = 0 }
+        lock.unlock()
     }
 
     /// The last viewfinder frame, small, for the editors' previews.
@@ -340,6 +363,7 @@ final class CameraModel: NSObject, ObservableObject {
             skipReview()
             lock.lock(); _switchPending = true; _switchStart = CACurrentMediaTime(); _toDigi = mode.developed; lock.unlock()
             if old == .video && recording { stopRecording() }
+            if old == .video { frameQueue.async { self._fx?.release() } }
             if (old == .film) != (mode == .film) { stack = Self.loadStack(for: mode) }
             // BOOTH turns the camera round to face you, and back when you leave.
             if old == .booth { cancelBooth(); setFront(false) }
@@ -357,11 +381,15 @@ final class CameraModel: NSObject, ObservableObject {
             if mode == .booth { setFront(true) }
         }
         syncFrameSettings()
-        guard old != mode, input != nil else { return }
+        guard old != mode else { return }
         let m = mode
         publishPhotoSize(m)
         snapshotDials()
+        // Checked on the session queue, not here: a mode that changes while the camera is still
+        // opening (the Lock Screen camera taking the app's settings) waits behind configure()
+        // instead of being skipped.
         sessionQueue.async {
+            guard self.input != nil else { return }
             // the microphone only while in VIDEO: elsewhere it kept the orange dot on, stopped the
             // user's music and made XA's sounds ignore the silent switch
             if m == .video { self.addAudioIfNeeded() } else { self.removeAudio() }
@@ -381,9 +409,26 @@ final class CameraModel: NSObject, ObservableObject {
 
     // MARK: session
 
+    /// The app opens the camera the moment it makes this model, while its first screen is still
+    /// being built, if it already may (otherwise `start` asks). `start` does the rest.
+    func openEarly() {
+        guard !openedEarly, AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { return }
+        openedEarly = true
+        let multi = wantsUltraWide
+        lock.lock(); _launchMulti = multi; lock.unlock()
+        warmViewfinder()
+        sessionQueue.async { self.configure() }
+    }
+    private var openedEarly = false
+
     func start() {
         updateMotion()
         loadFavorites()
+        if !openedEarly {
+            let multi = wantsUltraWide
+            lock.lock(); _launchMulti = multi; lock.unlock()
+            warmViewfinder()
+        }
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         #if CAPTURE_EXTENSION
         // The Lock Screen camera has the app's camera permission and cannot ask for it: unless
@@ -396,7 +441,9 @@ final class CameraModel: NSObject, ObservableObject {
         }
         #endif
         switch status {
-        case .authorized: authorized = true; sessionQueue.async { self.configure() }
+        case .authorized:
+            authorized = true
+            if !openedEarly { sessionQueue.async { self.configure() } }
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { ok in
                 DispatchQueue.main.async { self.authorized = ok }
@@ -433,7 +480,18 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     private func configure() {
+        // FILM with the ultra-wide behind its finder opens straight into the two-camera session
+        // (it used to start the plain one, stop it and build this one: two camera starts). Read
+        // once, by the first configure only.
+        lock.lock(); let multi = _launchMulti; _launchMulti = false; lock.unlock()
         guard input == nil else { return }
+        if multi && !multiCamFailed && !multiCam {
+            if configureMulti() { multiCam = true; return }
+            // Not marked as failed: the camera may only have been busy a moment. The plain
+            // session opens, and updateUltraWide tries the two cameras again as it always did.
+            input = nil; device = nil; uwInput = nil
+            session = AVCaptureSession()
+        }
         session.beginConfiguration()
         session.sessionPreset = .photo
         guard let dev = Self.backCamera(), let inp = try? AVCaptureDeviceInput(device: dev), session.canAddInput(inp) else {
@@ -462,12 +520,19 @@ final class CameraModel: NSObject, ObservableObject {
         session.commitConfiguration()
         setupLenses(dev)
         applyRotation()
-        session.startRunning()
-        applyProOnQueue(m)
+        // Everything the mode needs goes on before the camera starts: added to a running session,
+        // the QR reader, the microphone or BOOTH's selfie camera each rebuilt the camera's whole
+        // pipeline a moment after it opened, holding up the first frames.
         updateQR(m)
         if m == .video { addAudioIfNeeded() }
         if m == .booth { switchCamera(toFront: true) }
-        DispatchQueue.main.async { self.rawSupported = raw; self.preparePhotos() }
+        session.startRunning()
+        applyProOnQueue(m)
+        DispatchQueue.main.async {
+            // remembered: a launch straight into FILM's two cameras never asks the plain session
+            if self.rawSupported != raw { self.rawSupported = raw; UserDefaults.standard.set(raw, forKey: "rawSupported") }
+            self.preparePhotos()
+        }
     }
 
     private func setupPhotoOutput(_ dev: AVCaptureDevice, _ m: CaptureMode) {
@@ -489,7 +554,8 @@ final class CameraModel: NSObject, ObservableObject {
         let want = settings.proMegapixels
         if want > 0, let chosen = dims.filter({ mp($0) <= want }).max(by: { px($0) < px($1) }) { pro = chosen }
         lock.lock(); digiDims = digi; proDims = pro; lock.unlock()
-        DispatchQueue.main.async { self.proOptions = options; self.publishPhotoSize(m) }
+        // the mode as it is by now (it can change while the camera is still opening)
+        DispatchQueue.main.async { self.proOptions = options; self.publishPhotoSize(self.mode) }
     }
 
     private func shotDims(_ m: CaptureMode) -> CMVideoDimensions {
@@ -1137,6 +1203,9 @@ final class CameraModel: NSObject, ObservableObject {
     /// a new exposure, so those wait for it.
     func shoot() {
         guard authorized == true, input != nil else { return }
+        // not before the viewfinder shows what the picture will be (see holdViewfinder)
+        lock.lock(); let held = _holdFrames; lock.unlock()
+        guard !held else { return }
         if mode == .video { toggleRecording(); return }
         if mode == .booth { boothPress(); return }
         // Shots still developing hold their whole file in memory: past a handful, wait.
@@ -1491,7 +1560,7 @@ final class CameraModel: NSObject, ObservableObject {
         for i in 0..<48 { bins[i] = max(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]) }
         let mx = max(bins.max() ?? 1, 0.0001)
         let norm = bins.map { $0 / mx }
-        DispatchQueue.main.async { self.histogram = norm }
+        DispatchQueue.main.async { self.meters.histogram = norm }
     }
 }
 
@@ -1519,6 +1588,8 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             return
         }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        lock.lock(); let hold = _holdFrames; lock.unlock()
+        if hold { return }
         // Power: the developed modes run at a lighter size, at the camera's 30 frames a second
         // (FILM's finder is one baked colour cube per frame, see FilmPreview); on Low Power Mode
         // or a hot phone, 20 and lighter still.
@@ -1981,9 +2052,10 @@ extension CameraModel {
     private var wantsUltraWide: Bool {
         #if CAPTURE_EXTENSION
         return false   // one camera on the Lock Screen: less memory, nothing to fall back from
-        #endif
+        #else
         return mode == .film && settings.filmRecipe.xaFinder && settings.filmRecipe.ultraWide && !settings.digiZero && !front && AVCaptureMultiCamSession.isMultiCamSupported
             && AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back) != nil
+        #endif
     }
 
     /// Bring the ultra-wide in or out to match the mode and the finder setting.
@@ -2061,6 +2133,7 @@ extension CameraModel {
         applyCapturePolicy(flash: settings.flash != .off)
         let m = frameState().0
         setupPhotoOutput(wide, m)
+        addControls(wide, m)
         ms.commitConfiguration()
         // Too much for this phone at this quality: drop the ultra-wide rather than the photo.
         // (The cameras are only taken on once the session is known to run: set before this,
@@ -2125,6 +2198,52 @@ extension CameraModel {
     }
 }
 
+// MARK: warming up
+
+extension CameraModel {
+    /// The first frame used to wait while Core Image made its contexts and compiled this mode's
+    /// chain (kernels compile the first time they're drawn). A blank frame goes through the same
+    /// steps on the frame queue while the camera is still starting, so the real one doesn't.
+    /// VIDEO and BOOTH aren't warmed: their tapes keep state, and BOOTH's faces need Vision.
+    func warmViewfinder() {
+        var (m, dev) = frameState()
+        guard m != .video, m != .booth else { return }
+        #if CAPTURE_EXTENSION
+        let w = 640
+        #else
+        let w = m.developed ? 810 : 1080
+        #endif
+        // FILM opens on an accurate peek at the film (see syncFrameSettings)
+        if m == .film && !settings.filmAlwaysOn { dev.accurate = true }
+        let finder = m == .film && dev.filmRecipe.xaFinder
+        let pixel = m == .digi && dev.stack.look.pixelWidth != nil
+        frameQueue.async {
+            guard let pb = Self.blankFrame(width: w, height: w * 4 / 3) else { return }
+            var img = Sanitize.apply(CIImage(cvPixelBuffer: pb), floor: 0)
+            if m.developed { img = Darkroom.develop(img, dev, date: Date(), preview: true).0 }
+            if finder {
+                self.lock.lock(); let flong = self._finderLong; self.lock.unlock()
+                img = XAFinder.compose(img, format: dev.filmRecipe.format, long: flong)
+            }
+            PreviewView.warm(img, pixelated: pixel)
+            _ = Looks.context   // the editors' copy of the frame and the histogram draw with this
+        }
+    }
+
+    /// A mid-grey camera-shaped frame.
+    private static func blankFrame(width: Int, height: Int) -> CVPixelBuffer? {
+        var out: CVPixelBuffer?
+        let attrs: [String: Any] = [kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+                                    kCVPixelBufferMetalCompatibilityKey as String: true]
+        guard CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA, attrs as CFDictionary, &out) == kCVReturnSuccess,
+              let pb = out else { return nil }
+        CVPixelBufferLockBaseAddress(pb, [])
+        if let base = CVPixelBufferGetBaseAddress(pb) { memset(base, 0x80, CVPixelBufferGetDataSize(pb)) }
+        CVPixelBufferUnlockBaseAddress(pb, [])
+        return pb
+    }
+}
+
 extension CameraModel {
     /// FILM's finder arrives: it starts too big for the screen and steps back to fit.
     func beginFinderIntro() {
@@ -2132,6 +2251,11 @@ extension CameraModel {
         lock.lock(); _introStart = CACurrentMediaTime(); lock.unlock()
         introPatchDone = false
     }
+}
+
+/// The live histogram, observed only by the histograms (see `CameraModel.meters`).
+final class LiveMeters: ObservableObject {
+    @Published var histogram: [Float] = []
 }
 
 /// The finder's swing with the camera's motion, observed only by the finder.

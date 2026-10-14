@@ -41,11 +41,15 @@ struct LockedCameraView: View {
         .environment(\.scenePhase, .active)
         .task {
             CameraSounds.shared.prepare()
-            // The app's settings first, briefly: the camera opens in the right mode with the right
-            // film instead of switching a moment later. The system ends a Lock Screen camera that
-            // isn't capturing within a few seconds, so this never waits long.
-            if let l = await Self.lockSettings(within: 0.6) { apply(l) }
+            // The camera opens at once, while the app's settings come in (it used to wait for
+            // them, up to 0.6 s, before it even started). Until they're applied the viewfinder
+            // stays dark, so it still opens in the right mode with the right film instead of
+            // switching a moment later. The system ends a Lock Screen camera that isn't capturing
+            // within a few seconds, so this never waits long.
+            camera.holdViewfinder(true)
             camera.start()
+            if let l = await Self.lockSettings(within: 0.6) { apply(l) }
+            camera.holdViewfinder(false)
             started = true
             // A late answer still counts, as long as nothing has been shot yet.
             if camera.lastShot == nil, camera.developing == 0, let l = await Self.lockSettings(within: 2.5) {

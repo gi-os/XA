@@ -95,8 +95,16 @@ final class VideoRecorder {
 
     func finish(_ done: @escaping (URL?) -> Void) {
         lock.lock()
-        guard started, writer.status == .writing, !finished else { lock.unlock(); writer.cancelWriting(); done(nil); return }
+        guard !finished else { lock.unlock(); done(nil); return }
         finished = true
+        guard started, writer.status == .writing else {
+            // Nothing recorded yet (stopped before the first frame): cancelled under the lock, so
+            // a frame on its way in can't start the session while the writer is being cancelled.
+            writer.cancelWriting()
+            lock.unlock()
+            done(nil)
+            return
+        }
         video.markAsFinished()
         audio?.markAsFinished()
         writer.endSession(atSourceTime: lastTime)

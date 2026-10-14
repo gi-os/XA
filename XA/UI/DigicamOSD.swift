@@ -109,7 +109,7 @@ struct DigicamOSD: View {
 
     private func rightColumn(_ k: CGFloat) -> some View {
         VStack(alignment: .trailing, spacing: 6 * k) {
-            Histo(bins: camera.histogram).frame(width: 58 * k, height: 22 * k)
+            LiveHisto(meters: camera.meters).frame(width: 58 * k, height: 22 * k)
             VStack(spacing: 3 * k) {
                 OSDText("W", 10 * k)
                 ZoomBar(fraction: zoomFraction, optical: opticalFraction, k: k).frame(width: 7 * k, height: 74 * k)
@@ -169,21 +169,26 @@ struct DigicamOSD: View {
 
     private func refresh() {
         battery = UIDevice.current.batteryLevel
-        let url = URL(fileURLWithPath: NSHomeDirectory())
-        if let v = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
-           let c = v.volumeAvailableCapacityForImportantUsage { free = c }
+        // Off the main thread: asking the volume for its free space isn't quick, and this runs
+        // with every shot.
+        DispatchQueue.global(qos: .utility).async {
+            let url = URL(fileURLWithPath: NSHomeDirectory())
+            guard let v = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+                  let c = v.volumeAvailableCapacityForImportantUsage else { return }
+            DispatchQueue.main.async { free = c }
+        }
     }
 
     static func day(_ d: Date) -> String {
-        let c = Calendar.current.dateComponents([.year, .month, .day], from: d)
+        let c = DateBack.calendar.dateComponents([.year, .month, .day], from: d)
         return "\(c.year ?? 2005)  \(c.month ?? 1)  \(c.day ?? 1)"
     }
     static func clock(_ d: Date) -> String {
-        let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+        let c = DateBack.calendar.dateComponents([.hour, .minute], from: d)
         let h = c.hour ?? 0
         return String(format: "%d:%02d", h % 12 == 0 ? 12 : h % 12, c.minute ?? 0)
     }
-    static func half(_ d: Date) -> String { (Calendar.current.component(.hour, from: d) < 12) ? "AM" : "PM" }
+    static func half(_ d: Date) -> String { (DateBack.calendar.component(.hour, from: d) < 12) ? "AM" : "PM" }
 }
 
 // MARK: - the look
@@ -390,6 +395,12 @@ private struct AFMark: View {
             .frame(width: 12 * k, height: 12 * k)
         }
     }
+}
+
+/// DIGI's histogram, redrawn on its own as the meter moves.
+private struct LiveHisto: View {
+    @ObservedObject var meters: LiveMeters
+    var body: some View { Histo(bins: meters.histogram) }
 }
 
 private struct Histo: View {
