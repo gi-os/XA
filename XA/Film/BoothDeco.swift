@@ -273,7 +273,7 @@ enum Deco {
         }
         // The scribbled word and the date, in marker, tilted.
         scribble(c, d.word, at: CGPoint(x: size.width * 0.06, y: size.height * 0.05), size: s * 0.09, color: d.ink, tilt: -0.14)
-        let df = DateFormatter(); df.dateFormat = "MM.dd"
+        let df = DateFormatter(); df.locale = Locale(identifier: "en_US_POSIX"); df.dateFormat = "MM.dd"
         scribble(c, df.string(from: date), at: CGPoint(x: size.width * 0.62, y: size.height * 0.9), size: s * 0.06, color: d.ink, tilt: -0.08)
     }
 

@@ -192,6 +192,8 @@ targets:
     platform: iOS
     sources:
       - path: XATests
+      - path: StoreKit/Tips.storekit
+        buildPhase: resources
     dependencies:
       - target: XA
     settings:
@@ -204,6 +206,9 @@ schemes:
       targets:
         XA: all
         XATests: [test]
+    # Tips from the local StoreKit file when run from Xcode (App Store Connect has the real ones).
+    run:
+      storeKitConfiguration: StoreKit/Tips.storekit
     test:
       targets:
         - XATests

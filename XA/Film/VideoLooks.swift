@@ -134,6 +134,13 @@ final class VideoFX {
         pocket3D.reset()
     }
 
+    /// Leaving VIDEO: the frames kept for Motion and Slit-scan (tens of megabytes) and the
+    /// buffer pools that hold them go too, instead of waiting for the next take.
+    func release() {
+        reset()
+        pools = [:]
+    }
+
     /// Frames a second a look shows, if it holds frames (the 3DS slows down in the dark).
     func fps(_ look: VideoLook) -> Double? { look == .pocket3D ? pocket3D.fps : look.heldFPS }
 
@@ -456,7 +463,7 @@ enum CCTVOverlay {
     private static var cached: CIImage?
 
     private static let stamp: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "yy-MM-dd  HH:mm:ss"; return f
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yy-MM-dd  HH:mm:ss"; return f
     }()
 
     static func image(size: CGSize, date: Date) -> CIImage? {

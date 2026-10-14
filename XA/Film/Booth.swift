@@ -260,7 +260,7 @@ enum Booth {
                 cg.drawLinearGradient(g, start: .zero, end: CGPoint(x: size.width * 0.4, y: size.height), options: [])
             }
             let pad = size.width * 0.056
-            let df = DateFormatter(); df.dateFormat = "yyyy.MM.dd"
+            let df = DateFormatter(); df.locale = Locale(identifier: "en_US_POSIX"); df.dateFormat = "yyyy.MM.dd"
             let head = size.width * (layout == .strip ? 0.075 : 0.05)
             text("XA BOOTH", at: CGPoint(x: pad, y: pad), size: head, color: BoothInk.hot)
             let meta = "\(df.string(from: date)) · NO.\(String(format: "%04d", number % 10000))"

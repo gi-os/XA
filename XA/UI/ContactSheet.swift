@@ -31,11 +31,20 @@ struct ContactSheet: View {
                 if v.translation.height > 110 || v.predictedEndTranslation.height > 260 { onClose?() } else { onDrag?(0) }
             })
             if library.denied {
-                // Photos access was turned down: the pictures are in Photos, the roll can't see them.
+                // Photos access was turned down. With Add Photos Only the pictures are in Photos and
+                // the roll can't see them; with none at all, XA keeps them until it may add them.
+                let canAdd = PHPhotoLibrary.authorizationStatus(for: .addOnly) == .authorized
+                let kept = canAdd ? 0 : Library.pendingCount
                 Spacer()
                 VStack(spacing: 14) {
-                    Text("Your pictures are in the Photos app.").font(XA.display(16))
-                    Text("To see them here too, let XA see your photos.").font(.system(size: 14)).foregroundStyle(XA.dim)
+                    if canAdd {
+                        Text("Your pictures are in the Photos app.").font(XA.display(16))
+                        Text("To see them here too, let XA see your photos.").font(.system(size: 14)).foregroundStyle(XA.dim)
+                    } else {
+                        Text(kept == 1 ? "XA is keeping 1 picture for you." : (kept > 1 ? "XA is keeping \(kept) pictures for you." : "XA can't save to Photos."))
+                            .font(XA.display(16))
+                        Text("Let XA add to your photos and they go into Photos, in an XA album.").font(.system(size: 14)).foregroundStyle(XA.dim)
+                    }
                     Button("Open Settings") {
                         if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) }
                     }

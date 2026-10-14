@@ -1,0 +1,33 @@
+name: App Store Connect setup
+
+# Run by hand. What deliver doesn't do: the tips (three consumable in-app purchases with their
+# price, availability and review screenshot), the age rating, a free price, availability in
+# every territory and the content rights. Safe to run again: what's already there is kept.
+on:
+  workflow_dispatch:
+    inputs:
+      submit_tips:
+        description: "Also submit the tips for review (they go with the next app version)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: appstore
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      SUBMIT_TIPS: ${{ inputs.submit_tips }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet pyjwt cryptography requests
+      - run: python ci/asc_setup.py

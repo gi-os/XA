@@ -1,0 +1,69 @@
+Dispara como en 2003: flashazo de fiesta, color CCD saturado y la fecha naranja en la esquina. Además, carrete para revelar, doce cintas de vídeo y una cabina de fotos.
+Cinco cámaras (DIGI, FILM, VIDEO, BOOTH y PRO) con todo incluido. Sin suscripción, anuncios ni cuenta. Las propinas son opcionales y no desbloquean nada.
+
+DIGI
+• Elige 1, 2, 3, 5, 8 o 12 megapíxeles.
+• Procesado cutre del bueno: altas luces quemadas, halo de nitidez, ruido de color y un JPEG bien machacado.
+• Color CCD: cielos de un cian profundo y rojos algo chillones.
+• Flash de fiesta: caras quemadas y blancos cálidos.
+• Las luces fuertes dejan una raya vertical, como en un CCD viejo.
+• Sube, baja o quita cada defecto.
+• La pantalla es la de una digicam, con batería y todo.
+
+FILM
+• Once películas basadas en fichas técnicas: ocho en color, de una 100 de grano fino a una 500T y una 1600, y tres en blanco y negro hasta 3200.
+• Grano y halación en micras sobre el negativo: el 110 sale áspero; el 120, suave.
+• Encuadra en el marco luminoso de un telémetro de bolsillo, con aguja de fotómetro y parche de enfoque.
+• Delante de la película: objetivo barato, caída del flash, fugas de luz y filtro de niebla. La película los tiñe.
+• Desliza una película hacia arriba para forzarla un paso; abajo, para subrevelarla.
+• En el laboratorio: autocorrección de minilab, calidez y tinte de la copia, y preexposición.
+• Escaneo de tambor a unos 5600 ppp por defecto: al ampliar ves grano, no píxeles. Se guarda en HEIC.
+• Si tu iPhone dispara en RAW, FILM puede revelarlo sin el procesado del iPhone.
+
+VIDEO: DOCE CINTAS
+• VHS: color suave, líneas de barrido, banda de tracking y el indicador PLAY.
+• Cine casero en 8 mm que parpadea y baila.
+• CCTV: vigilancia en gris verdoso con la hora sobreimpresa.
+• Cintas pixeladas de bolsillo: en verde, en color y en panorámico de 480×240.
+• Slit-scan, Trails, Motion, Stop Motion y Datamosh para lo raro; Clean, sin efectos.
+
+BOOTH
+• Cuatro fotos con cuenta atrás y la cámara frontal.
+• Ojos enormes y piel luminosa: Glow, Doll o Alien.
+• Fondo nuevo y garabatos de neón en cada foto: estrellas, corazones, rosas, orejas de gato.
+• Elige hoja de pegatinas, cuadrícula o tira.
+
+PRO
+• La foto más grande que da el sensor, en HEIF o JPEG.
+• Botones de objetivo, histograma en directo y diales de balance de blancos, exposición, velocidad, ISO y enfoque.
+• Automático, prioridad de obturación, prioridad ISO o manual.
+
+HAZLA TUYA
+• En DIGI, edita cualquier simulación: color, curva de tonos, virado partido, grano, halación y viñeteado. Guarda las tuyas.
+• Looks: Clean, Grain, Sixteen, Pocket, Pocket Color, 1-Bit, Press, Heat y Booth.
+• Formas: Capsule, Porthole, Window, Crush, Nova y cuatro marcos de instantánea.
+• Ocho fechadores: cuarzo de 7 segmentos, matriz de puntos, videocámara, LCD, píxeles rojos, sello de tinta roja, rotulador sobre cinta y borde de película.
+• Combínalos: simulación, look, forma y fechador.
+
+SIEMPRE A MANO
+• Cámara en la pantalla de bloqueo y botón en el centro de control.
+• Si tu iPhone tiene Control de Cámara, elige XA como su cámara en Ajustes.
+• Con Control de Cámara recorres simulaciones y looks en DIGI, películas en FILM, cintas en VIDEO, y exposición y zoom en PRO. Púlsalo para disparar.
+• Los botones de volumen también disparan.
+• Apunta a un QR en DIGI, FILM o PRO y tócalo para abrir el enlace.
+
+TUS FOTOS
+• Todo se guarda en Fotos, en un álbum XA.
+• Con Fotos de iCloud, se suben a la nube con tu fototeca.
+• Desliza hacia arriba bajo el visor, o toca el botón del carrete, para ver tu hoja de contactos.
+• Sin marca de agua.
+
+NO RECOPILA NADA
+• Sin rastreo: ni servidor, ni analíticas, ni recopilación de datos.
+• Las propinas opcionales (al final de Customize) ayudan a mantener XA.
+• XA es de código abierto (GPLv3): cualquiera puede leer el código y ver qué hace.
+• Simulación de película: spektrafilm, el simulador abierto de Andrea Volpato.
+
+A TENER EN CUENTA
+• Solo iPhone, iOS 18 o posterior.
+• La interfaz está en inglés.

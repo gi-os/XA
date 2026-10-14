@@ -15,9 +15,9 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     private let images = PHCachingImageManager()
     private var registered = false
 
+    /// Empty until `refresh`: the app reads Photos once the camera has started.
     override init() {
         super.init()
-        apply(PHPhotoLibrary.authorizationStatus(for: .readWrite))
     }
 
     /// Full and limited access both show the roll: with limited access iOS still lets XA see
@@ -35,6 +35,12 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
         let dir = docs.appendingPathComponent("Pending", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
+    }
+
+    /// How many pictures and videos are waiting in the pending folder.
+    static var pendingCount: Int {
+        guard let dir = pendingFolder else { return 0 }
+        return ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { !$0.hasPrefix(".") }.count
     }
 
     private var flushing: Set<URL> = []

@@ -57,7 +57,11 @@ enum FilmCatalog {
     /// No sim is Neutral: there is always a film loaded.
     static func sim(_ id: String?) -> Sim? {
         guard let id else { return Sim.neutral }
-        return sims.first { $0.id == id } ?? Sim.neutral
+        // Looked up several times a frame: the presets, then the custom films, without copying
+        // the two into one new list each time.
+        if let s = Sim.presets.first(where: { $0.id == id }) { return s }
+        lock.lock(); defer { lock.unlock() }
+        return _custom.first { $0.id == id } ?? Sim.neutral
     }
 
     static func setCustom(_ list: [Sim]) {
@@ -110,9 +114,44 @@ enum Darkroom {
     /// transparency past the edges, and rounding the size up left a half-covered edge row that
     /// the film then printed too bright or too dark.
     static func scaled(_ img: CIImage, longEdge: CGFloat) -> CIImage {
+        guard longEdge < max(img.extent.width, img.extent.height) else { return img }
+        return resampled(img, longEdge: longEdge)
+    }
+
+    /// A small copy of `img` (linear, as Core Image works), drawn in bands and kept as pixels, for
+    /// anything that reads the whole frame at once. Asked of a 40 MP drum scan in one go, Core
+    /// Image needs the whole frame in one buffer, refuses, and the metering reads black.
+    static func reduced(_ img: CIImage, longEdge: CGFloat) -> CIImage? {
+        let e = img.extent
+        guard e.width >= 1, e.height >= 1, e.width.isFinite, e.height.isFinite else { return nil }
+        let k = min(1, longEdge / max(e.width, e.height))
+        let small = img.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY))
+            .transformed(by: CGAffineTransform(scaleX: k, y: k))
+        let w = max(1, Int((e.width * k).rounded(.down))), h = max(1, Int((e.height * k).rounded(.down)))
+        let rowBytes = w * 8
+        var data = Data(count: rowBytes * h)
+        // each band reads at most about 8 MP of the full frame
+        let band = max(1, Int(8_000_000 * k / e.width))
+        data.withUnsafeMutableBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            for y0 in stride(from: 0, to: h, by: band) {
+                let bh = min(band, h - y0)
+                // the bitmap's rows go down from the top, Core Image's y goes up
+                let bounds = CGRect(x: 0, y: CGFloat(h - y0 - bh), width: CGFloat(w), height: CGFloat(bh))
+                autoreleasepool {
+                    Encoder.gpu.render(small, toBitmap: base.advanced(by: y0 * rowBytes), rowBytes: rowBytes,
+                                       bounds: bounds, format: .RGBAh, colorSpace: nil)
+                }
+            }
+        }
+        return CIImage(bitmapData: data, bytesPerRow: rowBytes, size: CGSize(width: w, height: h), format: .RGBAh, colorSpace: nil)
+    }
+
+    /// To `longEdge` at whole pixels, down or up (Lanczos either way).
+    static func resampled(_ img: CIImage, longEdge: CGFloat) -> CIImage {
         let e = img.extent
         let s = longEdge / max(e.width, e.height, 1)
-        guard s < 1 else { return img }
+        guard abs(s - 1) > 0.001 else { return img }
         let size = CGSize(width: (e.width * s).rounded(.down), height: (e.height * s).rounded(.down))
         let down = CIFilter.lanczosScaleTransform()
         down.inputImage = img.clampedToExtent().cropped(to: e.insetBy(dx: -16, dy: -16))
@@ -193,18 +232,29 @@ enum Darkroom {
         var img = src.transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
         let r = s.filmRecipe
         let frame = r.format.frame(in: img.extent)
+        var meter: CIImage?
         if !preview {
             img = img.cropped(to: frame).transformed(by: CGAffineTransform(translationX: -frame.minX, y: -frame.minY))
-            if let edge = r.scan.longEdge, max(img.extent.width, img.extent.height) > edge {
-                img = Darkroom.scaled(img, longEdge: edge)
+            // read before the scan's resample, at the camera's own size
+            meter = Darkroom.reduced(img, longEdge: 1024)
+            #if CAPTURE_EXTENSION
+            let scan = FilmScan.lab   // the Lock Screen camera's memory: a lab scan, always
+            #else
+            let scan = r.scan
+            #endif
+            if let edge = scan.longEdge(for: img.extent.size, format: r.format) {
+                // A drum scan enlarges a smaller picture first: the film's grain is then made at
+                // the scan's own resolution, not stretched from the camera's.
+                img = Darkroom.resampled(img, longEdge: edge)
             }
         }
         var shot = FilmShot(recipe: r, flashFired: flashFired, seed: Int(date.timeIntervalSince1970 * 1000))
         // A leak is a surprise on the print, never in the finder.
         if preview { shot.recipe.leak = 0 }
         shot.finder = preview
-        if r.labAuto > 0 { shot.lab = LabAuto.correction(img, strength: r.labAuto, preview: preview) }
-        shot.under = LabAuto.underexposure(img, preview: preview)
+        shot.meter = meter
+        if r.labAuto > 0 { shot.lab = LabAuto.correction(meter ?? img, strength: r.labAuto, preview: preview) }
+        shot.under = LabAuto.underexposure(meter ?? img, preview: preview)
         let sim = FilmCatalog.sim(s.stack.simID)
         if let sim, !sim.isNeutral {
             img = SimEngine.apply(sim, to: img, preview: preview && !s.accurate, push: s.stack.push, seed: preview ? nil : shot.seed, shot: shot)

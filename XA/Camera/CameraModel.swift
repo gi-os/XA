@@ -30,7 +30,7 @@ final class CameraModel: NSObject, ObservableObject {
     // VIDEO
     @Published var videoLook: VideoLook = .clean { didSet { UserDefaults.standard.set(videoLook.rawValue, forKey: "videoLook"); lock.lock(); frameVideoLook = videoLook; lock.unlock() } }
     /// Whether the phone can shoot Apple ProRAW (Customize hides Develop from RAW otherwise).
-    @Published private(set) var rawSupported = false
+    @Published private(set) var rawSupported = UserDefaults.standard.bool(forKey: "rawSupported")
     @Published private(set) var recording = false
     @Published private(set) var recordSeconds: Double = 0
     // FOCUS
@@ -69,7 +69,9 @@ final class CameraModel: NSObject, ObservableObject {
     /// Device zoom factor x this = the number iOS shows (0.5 when there's an ultra wide).
     @Published private(set) var zoomMultiplier: CGFloat = 1
     @Published private(set) var photoSize: CGSize = .zero
-    @Published private(set) var histogram: [Float] = []
+    /// The live histogram, in its own object: its five updates a second redraw only the
+    /// histograms, not every view that watches the camera.
+    let meters = LiveMeters()
     /// What the camera is metering right now, for the PRO panel.
     @Published private(set) var meterShutter: Double = 1.0 / 60
     @Published private(set) var meterISO: Float = 100
@@ -110,7 +112,13 @@ final class CameraModel: NSObject, ObservableObject {
     private var _lockedTurn: CGFloat?
     private var frameSegments: [TakeSegment] = []
     private var _recorder: VideoRecorder?
-    private let fx = VideoFX()
+    /// VIDEO's tapes, made the first time VIDEO draws a frame (they bring their own Metal
+    /// context, which the other modes and the Lock Screen camera never need). The frame queue's.
+    private var fx: VideoFX {
+        if let f = _fx { return f }
+        let f = VideoFX(); _fx = f; return f
+    }
+    private var _fx: VideoFX?
     /// POCKET 3D's sound (the 3DS's microphone and its 4-bit, 16 kHz code). The audio queue's.
     private let pocketAudio = Pocket3DAudio()
     private var recordTimer: Timer?
@@ -190,6 +198,10 @@ final class CameraModel: NSObject, ObservableObject {
     private var configureTries = 0
     /// The ultra-wide couldn't run alongside the main camera on this phone: not tried again.
     private var multiCamFailed = false
+    /// Frames aren't shown yet (see holdViewfinder). Read on the frame queue, under the lock.
+    private var _holdFrames = false
+    /// The first configure opens FILM's two-camera session directly (set on the main thread).
+    private var _launchMulti = false
     /// The PRO dials, read on the session queue (kept under the lock).
     private var _dials: (shutter: Int?, iso: Int?, wb: Int, focus: Int?, ev: Float) = (nil, nil, 0, nil, 0)
     #if CAPTURE_EXTENSION
@@ -232,6 +244,8 @@ final class CameraModel: NSObject, ObservableObject {
     private var introPatchDone = true
     private let eyeQueue = DispatchQueue(label: "xa.eyes", qos: .userInitiated)
     private var proDims = CMVideoDimensions(width: 4032, height: 3024)
+    /// FILM's drum and full scans: the biggest photo the sensor makes.
+    private var filmDims = CMVideoDimensions(width: 4032, height: 3024)
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -273,7 +287,18 @@ final class CameraModel: NSObject, ObservableObject {
         stack = m == .film ? l.filmStack : l.digiStack
         loadFavorites()
         syncFrameSettings()
-        if input != nil { applyResolution(); flashChanged() }
+        // on the session queue, after the camera has opened (it may still be opening)
+        applyResolution(); flashChanged()
+    }
+
+    /// The Lock Screen camera holds the viewfinder while the app's settings come in, so the
+    /// camera can open at the same time instead of after them. Let go, it opens already in its
+    /// mode: no fade from the mode it started in.
+    func holdViewfinder(_ hold: Bool) {
+        lock.lock()
+        _holdFrames = hold
+        if !hold { _switchPending = false; _switchStart = 0 }
+        lock.unlock()
     }
 
     /// The last viewfinder frame, small, for the editors' previews.
@@ -340,6 +365,7 @@ final class CameraModel: NSObject, ObservableObject {
             skipReview()
             lock.lock(); _switchPending = true; _switchStart = CACurrentMediaTime(); _toDigi = mode.developed; lock.unlock()
             if old == .video && recording { stopRecording() }
+            if old == .video { frameQueue.async { self._fx?.release() } }
             if (old == .film) != (mode == .film) { stack = Self.loadStack(for: mode) }
             // BOOTH turns the camera round to face you, and back when you leave.
             if old == .booth { cancelBooth(); setFront(false) }
@@ -357,11 +383,15 @@ final class CameraModel: NSObject, ObservableObject {
             if mode == .booth { setFront(true) }
         }
         syncFrameSettings()
-        guard old != mode, input != nil else { return }
+        guard old != mode else { return }
         let m = mode
         publishPhotoSize(m)
         snapshotDials()
+        // Checked on the session queue, not here: a mode that changes while the camera is still
+        // opening (the Lock Screen camera taking the app's settings) waits behind configure()
+        // instead of being skipped.
         sessionQueue.async {
+            guard self.input != nil else { return }
             // the microphone only while in VIDEO: elsewhere it kept the orange dot on, stopped the
             // user's music and made XA's sounds ignore the silent switch
             if m == .video { self.addAudioIfNeeded() } else { self.removeAudio() }
@@ -381,9 +411,40 @@ final class CameraModel: NSObject, ObservableObject {
 
     // MARK: session
 
+    /// The app opens the camera the moment it makes this model, while its first screen is still
+    /// being built, if it already may (otherwise `start` asks). `start` does the rest.
+    func openEarly() {
+        #if DEBUG && targetEnvironment(simulator) && !CAPTURE_EXTENSION
+        if Self.demo.active { return }
+        #endif
+        guard !openedEarly, AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { return }
+        openedEarly = true
+        let multi = wantsUltraWide
+        lock.lock(); _launchMulti = multi; lock.unlock()
+        warmViewfinder()
+        sessionQueue.async { self.configure() }
+    }
+    private var openedEarly = false
+
+    /// The camera is open (in a debug simulator build the demo feed stands in for it).
+    private var cameraReady: Bool {
+        #if DEBUG && targetEnvironment(simulator) && !CAPTURE_EXTENSION
+        if Self.demo.active { return true }
+        #endif
+        return input != nil
+    }
+
     func start() {
         updateMotion()
         loadFavorites()
+        #if DEBUG && targetEnvironment(simulator) && !CAPTURE_EXTENSION
+        if Self.demo.active { startDemo(); return }
+        #endif
+        if !openedEarly {
+            let multi = wantsUltraWide
+            lock.lock(); _launchMulti = multi; lock.unlock()
+            warmViewfinder()
+        }
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         #if CAPTURE_EXTENSION
         // The Lock Screen camera has the app's camera permission and cannot ask for it: unless
@@ -396,7 +457,9 @@ final class CameraModel: NSObject, ObservableObject {
         }
         #endif
         switch status {
-        case .authorized: authorized = true; sessionQueue.async { self.configure() }
+        case .authorized:
+            authorized = true
+            if !openedEarly { sessionQueue.async { self.configure() } }
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { ok in
                 DispatchQueue.main.async { self.authorized = ok }
@@ -433,7 +496,18 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     private func configure() {
+        // FILM with the ultra-wide behind its finder opens straight into the two-camera session
+        // (it used to start the plain one, stop it and build this one: two camera starts). Read
+        // once, by the first configure only.
+        lock.lock(); let multi = _launchMulti; _launchMulti = false; lock.unlock()
         guard input == nil else { return }
+        if multi && !multiCamFailed && !multiCam {
+            if configureMulti() { multiCam = true; return }
+            // Not marked as failed: the camera may only have been busy a moment. The plain
+            // session opens, and updateUltraWide tries the two cameras again as it always did.
+            input = nil; device = nil; uwInput = nil
+            session = AVCaptureSession()
+        }
         session.beginConfiguration()
         session.sessionPreset = .photo
         guard let dev = Self.backCamera(), let inp = try? AVCaptureDeviceInput(device: dev), session.canAddInput(inp) else {
@@ -462,12 +536,19 @@ final class CameraModel: NSObject, ObservableObject {
         session.commitConfiguration()
         setupLenses(dev)
         applyRotation()
-        session.startRunning()
-        applyProOnQueue(m)
+        // Everything the mode needs goes on before the camera starts: added to a running session,
+        // the QR reader, the microphone or BOOTH's selfie camera each rebuilt the camera's whole
+        // pipeline a moment after it opened, holding up the first frames.
         updateQR(m)
         if m == .video { addAudioIfNeeded() }
         if m == .booth { switchCamera(toFront: true) }
-        DispatchQueue.main.async { self.rawSupported = raw; self.preparePhotos() }
+        session.startRunning()
+        applyProOnQueue(m)
+        DispatchQueue.main.async {
+            // remembered: a launch straight into FILM's two cameras never asks the plain session
+            if self.rawSupported != raw { self.rawSupported = raw; UserDefaults.standard.set(raw, forKey: "rawSupported") }
+            self.preparePhotos()
+        }
     }
 
     private func setupPhotoOutput(_ dev: AVCaptureDevice, _ m: CaptureMode) {
@@ -488,13 +569,27 @@ final class CameraModel: NSObject, ObservableObject {
         var pro = largest
         let want = settings.proMegapixels
         if want > 0, let chosen = dims.filter({ mp($0) <= want }).max(by: { px($0) < px($1) }) { pro = chosen }
-        lock.lock(); digiDims = digi; proDims = pro; lock.unlock()
-        DispatchQueue.main.async { self.proOptions = options; self.publishPhotoSize(m) }
+        lock.lock(); digiDims = digi; proDims = pro; filmDims = largest; lock.unlock()
+        // the mode as it is by now (it can change while the camera is still opening)
+        DispatchQueue.main.async { self.proOptions = options; self.publishPhotoSize(self.mode) }
     }
 
+    /// On the main thread (it reads the settings).
     private func shotDims(_ m: CaptureMode) -> CMVideoDimensions {
+        let big = m == .film && filmTakesFullSensor
         lock.lock(); defer { lock.unlock() }
-        return m == .pro ? proDims : digiDims
+        return m == .pro ? proDims : (big ? filmDims : digiDims)
+    }
+
+    /// FILM's drum and full scans take the biggest photo the sensor makes, for real detail under
+    /// the grain (a 48 MP sensor's whole picture). A lab scan, ZERO's RAW and the Lock Screen
+    /// camera's small memory keep to 12 MP.
+    private var filmTakesFullSensor: Bool {
+        #if CAPTURE_EXTENSION
+        return false
+        #else
+        return settings.filmRecipe.scan != .lab && !settings.digiZero
+        #endif
     }
 
     private func publishPhotoSize(_ m: CaptureMode) {
@@ -511,6 +606,8 @@ final class CameraModel: NSObject, ObservableObject {
             // Only the per-shot size changes; the session is left alone.
             self.setupPhotoOutput(dev, m)
         }
+        // the next shot's buffers, at the size and quality it will now be taken at
+        preparePhotos()
     }
 
     private func setupLenses(_ dev: AVCaptureDevice) {
@@ -886,7 +983,7 @@ final class CameraModel: NSObject, ObservableObject {
     /// Second stage: fire, then let go of the lock.
     func fullPress() {
         if mode == .video {
-            guard authorized == true, input != nil else { return }
+            guard authorized == true, cameraReady else { return }
             toggleRecording(); return
         }
         shoot()
@@ -1111,7 +1208,11 @@ final class CameraModel: NSObject, ObservableObject {
         }
         // PRO's held shutter or ISO is only honoured at .speed (the camera may override it otherwise).
         let manual = m == .pro && (shutterIndex != nil || isoIndex != nil)
-        let want: AVCapturePhotoOutput.QualityPrioritization = manual ? .speed : (settings.flash != .off && m != .pro ? .balanced : m.prioritization)
+        // FILM at the whole sensor is asked for the way PRO asks for it (quality), the combination
+        // the biggest photos are known to come back from.
+        let fullSensor = m == .film && filmTakesFullSensor && !zero
+        let want: AVCapturePhotoOutput.QualityPrioritization = manual ? .speed
+            : (fullSensor ? .quality : (settings.flash != .off && m != .pro ? .balanced : m.prioritization))
         settingsP.photoQualityPrioritization = want.rawValue <= photoOutput.maxPhotoQualityPrioritization.rawValue ? want : photoOutput.maxPhotoQualityPrioritization
         settingsP.maxPhotoDimensions = shotDims(m)
         let fm: AVCaptureDevice.FlashMode = settings.flash == .on ? .on : (settings.flash == .auto ? .auto : .off)
@@ -1136,7 +1237,10 @@ final class CameraModel: NSObject, ObservableObject {
     /// away instead of when the camera reports back. With the flash or RAW the camera has to make
     /// a new exposure, so those wait for it.
     func shoot() {
-        guard authorized == true, input != nil else { return }
+        guard authorized == true, cameraReady else { return }
+        // not before the viewfinder shows what the picture will be (see holdViewfinder)
+        lock.lock(); let held = _holdFrames; lock.unlock()
+        guard !held else { return }
         if mode == .video { toggleRecording(); return }
         if mode == .booth { boothPress(); return }
         // Shots still developing hold their whole file in memory: past a handful, wait.
@@ -1145,7 +1249,7 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     private func fire(booth: (session: Int, index: Int)?) {
-        guard authorized == true, input != nil else { return }
+        guard authorized == true, cameraReady else { return }
         let pressed = CACurrentMediaTime()
         skipReview()
         let m = mode
@@ -1177,6 +1281,9 @@ final class CameraModel: NSObject, ObservableObject {
         }
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         developing += 1
+        #if DEBUG && targetEnvironment(simulator) && !CAPTURE_EXTENSION
+        if Self.demo.active { demoFire(id, settingsP); return }
+        #endif
         // Off the main thread: whatever the screen is busy drawing can't hold the shot up. The
         // settings were made on the main thread a moment ago; what the camera can do is checked
         // here, against the session as it is now (a flip or a rebuild may have come between).
@@ -1360,9 +1467,21 @@ final class CameraModel: NSObject, ObservableObject {
         // cell, so a render that came back with black tiles is redone on the CPU. It is also the
         // roll button's picture.
         let e0 = developed.extent
-        let k0: CGFloat = 200 / max(e0.width, 1)
-        let small = developed.transformed(by: CGAffineTransform(scaleX: k0, y: k0))
-        let reference = Encoder.gpu.createCGImage(small, from: small.extent.integral)
+        var reference: CGImage?
+        if shot.develop.film && e0.width * e0.height > 16_000_000, let meter = Darkroom.reduced(src, longEdge: 1024) {
+            // A drum scan can't be shrunk to a thumbnail in one go (it would be read whole): the
+            // same recipe on the meter's small copy, at its own size, stands in.
+            var d = shot.develop
+            d.filmRecipe.scan = .full
+            let sm = Darkroom.develop(meter, d, date: shot.date, preview: false, demo: demo).0
+            let k = 200 / max(sm.extent.width, 1)
+            let s = sm.transformed(by: CGAffineTransform(scaleX: k, y: k))
+            reference = Encoder.gpu.createCGImage(s, from: s.extent.integral)
+        } else {
+            let k0: CGFloat = 200 / max(e0.width, 1)
+            let small = developed.transformed(by: CGAffineTransform(scaleX: k0, y: k0))
+            reference = Encoder.gpu.createCGImage(small, from: small.extent.integral)
+        }
         guard let cg = Encoder.render(developed, reference: reference) else { return nil }
         let props = Recipe.properties(from: fileProps, recipe: recipe)
         // FILM keeps everything: HEIC at a high quality. DIGI saves the crunch you chose.
@@ -1412,7 +1531,12 @@ final class CameraModel: NSObject, ObservableObject {
     /// Into Photos, or into the pending folder for later when Photos won't take it now.
     private func save(_ out: Data, _ type: UTType) {
         if let lib = library {
-            lib.save(data: out, type: type) { ok in if !ok { self.writeFallback(out, type) } }
+            lib.save(data: out, type: type) { ok in
+                if !ok { self.writeFallback(out, type) }
+                #if !CAPTURE_EXTENSION
+                if ok { ReviewPrompt.noteShot() }
+                #endif
+            }
         } else {
             writeFallback(out, type)
         }
@@ -1491,7 +1615,7 @@ final class CameraModel: NSObject, ObservableObject {
         for i in 0..<48 { bins[i] = max(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]) }
         let mx = max(bins.max() ?? 1, 0.0001)
         let norm = bins.map { $0 / mx }
-        DispatchQueue.main.async { self.histogram = norm }
+        DispatchQueue.main.async { self.meters.histogram = norm }
     }
 }
 
@@ -1518,7 +1642,14 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             }
             return
         }
+        viewfinderFrame(sampleBuffer)
+    }
+
+    /// One frame of the viewfinder (and of a VIDEO take). On the frame queue.
+    private func viewfinderFrame(_ sampleBuffer: CMSampleBuffer) {
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        lock.lock(); let hold = _holdFrames; lock.unlock()
+        if hold { return }
         // Power: the developed modes run at a lighter size, at the camera's 30 frames a second
         // (FILM's finder is one baked colour cube per frame, see FilmPreview); on Low Power Mode
         // or a hot phone, 20 and lighter still.
@@ -1981,9 +2112,10 @@ extension CameraModel {
     private var wantsUltraWide: Bool {
         #if CAPTURE_EXTENSION
         return false   // one camera on the Lock Screen: less memory, nothing to fall back from
-        #endif
+        #else
         return mode == .film && settings.filmRecipe.xaFinder && settings.filmRecipe.ultraWide && !settings.digiZero && !front && AVCaptureMultiCamSession.isMultiCamSupported
             && AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back) != nil
+        #endif
     }
 
     /// Bring the ultra-wide in or out to match the mode and the finder setting.
@@ -2061,6 +2193,7 @@ extension CameraModel {
         applyCapturePolicy(flash: settings.flash != .off)
         let m = frameState().0
         setupPhotoOutput(wide, m)
+        addControls(wide, m)
         ms.commitConfiguration()
         // Too much for this phone at this quality: drop the ultra-wide rather than the photo.
         // (The cameras are only taken on once the session is known to run: set before this,
@@ -2125,6 +2258,52 @@ extension CameraModel {
     }
 }
 
+// MARK: warming up
+
+extension CameraModel {
+    /// The first frame used to wait while Core Image made its contexts and compiled this mode's
+    /// chain (kernels compile the first time they're drawn). A blank frame goes through the same
+    /// steps on the frame queue while the camera is still starting, so the real one doesn't.
+    /// VIDEO and BOOTH aren't warmed: their tapes keep state, and BOOTH's faces need Vision.
+    func warmViewfinder() {
+        var (m, dev) = frameState()
+        guard m != .video, m != .booth else { return }
+        #if CAPTURE_EXTENSION
+        let w = 640
+        #else
+        let w = m.developed ? 810 : 1080
+        #endif
+        // FILM opens on an accurate peek at the film (see syncFrameSettings)
+        if m == .film && !settings.filmAlwaysOn { dev.accurate = true }
+        let finder = m == .film && dev.filmRecipe.xaFinder
+        let pixel = m == .digi && dev.stack.look.pixelWidth != nil
+        frameQueue.async {
+            guard let pb = Self.blankFrame(width: w, height: w * 4 / 3) else { return }
+            var img = Sanitize.apply(CIImage(cvPixelBuffer: pb), floor: 0)
+            if m.developed { img = Darkroom.develop(img, dev, date: Date(), preview: true).0 }
+            if finder {
+                self.lock.lock(); let flong = self._finderLong; self.lock.unlock()
+                img = XAFinder.compose(img, format: dev.filmRecipe.format, long: flong)
+            }
+            PreviewView.warm(img, pixelated: pixel)
+            _ = Looks.context   // the editors' copy of the frame and the histogram draw with this
+        }
+    }
+
+    /// A mid-grey camera-shaped frame.
+    private static func blankFrame(width: Int, height: Int) -> CVPixelBuffer? {
+        var out: CVPixelBuffer?
+        let attrs: [String: Any] = [kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+                                    kCVPixelBufferMetalCompatibilityKey as String: true]
+        guard CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA, attrs as CFDictionary, &out) == kCVReturnSuccess,
+              let pb = out else { return nil }
+        CVPixelBufferLockBaseAddress(pb, [])
+        if let base = CVPixelBufferGetBaseAddress(pb) { memset(base, 0x80, CVPixelBufferGetDataSize(pb)) }
+        CVPixelBufferUnlockBaseAddress(pb, [])
+        return pb
+    }
+}
+
 extension CameraModel {
     /// FILM's finder arrives: it starts too big for the screen and steps back to fit.
     func beginFinderIntro() {
@@ -2132,6 +2311,11 @@ extension CameraModel {
         lock.lock(); _introStart = CACurrentMediaTime(); lock.unlock()
         introPatchDone = false
     }
+}
+
+/// The live histogram, observed only by the histograms (see `CameraModel.meters`).
+final class LiveMeters: ObservableObject {
+    @Published var histogram: [Float] = []
 }
 
 /// The finder's swing with the camera's motion, observed only by the finder.
@@ -2181,3 +2365,151 @@ extension CameraModel: AVCaptureMetadataOutputObjectsDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: w)
     }
 }
+
+#if DEBUG && targetEnvironment(simulator) && !CAPTURE_EXTENSION
+// MARK: demo (the simulator, for screenshots)
+
+/// The simulator has no camera. With XA_DEMO_PHOTO set (a picture, or a folder of them), the
+/// picture is fed through the real viewfinder as the camera's frames, drifting slowly the way a
+/// hand-held camera does, and a press develops what is shown through the real lab and saves it.
+/// Debug builds in the simulator only: nothing of this is in the app people get.
+extension CameraModel {
+    final class Demo {
+        let photos: [URL]
+        var index = 0
+        /// The picture at full size (for a press) and small (for the frames), each decoded once:
+        /// drawn lazily from the file, a 24 MP JPEG was decoded again for every frame.
+        var still: CIImage?
+        var small: CIImage?
+        var timer: DispatchSourceTimer?
+        var pool: CVPixelBufferPool?
+        var started: CFTimeInterval = 0
+        let context = CIContext(options: [.cacheIntermediates: false])
+        var active: Bool { !photos.isEmpty }
+
+        init() {
+            guard let path = ProcessInfo.processInfo.environment["XA_DEMO_PHOTO"] else { photos = []; return }
+            let url = URL(fileURLWithPath: path)
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { photos = []; return }
+            if isDir.boolValue {
+                let kinds: Set<String> = ["jpg", "jpeg", "png", "heic", "tif", "tiff"]
+                photos = ((try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? [])
+                    .filter { kinds.contains($0.pathExtension.lowercased()) }
+                    .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            } else {
+                photos = [url]
+            }
+        }
+
+        /// The picture as the camera would hold it: upright, 3:4 portrait, cropped from the middle.
+        func load() {
+            still = nil; small = nil
+            guard !photos.isEmpty, let src = CGImageSourceCreateWithURL(photos[index % photos.count] as CFURL, nil),
+                  let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, [
+                      kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 8064,
+                      kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: true,
+                  ] as CFDictionary) else { return }
+            let img = CIImage(cgImage: cg)
+            let e = img.extent
+            let w = min(e.width, e.height * 3 / 4), h = w * 4 / 3
+            let crop = CGRect(x: e.midX - w / 2, y: e.midY - h / 2, width: w, height: h).integral
+            let full = img.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+            still = full
+            let k = 1600 / full.extent.width
+            let s = full.transformed(by: CGAffineTransform(scaleX: k, y: k))
+            if let c = context.createCGImage(s, from: s.extent.integral) { small = CIImage(cgImage: c) }
+        }
+
+        /// What the camera sees at time `t`: a 92% window drifting a little, as a hand holds a
+        /// camera. From the small copy for the frames, from the full picture for a press.
+        func window(_ t: CFTimeInterval, full: Bool = false) -> CIImage? {
+            guard let s = full ? still : small else { return nil }
+            let e = s.extent
+            let k: CGFloat = 0.92
+            let dx = CGFloat(sin(t * 0.37)) * e.width * (1 - k) / 2
+            let dy = CGFloat(cos(t * 0.29)) * e.height * (1 - k) / 2
+            let r = CGRect(x: e.width * (1 - k) / 2 + dx, y: e.height * (1 - k) / 2 + dy, width: e.width * k, height: e.height * k)
+            return s.cropped(to: r).transformed(by: CGAffineTransform(translationX: -r.minX, y: -r.minY))
+        }
+    }
+
+    static let demo = Demo()
+
+    /// Frames at 30 a second on the frame queue, as the camera sends them (1440 × 1920 portrait).
+    fileprivate func startDemo() {
+        let d = Self.demo
+        authorized = true
+        lenses = Lenses.stops(switchOvers: [2, 10], maxZoom: 20, multiplier: 0.5)
+        zoom = Lenses.main(switchOvers: [2, 10], multiplier: 0.5)
+        zoomMultiplier = 0.5
+        proOptions = [12, 48]
+        publishPhotoSize(mode)
+        if mode == .film { beginFinderIntro() }
+        // XA_DEMO_SHOOT=1: one picture by itself once the finder has settled (to fill the roll)
+        if ProcessInfo.processInfo.environment["XA_DEMO_SHOOT"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { self.shoot() }
+        }
+        frameQueue.async {
+            d.load()
+            d.started = CACurrentMediaTime()
+            let attrs: [String: Any] = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                                        kCVPixelBufferWidthKey as String: 1440, kCVPixelBufferHeightKey as String: 1920,
+                                        kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any]()]
+            CVPixelBufferPoolCreate(nil, nil, attrs as CFDictionary, &d.pool)
+            let t = DispatchSource.makeTimerSource(queue: self.frameQueue)
+            t.schedule(deadline: .now(), repeating: 1.0 / 30)
+            t.setEventHandler { [weak self] in self?.demoFrame() }
+            t.resume()
+            d.timer = t
+        }
+    }
+
+    private func demoFrame() {
+        let d = Self.demo
+        guard let pool = d.pool, let win = d.window(CACurrentMediaTime() - d.started) else { return }
+        var out: CVPixelBuffer?
+        guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &out) == kCVReturnSuccess, let pb = out else { return }
+        let s = 1440 / win.extent.width
+        d.context.render(win.transformed(by: CGAffineTransform(scaleX: s, y: s)), to: pb,
+                         bounds: CGRect(x: 0, y: 0, width: 1440, height: 1920), colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        var fmt: CMVideoFormatDescription?
+        CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: pb, formatDescriptionOut: &fmt)
+        guard let fmt else { return }
+        var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 30),
+                                        presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), decodeTimeStamp: .invalid)
+        var sb: CMSampleBuffer?
+        CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: pb, formatDescription: fmt, sampleTiming: &timing, sampleBufferOut: &sb)
+        if let sb { viewfinderFrame(sb) }
+    }
+
+    /// A press: the picture in the window, at the camera's photo size, through the real develop.
+    /// With a folder, the next picture comes up after the shot.
+    fileprivate func demoFire(_ id: Int64, _ settingsP: AVCapturePhotoSettings) {
+        guard let shot = pending.removeValue(forKey: id) else { return }
+        answered.remove(id); quietShots.remove(id)
+        if settings.sounds { CameraSounds.shared.play(.shutter) }
+        if shot.mode.usesFilm && settings.instantReview { startReview() }
+        flash = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { self.flash = false }
+        let dims = settingsP.maxPhotoDimensions
+        frameQueue.async {
+            let d = Self.demo
+            guard let win = d.window(CACurrentMediaTime() - d.started, full: true) else {
+                DispatchQueue.main.async { self.developing = max(0, self.developing - 1) }; return
+            }
+            // the photo at the size the camera would have taken (portrait: the short side across)
+            let across = CGFloat(min(dims.width, dims.height))
+            let s = across / win.extent.width
+            let photo = win.transformed(by: CGAffineTransform(scaleX: s, y: s))
+            let data = d.context.jpegRepresentation(of: photo, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                                    options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95])
+            if d.photos.count > 1 { d.index += 1; d.load() }
+            DispatchQueue.main.async {
+                guard let data else { self.developing = max(0, self.developing - 1); return }
+                self.develop(data, shot)
+            }
+        }
+    }
+}
+#endif

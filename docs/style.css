@@ -8,3 +8,12 @@ h2{font-size:24px;margin:36px 0 6px;color:var(--ink);letter-spacing:.04em}
 .eyebrow{font-size:14px;letter-spacing:.16em;color:var(--red);margin:0 0 4px}
 p,li{color:var(--muted)}strong{color:var(--ink)}a{color:var(--accent)}
 ul{padding-left:20px}li{margin:4px 0}
+.lede{font-size:20px;color:var(--ink)}
+.cta{margin:20px 0 8px}.button{display:inline-block;background:var(--accent);color:#141210;font-weight:600;padding:10px 18px;border-radius:999px;text-decoration:none;margin-right:12px}
+.strip{display:flex;gap:16px;overflow-x:auto;scroll-snap-type:x mandatory;padding:24px 20px 8px;max-width:100%;-webkit-overflow-scrolling:touch}
+.strip img{flex:0 0 auto;width:260px;height:auto;border-radius:18px;scroll-snap-align:center;background:#000}
+section{margin-top:8px}
+details{border-top:1px solid #2c2722;padding:10px 0}details:last-of-type{border-bottom:1px solid #2c2722}
+summary{cursor:pointer;color:var(--ink);font-weight:600}
+footer{margin-top:48px;font-size:14px}
+@media (min-width:900px){.strip{justify-content:flex-start;padding-left:max(20px,calc((100vw - 680px)/2))}}

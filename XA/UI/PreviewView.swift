@@ -13,7 +13,6 @@ final class PreviewView: MTKView {
     private static let device = MTLCreateSystemDefaultDevice()
     private static let sharedCI: CIContext = device.map { CIContext(mtlDevice: $0, options: [.cacheIntermediates: false, .priorityRequestLow: false]) } ?? CIContext()
     private static let sharedQueue = device?.makeCommandQueue()
-    private var ci: CIContext { Self.sharedCI }
     private var queue: MTLCommandQueue? { Self.sharedQueue }
     private let sizeLock = NSLock()
     private var _size: CGSize = .zero
@@ -42,10 +41,22 @@ final class PreviewView: MTKView {
         sizeLock.lock(); let known = _size; sizeLock.unlock()
         guard known.width > 0, known.height > 0, let layer = self.layer as? CAMetalLayer,
               let drawable = layer.nextDrawable(), let cb = queue?.makeCommandBuffer() else { return }
+        guard let source = Self.draw(img, pixelated: pixelated, into: drawable.texture, commandBuffer: cb) else { return }
+        // The frame's pixel buffer belongs to the camera's small pool. If it goes back to the pool
+        // while the GPU is still reading it, the camera writes the next frame into it mid-read and
+        // squares of the picture come out white, black or from another frame. Hold it until done.
+        cb.addCompletedHandler { _ in withExtendedLifetime(source) {} }
+        cb.present(drawable)
+        cb.commit()
+    }
+
+    /// One frame fitted on black into `texture`, encoded on `cb`. Returns the picture the GPU
+    /// reads (to keep alive until it is done), or nil when there's nothing to draw.
+    private static func draw(_ img: CIImage, pixelated: Bool, into texture: MTLTexture, commandBuffer cb: MTLCommandBuffer) -> CIImage? {
         // Size from the texture actually handed out, not the one remembered at the last layout.
         // The viewfinder changes height when PRO's dials come in; a stale size left strips of the
         // texture undrawn along the top and right, showing whatever was in them before.
-        let ds = CGSize(width: drawable.texture.width, height: drawable.texture.height)
+        let ds = CGSize(width: texture.width, height: texture.height)
         // Whole pixels only. A downscaled frame ends mid-pixel on its far edges (top and right in
         // Core Image), and scaling that again for the screen blends the half-covered row with
         // transparency: a faint line along the top and right. PRO shows it because nothing else
@@ -54,7 +65,7 @@ final class PreviewView: MTKView {
         let e = CGRect(x: f.minX.rounded(.up), y: f.minY.rounded(.up),
                        width: f.maxX.rounded(.down) - f.minX.rounded(.up),
                        height: f.maxY.rounded(.down) - f.minY.rounded(.up))
-        guard e.width > 0, e.height > 0 else { return }
+        guard e.width > 0, e.height > 0 else { return nil }
         let img = img.clampedToExtent().cropped(to: e)
         // Fit, not fill: an instant print is square and must not be cropped.
         let s = min(ds.width / e.width, ds.height / e.height)
@@ -64,13 +75,22 @@ final class PreviewView: MTKView {
             .transformed(by: CGAffineTransform(translationX: (ds.width - e.width * s) / 2, y: (ds.height - e.height * s) / 2))
         let bounds = CGRect(origin: .zero, size: ds)
         let bg = CIImage(color: .black).cropped(to: bounds)
-        ci.render(src.composited(over: bg), to: drawable.texture, commandBuffer: cb, bounds: bounds, colorSpace: CGColorSpaceCreateDeviceRGB())
-        // The frame's pixel buffer belongs to the camera's small pool. If it goes back to the pool
-        // while the GPU is still reading it, the camera writes the next frame into it mid-read and
-        // squares of the picture come out white, black or from another frame. Hold it until done.
-        let source = img
-        cb.addCompletedHandler { _ in withExtendedLifetime(source) {} }
-        cb.present(drawable)
+        sharedCI.render(src.composited(over: bg), to: texture, commandBuffer: cb, bounds: bounds, colorSpace: deviceRGB)
+        return img
+    }
+    private static let deviceRGB = CGColorSpaceCreateDeviceRGB()
+
+    /// Draws a frame once, off screen, the way `show` does. Core Image makes its context and
+    /// compiles a chain's kernels the first time they're drawn; done while the camera is still
+    /// starting, the first real frame doesn't wait for that. Any queue.
+    static func warm(_ img: CIImage, pixelated: Bool) {
+        guard let device, let cb = sharedQueue?.makeCommandBuffer() else { return }
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 600, height: 800, mipmapped: false)
+        d.usage = [.shaderRead, .shaderWrite, .renderTarget]
+        d.storageMode = .private
+        guard let tex = device.makeTexture(descriptor: d),
+              let source = draw(img, pixelated: pixelated, into: tex, commandBuffer: cb) else { return }
+        cb.addCompletedHandler { _ in withExtendedLifetime((source, tex)) {} }
         cb.commit()
     }
 }

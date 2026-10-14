@@ -210,11 +210,7 @@ struct CameraView: View {
         ZStack {
             Color.black
             if camera.authorized == false {
-                VStack(spacing: 12) {
-                    Text("XA needs the camera.").font(XA.display(18))
-                    Text("Settings › XA › Camera").font(.system(size: 14)).foregroundStyle(XA.dim)
-                }
-                .foregroundStyle(.white)
+                CameraDeniedNote()
             } else {
                 Viewfinder(camera: camera)
                     .aspectRatio(finderAspect, contentMode: .fit)
@@ -919,5 +915,29 @@ struct FavoriteStar: View {
             .background(Color.black.opacity(0.75), in: Circle())
             .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
             .accessibilityLabel("Favorite")
+    }
+}
+
+/// Camera access was refused: what to do about it, and in the app a way straight there.
+private struct CameraDeniedNote: View {
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("XA needs the camera.").font(XA.display(18))
+            #if CAPTURE_EXTENSION
+            Text("Settings › XA › Camera").font(.system(size: 14)).foregroundStyle(XA.dim)
+            #else
+            Text("Turn on Camera for XA in Settings.").font(.system(size: 14)).foregroundStyle(XA.dim)
+            Button("Open Settings") {
+                if let u = URL(string: UIApplication.openSettingsURLString) { openURL(u) }
+            }
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(XA.orange)
+            .padding(.top, 4)
+            #endif
+        }
+        .foregroundStyle(.white)
+        .multilineTextAlignment(.center)
     }
 }

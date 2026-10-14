@@ -104,6 +104,12 @@ enum Shapes {
 
     private static let lock = NSLock()
     private static var masks: [String: CIImage] = [:]
+    private static func keep(_ m: CIImage, _ key: String) {
+        lock.lock()
+        if masks.count >= 8 { masks.removeAll() }
+        masks[key] = m
+        lock.unlock()
+    }
 
     /// White inside the shape, clear outside, the size of `extent`.
     static func mask(_ shape: FrameShape, extent: CGRect) -> CIImage? {
@@ -116,6 +122,7 @@ enum Shapes {
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = 1
         fmt.opaque = false
+        fmt.preferredRange = .standard   // white on clear: 8 bits, never a wide-colour 16
         let img = UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
             guard let p = shape.path(in: CGRect(origin: .zero, size: size)) else { return }
             ctx.cgContext.addPath(p)
@@ -124,13 +131,9 @@ enum Shapes {
         }
         guard let cg = img.cgImage else { return nil }
         let m = CIImage(cgImage: cg)
-        // Only viewfinder-size masks are kept: a photo-size one is 50 MB and is made once.
-        if size.width * size.height <= 2_500_000 {
-            lock.lock()
-            if masks.count > 16 { masks.removeAll() }
-            masks[key] = m
-            lock.unlock()
-        }
+        // Only viewfinder-size masks are kept (a DIGI photo's 1 or 2 MP ones were kept too):
+        // a photo-size one is made once.
+        if size.width * size.height <= 1_200_000 { keep(m, key) }
         return m.transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
     }
 
@@ -201,18 +204,28 @@ enum Shapes {
         let paperRect = CGRect(origin: .zero, size: layout.paper)
         let paperImg = CIImage(color: paper).cropped(to: paperRect)
         if kind == .round {
-            let d: CGFloat = min(win.width, win.height) * 0.92
-            let circle = CGRect(x: (win.width - d) / 2, y: (win.height - d) / 2, width: d, height: d)
-            let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 1; fmt.opaque = false
-            let maskImg = UIGraphicsImageRenderer(size: win, format: fmt).image { ctx in
-                ctx.cgContext.setFillColor(UIColor.white.cgColor)
-                ctx.cgContext.fillEllipse(in: circle)
+            // The circle is drawn once per size and kept like the shapes' masks: the viewfinder
+            // drew a new one every frame.
+            let key = "round-\(Int(win.width))x\(Int(win.height))"
+            lock.lock(); var mask = masks[key]; lock.unlock()
+            if mask == nil {
+                let d: CGFloat = min(win.width, win.height) * 0.92
+                let circle = CGRect(x: (win.width - d) / 2, y: (win.height - d) / 2, width: d, height: d)
+                let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 1; fmt.opaque = false; fmt.preferredRange = .standard
+                let maskImg = UIGraphicsImageRenderer(size: win, format: fmt).image { ctx in
+                    ctx.cgContext.setFillColor(UIColor.white.cgColor)
+                    ctx.cgContext.fillEllipse(in: circle)
+                }
+                if let cg = maskImg.cgImage {
+                    mask = CIImage(cgImage: cg)
+                    if win.width * win.height <= 1_200_000, let mask { keep(mask, key) }
+                }
             }
-            if let cg = maskImg.cgImage {
+            if let mask {
                 let f = CIFilter.blendWithAlphaMask()
                 f.inputImage = photo
                 f.backgroundImage = CIImage(color: paper).cropped(to: photo.extent)
-                f.maskImage = CIImage(cgImage: cg)
+                f.maskImage = mask
                 photo = (f.outputImage ?? photo).cropped(to: photo.extent)
             }
         }

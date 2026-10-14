@@ -3,6 +3,7 @@ import LockedCameraCapture
 import AppIntents
 import UniformTypeIdentifiers
 import Photos
+import StoreKit
 
 @main
 struct XAApp: App {
@@ -22,15 +23,25 @@ struct RootView: View {
     @State private var showCustomize = false
     @State private var showFilm = false
     @State private var pull: CGFloat = 0
+    /// The roll is built a moment after launch (or when first opened), not with the camera:
+    /// laying out its first day, and asking Photos about every print on it, held the camera up.
+    @State private var rollMounted = false
     /// A QR code's link from the Lock Screen camera, opened in the browser once the app is up.
     @State private var pendingLink: URL?
     @Environment(\.scenePhase) private var phase
     @Environment(\.openURL) private var openURL
+    @Environment(\.requestReview) private var requestReview
 
     init() {
         let s = AppSettings()
         _settings = StateObject(wrappedValue: s)
-        _camera = StateObject(wrappedValue: CameraModel(settings: s))
+        // made once (a StateObject's value is made lazily, on first use), and the camera starts
+        // opening right then, not once the whole first screen has been built and appeared
+        _camera = StateObject(wrappedValue: {
+            let c = CameraModel(settings: s)
+            c.openEarly()
+            return c
+        }())
     }
 
     // In pieces: as one chain of modifiers it was too much for the compiler to type-check.
@@ -52,10 +63,12 @@ struct RootView: View {
                 // The roll is a layer above the camera: swipe up for it, swipe down to put it away.
                 ZStack {
                     camView.accessibilityHidden(showRoll)
-                    ContactSheet(library: library, onClose: closeRoll, onDrag: { pull = $0 })
-                        .offset(y: showRoll ? max(0, pull) : geo.size.height + 40)
-                        .allowsHitTesting(showRoll)
-                        .accessibilityHidden(!showRoll)
+                    if rollMounted {
+                        ContactSheet(library: library, onClose: closeRoll, onDrag: { pull = $0 })
+                            .offset(y: showRoll ? max(0, pull) : geo.size.height + 40)
+                            .allowsHitTesting(showRoll)
+                            .accessibilityHidden(!showRoll)
+                    }
                 }
             }
         }
@@ -69,15 +82,16 @@ struct RootView: View {
     private func lifecycle<V: View>(_ v: V) -> some View {
         v
         .onAppear {
+            camera.onStackChange = { pushContext() }
+            camera.start()
             CameraSounds.shared.prepare()
             camera.library = library
             // A picture Photos wouldn't take waits here and goes in the next time it can.
             camera.fallbackFolder = Library.pendingFolder
-            library.flushPending()
-            camera.onStackChange = { pushContext() }
-            camera.start()
             pushContext()
             syncThumb()
+            // Photos after the camera: the first look at a big library is slow on the main thread.
+            DispatchQueue.main.async { library.refresh(); library.flushPending() }
         }
         .onChange(of: phase) { _, p in phaseChanged(p) }
         // The camera sleeps under the roll: no capture, no develop, no hardware shutter.
@@ -88,6 +102,12 @@ struct RootView: View {
         .onChange(of: showCustomize) { _, open in camera.captureButtonsEnabled = !open && !showRoll && !showFilm }
         .onChange(of: showFilm) { _, open in camera.captureButtonsEnabled = !open && !showRoll && !showCustomize }
         .task { await ingestLockScreenShots() }
+        .task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            rollMounted = true
+            // the tip jar listens for tips that finish later (Ask to Buy), once the camera is up
+            _ = TipJar.shared
+        }
         // The Lock Screen camera opened the app (its roll, settings or film buttons).
         .onContinueUserActivity(NSUserActivityTypeLockedCameraCapture) { a in
             switch a.userInfo?["open"] as? String {
@@ -129,7 +149,10 @@ struct RootView: View {
         .onChange(of: settings.recipe) { _, _ in camera.syncFrameSettings(); pushContext() }
         .onChange(of: settings.digiOSD) { _, _ in camera.syncFrameSettings(); pushContext() }
         .onChange(of: settings.filmAlwaysOn) { _, _ in camera.syncFrameSettings(); pushContext() }
-        .onChange(of: settings.filmRecipe) { _, _ in camera.syncFrameSettings(); camera.updateUltraWide(); pushContext() }
+        .onChange(of: settings.filmRecipe) { old, new in
+            camera.syncFrameSettings(); camera.updateUltraWide(); pushContext()
+            if old.scan != new.scan { camera.applyResolution() }   // a drum scan takes the whole sensor
+        }
         .onChange(of: settings.digiMegapixels) { _, _ in camera.applyResolution(); pushContext() }
     }
 
@@ -161,8 +184,21 @@ struct RootView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { openURL(u) }
     }
 
-    private func openRoll() { pull = 0; withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { showRoll = true } }
-    private func closeRoll() { withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { showRoll = false; pull = 0 } }
+    private func openRoll() {
+        pull = 0
+        // not built yet: built below the screen first, then slid up
+        guard rollMounted else { rollMounted = true; DispatchQueue.main.async { openRoll() }; return }
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { showRoll = true }
+    }
+    private func closeRoll() {
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { showRoll = false; pull = 0 }
+        // Back from looking at the pictures: the moment to ask for a rating, once XA has been
+        // used for a while (see ReviewPrompt), never in the middle of shooting.
+        if ReviewPrompt.due {
+            ReviewPrompt.asked()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { requestReview() }
+        }
+    }
 
     /// The Lock Screen camera cannot read the app's settings; they travel in the intent context.
     private func pushContext() {

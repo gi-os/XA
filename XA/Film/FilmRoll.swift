@@ -48,11 +48,34 @@ enum FilmFormat: String, CaseIterable, Codable {
     }
 }
 
-/// How the lab scans the roll: at a minilab scanner's size, or the whole sensor.
+/// How the lab scans the roll.
+/// - lab: a minilab scanner's size (a Frontier's large scan of a 35mm frame is 3088 pixels on
+///   the long side).
+/// - full: every pixel the camera took, nothing resampled.
+/// - drum: a high-resolution scan of the negative, about 5600 dpi, whatever the camera's own
+///   resolution: the grain is resolved into its dye clouds, so zooming in shows film, not pixels.
 enum FilmScan: String, CaseIterable, Codable {
-    case lab, full
-    /// A Frontier's large scan of a 35mm frame is 3088 pixels on the long side.
-    var longEdge: CGFloat? { self == .lab ? 3088 : nil }
+    case lab, full, drum
+    /// Microns of negative per pixel of a drum scan (about 5600 dpi).
+    static let drumUM: CGFloat = 4.5
+    /// A drum scan stays within 48 MP (a 120 frame would be well past it).
+    static let drumMaxPixels: CGFloat = 48_000_000
+
+    /// The long side to scan a frame of `size` (the format's crop of the picture) at, or nil to
+    /// keep it as it is.
+    func longEdge(for size: CGSize, format: FilmFormat) -> CGFloat? {
+        switch self {
+        case .lab: return 3088
+        case .full: return nil
+        case .drum:
+            let long = max(size.width, size.height), short = min(size.width, size.height)
+            guard long > 0, short > 0 else { return nil }
+            var edge = format.longMM * 1000 / Self.drumUM
+            let pixels = edge * edge * short / long
+            if pixels > Self.drumMaxPixels { edge *= (Self.drumMaxPixels / pixels).squareRoot() }
+            return edge.rounded(.down)
+        }
+    }
 }
 
 /// FILM's camera and lab, in the order the light goes: the point-and-shoot's lens, its flash,
@@ -64,7 +87,7 @@ struct FilmRecipe: Codable, Equatable {
     var leak: Double = 0.3
     var mist: Double = 0
     var format: FilmFormat = .mm35
-    var scan: FilmScan = .lab
+    var scan: FilmScan = .drum
     /// Print color timing: + warm (less yellow filter density), − cool.
     var warmth: Double = 0
     /// + magenta, − green.
@@ -120,6 +143,9 @@ struct FilmShot {
     /// How thin the negative is as a whole (LabAuto.underexposure): the stock's muddy, off-colour
     /// lift of thin shadows happens only on an underexposed frame, never on every frame's blacks.
     var under: Double = 0
+    /// A small copy of the frame (Darkroom.reduced), for everything that reads the whole frame at
+    /// once: the lab's metering, the scanner's levels, glare. Nil in the viewfinder.
+    var meter: CIImage?
 }
 
 /// A minilab's auto-correction (a Frontier's or Noritsu's scanner and printer): it reads the

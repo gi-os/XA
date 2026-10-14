@@ -155,7 +155,7 @@ private struct FilmLCD: View {
 
     static func dateText() -> String { dateFormat.string(from: Date()) }
     private static let dateFormat: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "''yy MM dd"; return f
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "''yy MM dd"; return f
     }()
 }
 

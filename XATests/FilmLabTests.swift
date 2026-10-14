@@ -101,13 +101,22 @@ final class FilmLabTests: XCTestCase {
         XCTAssertFalse(alpha)
         // 35mm at the lab: cut to 2:3 and scanned at a Frontier's 3088 on the long side.
         d.filmRecipe = FilmRecipe()
+        d.filmRecipe.scan = .lab
         let lab = Darkroom.develop(big, d, date: Date(), preview: false).0.extent.size
         XCTAssertEqual(lab.width, 3088, accuracy: 2)
         XCTAssertEqual(lab.height, 3088 * 2 / 3, accuracy: 3)
-        // 120 is square.
+        // The default, a drum scan: 35mm at 4.5 µm a pixel is 8000 on the long side, enlarged
+        // from the camera's 4032.
+        d.filmRecipe = FilmRecipe()
+        XCTAssertEqual(d.filmRecipe.scan, .drum)
+        let drum = Darkroom.develop(big, d, date: Date(), preview: false).0.extent.size
+        XCTAssertEqual(drum.width, 8000, accuracy: 2)
+        XCTAssertEqual(drum.height, 8000 * 2 / 3, accuracy: 3)
+        // 120 is square, and its drum scan stays within 48 MP.
         d.filmRecipe.format = .mf120
         let sq = Darkroom.develop(big, d, date: Date(), preview: false).0.extent.size
         XCTAssertEqual(sq.width, sq.height, accuracy: 2)
+        XCTAssertLessThanOrEqual(sq.width * sq.height, FilmScan.drumMaxPixels)
         d.film = false; d.stack = Stack(simID: "nocturne"); d.megapixels = 2
         XCTAssertLessThan(Darkroom.develop(big, d, date: Date(), preview: false).0.extent.width, 2000)
     }

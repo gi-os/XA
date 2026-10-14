@@ -403,9 +403,12 @@ struct PrintView: View {
     static func aspect(_ a: PHAsset) -> CGFloat { a.pixelHeight > 0 ? CGFloat(a.pixelWidth) / CGFloat(a.pixelHeight) : 0.75 }
     /// Instant film comes out of the camera with its paper on.
     static func isInstant(_ a: PHAsset) -> Bool {
-        let r = aspect(a)
-        return [1.12 / 1.276, 54.0 / 86.0, 108.0 / 86.0].contains { abs($0 - r) < 0.012 }
+        let r: CGFloat = aspect(a)
+        return instantAspects.contains { (x: CGFloat) -> Bool in abs(x - r) < 0.012 }
     }
+    /// The instant prints' width over height. Typed out: as a literal in the expression above,
+    /// Xcode 26's type checker gave up on it.
+    private static let instantAspects: [CGFloat] = [1.12 / 1.276, 54.0 / 86.0, 108.0 / 86.0]
     static func bordered(_ a: PHAsset, _ library: Library) -> Bool { !isInstant(a) && !library.isTransparentCached(a) }
     static func height(for a: PHAsset, width: CGFloat, library: Library) -> CGFloat {
         let b = bordered(a, library) ? max(3, width * 0.035) : 0

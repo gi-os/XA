@@ -67,7 +67,8 @@ struct PhotoViewer: View {
             Orientation.allow(.portrait)
             if let written { try? FileManager.default.removeItem(at: written) }
         }
-        .onChange(of: library.assets.count) { _, _ in
+        // the ids, not the count: a delete and a new picture in one reload left the count alone
+        .onChange(of: library.assets.map(\.localIdentifier)) { _, _ in
             guard asset == nil else { return }
             // the photo on screen went away (deleted here or in Photos): its neighbor takes its place
             if assets.isEmpty { close(); return }
@@ -159,7 +160,14 @@ struct PhotoViewer: View {
         guard let a = asset else { return }
         let id = a.localIdentifier
         if a.mediaType == .video {
-            library.exportVideo(a) { url in if id == current { file = url } }
+            library.exportVideo(a) { url in
+                guard let url else { return }
+                guard id == current else { try? FileManager.default.removeItem(at: url); return }
+                // one copy in the temporary folder at a time, videos too
+                if let old = written, old != url { try? FileManager.default.removeItem(at: old) }
+                written = url
+                file = url
+            }
             return
         }
         library.data(a) { d, uti in
@@ -189,9 +197,13 @@ private struct PhotoPage: View {
     @Binding var zoomed: Bool
     @State private var img: UIImage?
     @State private var player: AVPlayer?
+    /// On screen. A photo that arrives after its page has been swiped past is dropped: scrubbing
+    /// the thumbnails kept every full-size photo it passed, tens of megabytes each.
+    @State private var shown = false
     /// A photo saved a moment ago can still be being written: ask again shortly if it isn't there.
     private func load(tries: Int) {
         library.full(asset) { got in
+            guard shown else { return }
             if let got { img = got }
             else if tries > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { load(tries: tries - 1) } }
         }
@@ -207,13 +219,15 @@ private struct PhotoPage: View {
             } else if let img { ZoomableImage(image: img, zoomed: $zoomed) } else { ProgressView().tint(.white) }
         }
         .onAppear {
+            shown = true
             if asset.mediaType == .video {
-                if player == nil { library.playerItem(asset) { item in if let item { player = AVPlayer(playerItem: item) } } }
+                if player == nil { library.playerItem(asset) { item in if shown, let item { player = AVPlayer(playerItem: item) } } }
             } else if img == nil { load(tries: 4) }
         }
         // A full-size photo is tens of megabytes decoded: let it go once it's swiped away
         // (the pager keeps pages it has shown), and load it again if it comes back.
         .onDisappear {
+            shown = false
             img = nil
             player?.pause(); player = nil
         }

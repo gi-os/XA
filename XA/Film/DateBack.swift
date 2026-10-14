@@ -108,8 +108,16 @@ enum DateBack {
 
     private static let months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
 
+    /// The calendar a date back prints in: Gregorian whatever the phone uses (a Buddhist or
+    /// Japanese calendar printed '69 or the era's year), in the phone's own time zone.
+    static let calendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = .autoupdatingCurrent
+        return c
+    }()
+
     static func format(_ date: Date, style: DateStyle = .dots, format: DateFormat = .own, time: Bool = false,
-                       calendar: Calendar = .current) -> String {
+                       calendar: Calendar = DateBack.calendar) -> String {
         let c = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
         let y = c.year ?? 2000, m = c.month ?? 1, d = c.day ?? 1
         let yy = y % 100
@@ -541,6 +549,9 @@ enum DateBack {
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = 1
         fmt.opaque = false
+        // 8 bits a channel: left to choose, a wide-colour phone drew this frame-sized layer at 16
+        // (twice the memory, which the Lock Screen camera hasn't got), for inks that are sRGB.
+        fmt.preferredRange = .standard
         let img = UIGraphicsImageRenderer(size: size, format: fmt).image { r in
             let ctx = r.cgContext
             if config.style == .marker && instant == .none { drawTape(ctx, size: size, date: date, config: config, shape: shape, mono: mono) }
@@ -569,7 +580,8 @@ enum DateBack {
         guard let cg = overlay(size: size, date: date, config: cfg, shape: shape, mono: mono, instant: instant) else { return nil }
         var img = CIImage(cgImage: cg)
         if cfg.style == .camcorder { img = videoResolution(img) }
-        cacheLock.lock(); cacheKey = key; cached = img; cacheLock.unlock()
+        // kept only at the viewfinder's size: a drum scan's overlay is well over 100 MB
+        if size.width * size.height <= 4_000_000 { cacheLock.lock(); cacheKey = key; cached = img; cacheLock.unlock() }
         return img
     }
 

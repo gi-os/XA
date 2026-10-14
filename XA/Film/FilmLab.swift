@@ -259,7 +259,18 @@ enum FilmLab {
         // Stray light in the camera: a few percent of the frame's light veils it, most where it
         // is brightest (spektrafilm's film glare, 3%).
         let filmGlare = CGFloat(0.03 * (r?.glare ?? 0))
-        if filmGlare > 0 { img = addLight(img, scale(veil(img, full), filmGlare, filmGlare, filmGlare)) }
+        if filmGlare > 0 {
+            // the frame's light, from the meter's small copy when there is one (a drum scan can't
+            // be read whole), lit the same way: the camera, the lab's correction, the exposure
+            var light = img
+            if let m = shot?.meter, let shot {
+                let mum = (shot.recipe.format.longMM * 1000) / max(m.extent.width, m.extent.height, 1)
+                var l = FilmCamera.apply(m, shot, um: mum)
+                if let c = shot.lab { l = scale(l, c.x, c.y, c.z) }
+                light = scale(l, gain, gain, gain)
+            }
+            img = addLight(img, scale(veil(light, full), filmGlare, filmGlare, filmGlare))
+        }
         trace?("exposed", img)
         // Light spreading in the emulsion, then the red halo from the film base.
         if !flat {
@@ -341,14 +352,21 @@ enum FilmLab {
                                                              "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1)])
         trace?("grained", img)
         img = cube(img, t.print, t.size, full)
+        // A small flat develop of the same frame, for what reads the whole print: the scanner's
+        // levels and the print's glare (the full-size graph read back to the CPU cost a whole extra
+        // render per photo, and every frame of the finder's peek; at a drum scan's size it can't be
+        // read at all). Made from the meter's copy when there is one.
+        let printGlare = CGFloat(0.012 * (r?.glare ?? 0))
+        var proxy: CIImage?
+        if !flat, !preview, let shot, shot.recipe.labAuto > 0 || (printGlare > 0 && shot.meter != nil) {
+            var m = shot; m.recipe.labAuto = 0
+            let base = shot.meter ?? input
+            let k = 256 / max(base.extent.width, base.extent.height, 1)
+            proxy = develop(base.transformed(by: CGAffineTransform(scaleX: k, y: k)), stock: stock, push: push,
+                            preview: false, seed: seed, shot: m, flat: true)
+        }
         // The scanner: levels and colour set from the frame, as a minilab operator's scanner does.
-        if !flat, !preview, let r = shot?.recipe, r.labAuto > 0 {
-            // Metered on a small flat develop of the same frame (the full-size graph read back to
-            // the CPU cost a whole extra render per photo, and every frame of the finder's peek).
-            var m = shot!; m.recipe.labAuto = 0
-            let k = 256 / max(e.width, e.height, 1)
-            let proxy = develop(input.transformed(by: CGAffineTransform(scaleX: k, y: k)), stock: stock, push: push,
-                                preview: false, seed: seed, shot: m, flat: true)
+        if !flat, !preview, let r = shot?.recipe, r.labAuto > 0, let proxy {
             img = LabAuto.applyScan(img, LabAuto.scan(proxy, strength: r.labAuto, mono: stock.mono, preview: shot?.finder == true), linear: false)
         }
         if stock.mono {
@@ -359,10 +377,11 @@ enum FilmLab {
         }
         trace?("print", img)
         img = img.applyingFilter("CISRGBToneCurveToLinear")
-        // Flare on the print: a little of its light lifts its deepest blacks.
-        let printGlare = CGFloat(0.012 * (r?.glare ?? 0))
+        // Flare on the print: a little of its light lifts its deepest blacks (read from the small
+        // develop when the frame is too big to read whole).
         if printGlare > 0 {
-            img = addLight(scale(img, 1 - printGlare, 1 - printGlare, 1 - printGlare), scale(veil(img, full), printGlare, printGlare, printGlare))
+            let light = shot?.meter != nil ? (proxy ?? img) : img
+            img = addLight(scale(img, 1 - printGlare, 1 - printGlare, 1 - printGlare), scale(veil(light, full), printGlare, printGlare, printGlare))
         }
         // The lab scanner's sharpening.
         if !flat && (!preview || um < 40) {
@@ -374,11 +393,16 @@ enum FilmLab {
     }
 
     /// The light of the whole frame, spread wide: what a veiling glare adds.
+    /// `i` may be a small copy of the frame: the veil is spread over `full` either way.
     static func veil(_ i: CIImage, _ full: CGRect) -> CIImage {
-        let k: CGFloat = 64 / max(full.width, full.height, 1)
-        let small = i.transformed(by: CGAffineTransform(scaleX: k, y: k))
+        let ie = i.extent
+        let k: CGFloat = 64 / max(ie.width, ie.height, 1)
+        let small = i.transformed(by: CGAffineTransform(translationX: -ie.minX, y: -ie.minY)).transformed(by: CGAffineTransform(scaleX: k, y: k))
         let b = small.clampedToExtent().applyingGaussianBlur(sigma: 9).cropped(to: small.extent)
-        return b.clampedToExtent().samplingLinear().transformed(by: CGAffineTransform(scaleX: 1 / k, y: 1 / k)).cropped(to: full)
+        let sx = full.width / max(small.extent.width, 1), sy = full.height / max(small.extent.height, 1)
+        return b.clampedToExtent().samplingLinear()
+            .transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+            .transformed(by: CGAffineTransform(translationX: full.minX, y: full.minY)).cropped(to: full)
     }
 
     /// Print filter density per printing light. Warmer: less density on the blue printing light
