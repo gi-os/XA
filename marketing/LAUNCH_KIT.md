@@ -4,11 +4,12 @@ Drafted for the App Store launch. Honest, no invented numbers or quotes: check e
 
 ## Timeline
 
-- **Wed Oct 14 – Mon Oct 19: fixes in the build**: Remove 'Olympus' from the in-app string at XA/UI/CustomizeView.swift:131 and describe the finder generically. Add an About group to Customize with the privacy policy, support email, source code and licenses (guidelines 5.1.1(i) and 1.5). Check the drum scan on a real 48 MP iPhone and a 12 MP iPhone, then keep or soften the resolution copy. Confirm that no spektrafilm source code was ported into Swift (only the baked tables ship); the Show HN post says so. Decide the store version number (project.yml says 0.15.3). Tag the exact source of the submitted build in git.
-- **Wed Oct 14 – Mon Oct 19: web and text**: Add docs/terms.html (needed for the r/iOSapps Tier 2 post). Add a tips paragraph and a retention line to docs/privacy.html. Change 'pull down for the roll' to 'swipe up under the viewfinder, or tap the roll button' in review_notes.txt, docs/index.html and README.md. Change 'iPhone 16 and later' to 'an iPhone with Camera Control' everywhere. Rewrite the README (five cameras, 1 to 12 MP, screenshots, App Store badge) and point marketing_url.txt to https://gi-os.github.io/XA/. Build the landing page from this kit.
-- **Wed Oct 14 – Wed Oct 21: App Store Connect**: Create the three tip consumables (com.gios.xa.tip.small, .medium, .large) with display names of 30 characters or fewer, descriptions of 45 or fewer and a review screenshot of the tip screen; without them the tip jar stays hidden and the tip lines are untrue. Set App Privacy to Data Not Collected. Answer the age rating questions (expected 4+, Unrestricted Web Access: No). Declare EU DSA trader status. Complete the Paid Apps Agreement, banking and tax. Turn off Mac and Apple Vision Pro availability and China mainland. Answer content rights 'yes, I have the rights'.
+- **Wed Oct 14 – Mon Oct 19: fixes in the build**: Done in the 1.0 build: 'Olympus' removed from the in-app string, an About group in Customize (privacy policy, support, contact, source code, licenses), version 1.0, the photo-rotation fix, the tip jar compiled off. Still to do: check the drum scan on a real 48 MP iPhone and a 12 MP iPhone, then keep or soften the resolution copy. Confirm that no spektrafilm source code was ported into Swift (only the baked tables ship); the Show HN post says so. Tag the exact source of the submitted build in git.
+- **Wed Oct 14 – Mon Oct 19: web and text**: Add docs/terms.html (needed for the r/iOSapps Tier 2 post). Add a retention line to docs/privacy.html. Change 'pull down for the roll' to 'swipe up under the viewfinder, or tap the roll button' in review_notes.txt, docs/index.html and README.md. Change 'iPhone 16 and later' to 'an iPhone with Camera Control' everywhere. Rewrite the README (five cameras, 1 to 12 MP, screenshots, App Store badge) and point marketing_url.txt to https://gi-os.github.io/XA/. Build the landing page from this kit.
+- **Wed Oct 14 – Wed Oct 21: App Store Connect**: Set App Privacy to Data Not Collected. Answer the age rating questions (expected 4+, Unrestricted Web Access: No). Turn off Mac and Apple Vision Pro availability and China mainland. Answer content rights 'yes, I have the rights'.
 - **Thu Oct 15 – Wed Oct 21: store assets**: Capture the 10 screenshots on a real iPhone (digi, film, video, booth, sims, pro, dates, shapes, lock, roll) at 1320×2868 and 1206×2622, with the final captions. Get releases for every face. Record one or two 15 to 30 second app previews (886×1920, screen captures only). Add the en-GB and other planned localizations from the keyword research.
-- **Thu Oct 22 (target)**: Submit the app version and all three tips in the same submission, with manual release. Review notes must say where the tips are and that they unlock nothing.
+- **Thu Oct 22 (target)**: Submit 1.0 alone, with manual release. There are no tips in 1.0; they go with 1.0.1.
+- **Before release**: Declare EU Digital Services Act (DSA) trader status in App Store Connect (Business > Compliance).
 - **By Tue Oct 27**: Submit the App Launch featuring nomination for Nov 17 (Apple asks for at least three weeks). Use the text in this kit; add accessibility facts after a VoiceOver pass.
 - **Oct 15 – Nov 16: groundwork**: Build genuine comment history on r/apple (5+ non-app posts or comments in the month before Nov 22) and r/iOSProgramming (about 20 karma). Message the r/iphone mods for developer flair. Start the X, Threads, Instagram and Bluesky accounts. Build the press kit page (fact sheet, screenshots, icon, 30 s video, full-size samples from each mode). Prepare honest answers for Hacker News: GPL on the App Store, 'is this just LUTs', file sizes, and why it's called XA.
 - **Sat Oct 31**: Halloween teaser on social: a VHS and CCTV tape clip with 'Out Nov 17'. No App Store link yet.
@@ -25,6 +26,15 @@ Drafted for the App Store launch. Honest, no invented numbers or quotes: check e
 - **Tue Nov 24 – Fri Nov 27: US Thanksgiving week**: No pitches or launches. Review may be slower, so submit an urgent bug fix early in the week or wait. By Fri Nov 27, submit a second featuring nomination (App Enhancement or holiday content) aimed at mid-December.
 - **Mon Nov 30**: r/apps post from your established account, with disclosure. Post the r/iphone AMA on the date the mods agreed.
 - **Tue Dec 1: two weeks after release**: Review the results: campaign-link counts per channel, product page conversion per custom page, ratings (20 opens r/iOSapps Tier 1), GitHub stars (100 opens Tier 1), Hacker News outcome and crash reports in App Store Connect. Create $0 Apple Ads draft campaigns to read search popularity for the main keywords. Plan version 1.1 and its What's New text. Plan the holiday social wave (Dec 18 – Jan 2) and the Japan and Korea wave (Jan to Mar 2027).
+
+## 1.0.1
+
+1.0 ships without the optional tips. They go out with 1.0.1, once the Paid Apps Agreement, W-9 and banking are active. Until then, no 1.0 copy mentions tips.
+
+- **Paid Apps Agreement, banking and tax**: In App Store Connect, complete the Paid Apps Agreement, banking and tax (the W-9). The tips can't go on sale until all three are active.
+- **Create the tips**: Create the three tip consumables (com.gios.xa.tip.small, .medium, .large) with display names of 30 characters or fewer, descriptions of 45 or fewer and a review screenshot of the tip screen. Without them the tip jar stays hidden.
+- **Web and text**: Add a tips paragraph to docs/privacy.html, and add the tips to the store copy, the README and the support page for this version.
+- **Submission**: Submit 1.0.1 with the three tips in the same submission, with manual release. Review notes must say where the tips are and that they unlock nothing.
 
 ## App Store featuring nomination
 
@@ -53,11 +63,11 @@ XA is a camera app for iPhone with five cameras in one app. Every mode except PR
 - BOOTH is a Japanese-style photo-sticker booth: four shots with the front camera, big eyes and a sticker sheet.
 - PRO is the iPhone at full quality: the biggest photo the sensor makes, as HEIF or JPEG, with a live histogram, manual white balance, exposure, shutter, ISO and focus, and shutter and ISO priority.
 
-Every feature is in the free download. There is no subscription, no advertising, no account and no watermark. Optional tips unlock nothing. XA collects no data; its privacy label is Data Not Collected. Pictures are saved to Photos in an XA album. XA is open source under the GNU GPL version 3.
+Every feature is in the free download. There is no subscription, no advertising, no account and no watermark. XA collects no data; its privacy label is Data Not Collected. Pictures are saved to Photos in an XA album. XA is open source under the GNU GPL version 3.
 
 HELPFUL DETAILS:
 - What makes it different: five distinct cameras in one app, with nothing locked. The film is modeled from published datasheets: color stocks are developed through tables made with spektrafilm (an open-source spectral film simulation), and grain and halation are sized in microns on the negative, so they change with the format.
-- Apple technologies: a Lock Screen camera built on LockedCameraCapture, which opens with the app's own settings passed in the capture intent; a Control Center and Lock Screen control (WidgetKit and App Intents) that also makes XA a Launch Camera choice for Camera Control and can go on the Action button; Camera Control through AVCaptureControl, with pickers for sims and looks in DIGI, stocks in FILM and tapes in VIDEO, and sliders for exposure and zoom in PRO; the volume buttons as a shutter through AVCaptureEventInteraction; a Metal viewfinder that renders Core Image frames on the camera's queue; StoreKit 2 for the tips.
+- Apple technologies: a Lock Screen camera built on LockedCameraCapture, which opens with the app's own settings passed in the capture intent; a Control Center and Lock Screen control (WidgetKit and App Intents) that also makes XA a Launch Camera choice for Camera Control and can go on the Action button; Camera Control through AVCaptureControl, with pickers for sims and looks in DIGI, stocks in FILM and tapes in VIDEO, and sliders for exposure and zoom in PRO; the volume buttons as a shutter through AVCaptureEventInteraction; a Metal viewfinder that renders Core Image frames on the camera's queue.
 - Privacy: no account, no server, no analytics, no tracking.
 - Accessibility: [Fill in after a VoiceOver pass. Today, VoiceOver labels exist on the main camera controls, the roll and the PRO dials. Don't claim more than that.]
 - Localization: [List the store localizations. The interface is English.]
@@ -94,7 +104,7 @@ XA is five cameras in one iPhone app:
 • PRO: the biggest photo the sensor makes, a live histogram and manual dials.
 
 A few things that matter to me:
-• Everything is in the free download. There's no subscription, no ads, no account and no watermark. The optional tips unlock nothing.
+• Everything is in the free download. There's no subscription, no ads, no account and no watermark.
 • Nothing is collected. XA has no server and no analytics.
 • It's open source under GPLv3: github.com/gi-os/XA
 • It works with the iPhone's buttons: a Lock Screen camera, Control Center, Camera Control (slides through looks, stocks and tapes) and the volume buttons.
@@ -107,7 +117,7 @@ I'd like to hear which mode you use most, and what breaks. Bug reports go to git
 
 **Title:** Show HN: XA – open-source iPhone camera with a 2003 digicam and modelled film
 
-Hi HN. XA is an iPhone camera app I've been building. The source is on GitHub under GPLv3, and the App Store build is free with nothing gated: no subscription, no ads, no account, no analytics. There's an optional tip jar that unlocks nothing.
+Hi HN. XA is an iPhone camera app I've been building. The source is on GitHub under GPLv3, and the App Store build is free with nothing gated: no subscription, no ads, no account, no analytics.
 
 It has five modes:
 
@@ -173,7 +183,7 @@ Where they're ahead: Dazz Cam has many more camera presets and a long update his
 
 **C) Price and link**
 
-Free. Optional tips in Customize unlock nothing. iPhone with iOS 18 or later.
+Free, open source, no ads and no data collected. iPhone with iOS 18 or later.
 
 - App Store: [App Store link]
 - Source: https://github.com/gi-os/XA
@@ -237,7 +247,7 @@ _Rules:_ App Saturday only. One app, once per year. Include the tech stack and d
 
 XA is five cameras in one iPhone app: a 2003 digicam, film stocks, video tapes, a photo-sticker booth and a manual PRO camera. Free, nothing gated, GPLv3.
 
-**Tech stack:** Swift, SwiftUI, AVFoundation, Core Image with a Metal-backed viewfinder (MTKView), LockedCameraCapture for the Lock Screen camera, WidgetKit controls and App Intents for Control Center and the Camera Control launch, AVCaptureControl for the Camera Control pickers, AVCaptureEventInteraction for the volume buttons, StoreKit 2 for optional tips, XcodeGen and fastlane for builds.
+**Tech stack:** Swift, SwiftUI, AVFoundation, Core Image with a Metal-backed viewfinder (MTKView), LockedCameraCapture for the Lock Screen camera, WidgetKit controls and App Intents for Control Center and the Camera Control launch, AVCaptureControl for the Camera Control pickers, AVCaptureEventInteraction for the volume buttons, XcodeGen and fastlane for builds.
 
 **Two problems I had to solve:**
 
@@ -293,7 +303,7 @@ What it took:
 - A Lock Screen camera extension that gets the app's settings through a 4 KB hand-off.
 - A drum-scan mode that needed banded and tiled rendering so 40 MP frames don't come out black.
 
-How it's funded: it isn't, really. Every feature is free, with no ads, no account and nothing collected. There are optional tips that unlock nothing. The code is GPLv3.
+How it's funded: it isn't, really. XA is free and open source, with no subscription, no ads, no account and no data collected. The code is GPLv3.
 
 [One or two lines on why you built it, in your own words.]
 
@@ -508,7 +518,7 @@ I'm Giovanni Lupo, an independent developer. On Tuesday, November 17, I'm releas
 
 Why it may interest your readers:
 
-- Everything is in the free download. There's no subscription, no ads, no account and no watermark. Optional tips unlock nothing. Most apps in this category sell subscriptions or camera packs.
+- Everything is in the free download. There's no subscription, no ads, no account and no watermark. Most apps in this category sell subscriptions or camera packs.
 - It collects nothing. XA has no server and no analytics; the App Store privacy label is Data Not Collected.
 - The film is modeled from published datasheets, using spektrafilm, Andrea Volpato's open-source film simulation. Grain and halation are sized in microns on the negative, so they change with the format.
 - It works as the iPhone's camera: a Lock Screen camera, a Control Center control, and Camera Control, which slides through looks, stocks and tapes.
@@ -578,7 +588,7 @@ BUILT FOR THE IPHONE'S BUTTONS
 XA includes a Lock Screen camera and a Control Center control. On an iPhone with Camera Control, XA can be the button's camera, and the button slides through sims, looks, stocks and tapes. The volume buttons also take pictures, and XA opens QR codes from the viewfinder.
 
 FREE AND OPEN SOURCE
-Most retro camera apps on the App Store sell subscriptions or camera packs. XA includes every camera, stock, sim, look, shape, date back and tape in the free download. Optional tips in the app support development and unlock nothing. XA has no server and no analytics, and its App Store privacy label is Data Not Collected. Pictures are saved to the Photos library, in an XA album. The source code is public on GitHub under the GNU GPL version 3.
+Most retro camera apps on the App Store sell subscriptions or camera packs. XA includes every camera, stock, sim, look, shape, date back and tape in the free download. XA is free, open source and has no ads. XA has no server and no analytics, and its App Store privacy label is Data Not Collected. Pictures are saved to the Photos library, in an XA album. The source code is public on GitHub under the GNU GPL version 3.
 
 [Optional: one or two sentences from Giovanni Lupo, in his own words. Leave this paragraph out rather than use a line written for him.]
 

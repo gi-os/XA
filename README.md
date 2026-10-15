@@ -1,14 +1,12 @@
 # XA
 
-A camera for iPhone that's fun to use, and serious when you want it to be. iOS port of
-[Roll](https://github.com/gi-os/Roll) for the Light Phone III.
+A camera for iPhone that's fun to use, and serious when you want it to be.
 
-Free, with every feature: no subscription, no ads, no account, nothing collected. An optional
-tip jar (tips unlock nothing) keeps it going.
+Free, with every feature: no subscription, no ads, no account, nothing collected.
 
 ## Five cameras
 
-- **DIGI** is a 2003 point-and-shoot. 1, 2, 3 or 5 megapixels, cheap processing on purpose
+- **DIGI** is a 2003 point-and-shoot. 1, 2, 3, 5, 8 or 12 megapixels, cheap processing on purpose
   (clipped highlights, a sharpening halo, color noise, a JPEG squeezed hard), its whole live
   screen, and a stack of:
   - **a sim**: a film simulation, fully editable (color, tone curve, split tone, grain,
@@ -16,14 +14,16 @@ tip jar (tips unlock nothing) keeps it going.
   - **a look**: Clean, Grain, Sixteen, Pocket, Pocket Color, 1-Bit, Press, Heat, Booth;
   - **a shape**: Capsule, Porthole, Window, Crush, Nova and the instant prints. Outside the
     shape is empty pixels, saved as a PNG.
-- **FILM** loads a roll: eleven stocks modelled with [spektrafilm](https://github.com/andreavolpato/spektrafilm),
-  seen through an XA-style rangefinder finder. 110, half frame, 35mm or 120; flash, light leaks,
+- **FILM** loads a roll: eleven stocks (eight color, three black and white), the color ones baked
+  with [spektrafilm](https://github.com/andreavolpato/spektrafilm), seen through an XA-style
+  rangefinder finder. 110, half frame, 35mm or 120; flash, light leaks,
   a mist filter; the lab's auto-correction, color timing and preflash. The default **drum scan**
   scans the negative at about 5600 dpi (up to 48 MP, the whole sensor on a 48 MP iPhone), so the
   grain is resolved into dye clouds when you zoom in.
 - **PRO** is the iPhone at its best: the biggest photo the sensor makes, quality-first
-  processing, saved as the camera made it (HEIF or JPEG). Lens buttons, a live histogram, and
-  a WB · EV · S · ISO · FOCUS strip with a tick dial. Shutter and ISO priority work the way Roll's do.
+  processing, saved as the camera made it (HEIF or JPEG). A lens selector, a live histogram, and
+  a WB · EV · S · ISO · FOCUS strip with a tick dial. Auto, shutter priority, ISO priority or
+  fully manual.
 - **VIDEO** has twelve tapes: Clean, Pocket, Pocket Color, Pocket 3D, Super 8, VHS, Trails,
   Motion, Stop Motion, CCTV, Slit-scan and Datamosh.
 - **BOOTH** is a photo-sticker booth: four shots with a countdown, big eyes, backdrops and a
@@ -46,21 +46,25 @@ film picker turns the current sim + look + shape into a new sim.
 
 ## Date backs
 
-Quartz, Dots and Camcorder are Roll's DateStamp drawn the same way: seven mitred segments,
-5×7 round lamps that lean as a staircase, a keylined condensed face. Plus LCD, Stamp, Marker
-(on white tape), Edge and Digicam. In the corner or following the frame, around the Porthole and up the
-side of Crush. The instant sims write the date by hand on the print instead.
+Quartz is seven mitred segments, Dots is 5×7 round lamps that lean as a staircase, and
+Camcorder is a keylined condensed face. Plus LCD, Stamp, Marker (on white tape), Edge and
+Digicam. In the corner or following the frame, around the Porthole and up the side of Crush.
+The instant sims write the date by hand on the print instead.
 
 ## The camera button
 
-XA ships a Lock Screen camera and a Control Center control, so it can be the camera:
+XA ships a Lock Screen camera and a Control Center control. Add the XA control to Control Center
+or the Lock Screen (touch and hold the Lock Screen, Customize) to open it while locked. On an
+iPhone with Camera Control, XA can also be the button's camera:
 Settings › Camera › Camera Control › Launch Camera › XA. The Lock Screen camera takes its
-settings from the app through the capture intent.
+settings from the app through the capture intent, and offers DIGI, FILM and PRO (PRO saves up to
+12 MP).
 
 ## Controls
 
 - Swipe up from the shutter row (or tap the roll button) for the roll; drag it down to go back.
-- Camera Control: DIGI slides through sims and looks, PRO through exposure and zoom. Click to shoot.
+- Camera Control: DIGI slides through sims and looks, FILM through stocks, VIDEO through tapes,
+  PRO through exposure and zoom. Click to shoot.
 - Volume buttons shoot too.
 
 ## Build
@@ -81,11 +85,12 @@ Screenshots: `tools/screenshots/capture.py` runs a debug build in the simulator 
 (the simulator has no camera; the demo feed sends them through the real viewfinder and develop),
 and `frame.py` adds the headline and the phone. Swap in your own photos and run them again.
 
-Fonts are bundled open-licence faces from Google Fonts (SIL OFL 1.1, Apache 2.0 for Roboto
-Condensed and Yellowtail).
+Fonts are bundled open-license faces from Google Fonts (SIL OFL 1.1; Apache 2.0 for Roboto
+Condensed, Yellowtail and Permanent Marker).
 
 ## License
 
 XA is free software: the GNU General Public License version 3 (`LICENSE`), with an additional
-permission for the App Store and TestFlight (`EXCEPTION.md`). Credits, font licenses and the
-spektrafilm notice are in `NOTICE.md`.
+permission for the App Store and TestFlight (`EXCEPTION.md`). The film tables in
+`XA/Resources/Stocks` are CC BY-SA 4.0 (the color ones are generated from spektrafilm). Credits,
+font licenses and the spektrafilm notice are in `NOTICE.md`.

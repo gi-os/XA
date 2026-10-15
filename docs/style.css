@@ -1,9 +1,9 @@
 :root{--bg:#141210;--ink:#f4ead8;--muted:#b3a894;--accent:#f2a33a;--red:#e2513a}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;padding:48px 20px 80px}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;padding:48px 20px 80px}
 main{max-width:680px;margin:0 auto}
-h1,h2,.eyebrow{font-family:"Saira Extra Condensed","Arial Narrow",sans-serif;font-weight:600;text-transform:uppercase}
-h1{font-size:56px;line-height:1;margin:0 0 12px;color:var(--accent);letter-spacing:.02em}
+h1,h2,.eyebrow{font-family:"Avenir Next Condensed","Arial Narrow","Roboto Condensed","Helvetica Neue",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;font-weight:600;text-transform:uppercase}
+h1{font-size:clamp(40px,11vw,56px);line-height:1;overflow-wrap:break-word;margin:0 0 12px;color:var(--accent);letter-spacing:.02em}
 h2{font-size:24px;margin:36px 0 6px;color:var(--ink);letter-spacing:.04em}
 .eyebrow{font-size:14px;letter-spacing:.16em;color:var(--red);margin:0 0 4px}
 p,li{color:var(--muted)}strong{color:var(--ink)}a{color:var(--accent)}
