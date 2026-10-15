@@ -90,17 +90,25 @@ enum XAFinder {
                 .transformed(by: CGAffineTransform(translationX: -w.midX, y: -w.midY))
                 .transformed(by: CGAffineTransform(scaleX: su, y: su))
                 .transformed(by: CGAffineTransform(translationX: src.midX, y: src.midY))
+            // Drawn at half size and scaled back up: the ultra-wide's small frame is enlarged a
+            // long way here anyway, and blurred.
+            let h: CGFloat = 0.5
+            let he = CGRect(x: e.minX * h, y: e.minY * h, width: e.width * h, height: e.height * h)
             around = onScreen
                 .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
                 .transformed(by: CGAffineTransform(scaleX: k, y: k))
                 .transformed(by: CGAffineTransform(translationX: t.minX, y: t.minY))
+                .transformed(by: CGAffineTransform(scaleX: h, y: h))
                 .applyingFilter("CIColorMatrix", parameters: [
                     "inputRVector": CIVector(x: gain.x, y: 0, z: 0, w: 0),
                     "inputGVector": CIVector(x: 0, y: gain.y, z: 0, w: 0),
                     "inputBVector": CIVector(x: 0, y: 0, z: gain.z, w: 0)])
                 .clampedToExtent()
-                .applyingGaussianBlur(sigma: Double(short * 0.004))
+                .applyingGaussianBlur(sigma: Double(short * 0.004 * h))
                 .applyingFilter("CIExposureAdjust", parameters: ["inputEV": -0.1])
+                .cropped(to: he.insetBy(dx: -2, dy: -2))
+                .samplingLinear()
+                .transformed(by: CGAffineTransform(scaleX: 1 / h, y: 1 / h))
                 .cropped(to: e)
         } else {
             // Without the ultra-wide: the rest of the main camera's picture, lined up, as far as it
@@ -123,7 +131,14 @@ enum XAFinder {
                 .cropped(to: e)
             let edge = short * 0.04
             let keep = softRect(m.insetBy(dx: edge, dy: edge), in: e, sigma: edge * 0.6)
-            let soft = mapped.applyingGaussianBlur(sigma: Double(short * 0.006)).cropped(to: m)
+            // (at half size and scaled back up, as it is only ever seen blurred)
+            let soft = mapped
+                .transformed(by: CGAffineTransform(scaleX: 0.5, y: 0.5))
+                .applyingGaussianBlur(sigma: Double(short * 0.003))
+                .cropped(to: CGRect(x: m.minX / 2, y: m.minY / 2, width: m.width / 2, height: m.height / 2))
+                .samplingLinear()
+                .transformed(by: CGAffineTransform(scaleX: 2, y: 2))
+                .cropped(to: m)
             let blend = CIFilter.blendWithMask()
             blend.inputImage = soft
             blend.backgroundImage = fill

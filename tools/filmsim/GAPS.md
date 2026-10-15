@@ -4,6 +4,15 @@ A ranked list of where XA's FILM output differs from spektrafilm's full simulati
 view and zoomed into a drum scan, with what each would cost to port to Core Image on an iPhone.
 Written by an analysis pass over both pipelines (October 2026); the port itself is still to do.
 
+**Ported so far:** grain (gaps 2, 4 and 12, and the look of 9). FilmLab's grain is spektrafilm's
+sublayer model: each dye layer's fast, mid and slow sublayer has the granularity its layer curves
+give at the pixel's density (grain_bake.py → grain.json), independent per layer, hashed so it never
+repeats. Its strength at a phone screen's pixel (18 µm of film) is spektrafilm's to within a few
+percent at drum and lab pitch (FilmGrainTests). The dye clouds are drawn 5× spektrafilm's size
+(Fit.cloudScale), so a drum scan shows clouds when zoomed instead of single-pixel speckle; at a
+lab scan they are below a pixel, as spektrafilm's are. Stocks follow spektrafilm's data, with a
+gentle ladder by speed ((ISO/400)^¼) on top.
+
 I measured XA's real develop (exported from the iPhone Air simulator) against spektrafilm v0.3.4's full simulation at the same pixel size. Stocks were Bowery 400 vs Portra 400 on Endura, and Canal 500T vs Vision3 500T on 2383, at drum 4.5 µm/px and lab 11.66 µm/px.
 
 Main findings:

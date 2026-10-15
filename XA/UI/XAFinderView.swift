@@ -11,6 +11,11 @@ struct XAFinderView: View {
     let format: FilmFormat
     var leaving = false
     fileprivate static let cream = Color(red: 0.957, green: 0.925, blue: 0.835)
+    /// Black to clear along a smoothstep, so neither end of the fade shows as a line.
+    private static let topFade: [Gradient.Stop] = stride(from: 0.0, through: 1.0, by: 0.1).map { x in
+        let t = 1 - x
+        return .init(color: .black.opacity(t * t * (3 - 2 * t)), location: x)
+    }
     private var cream: Color { Self.cream }
     /// Arriving: the finder starts too big for the screen and steps back to fit.
     @State private var arrived = false
@@ -32,6 +37,16 @@ struct XAFinderView: View {
                         .blur(radius: min(g.size.width, g.size.height) * 0.05)
                     Rectangle().stroke(Color.black, lineWidth: 80).padding(-40)
                   }
+                }
+                // The top of the finder, under the Dynamic Island: the scene behind the speed scale
+                // runs up to it, and the eyepiece's falloff (swaying with the markings) was only
+                // half dark there, a straight line across the screen. This one stays put and is
+                // fully black at the edge, eased, so the finder melts into the black above it.
+                // Under the markings: the scale stays as bright as the rest of them.
+                VStack(spacing: 0) {
+                    LinearGradient(stops: Self.topFade, startPoint: .top, endPoint: .bottom)
+                        .frame(height: max(56, g.size.height * 0.11))
+                    Spacer(minLength: 0)
                 }
                 // the finder, in its own landscape space, turned with the body
                 SwayLayer(motion: camera.finderMotion, turned: true) {
