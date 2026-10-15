@@ -362,9 +362,31 @@ private struct PileView: View {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { drag = 0 }
             } : nil)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(pile.assets.count > 1 ? "Pile of \(pile.assets.count) shots" : "Photo")
+        .accessibilityLabel(spokenLabel)
         .accessibilityAddTraits(.isButton)
     }
+
+    /// What a print is, and when it was taken: "Photo, Oct 14, 2026 at 3:41 PM", "Video, ..., 12 seconds",
+    /// "Pile of 3 shots, ...". A print fanned out of a pile also says where it sits in it.
+    private var spokenLabel: String {
+        let top = pile.top
+        let isVideo = top.mediaType == .video
+        var parts: [String]
+        if pile.assets.count > 1 {
+            parts = ["Pile of \(pile.assets.count) shots"]
+        } else {
+            parts = [isVideo ? "Video" : "Photo"]
+            if pile.fanOf != nil { parts.append("\(pile.fanIndex + 1) of \(pile.fanCount) in pile") }
+        }
+        if let date = top.creationDate { parts.append(date.formatted(date: .long, time: .shortened)) }
+        if isVideo, let length = Self.spokenLength.string(from: top.duration) { parts.append(length) }
+        return parts.joined(separator: ", ")
+    }
+    private static let spokenLength: DateComponentsFormatter = {
+        let f = DateComponentsFormatter()
+        f.unitsStyle = .full; f.allowedUnits = [.hour, .minute, .second]; f.maximumUnitCount = 2
+        return f
+    }()
     private var scale: CGFloat { max(0.6, width / 165) }
     /// The same slight angle every time for the same picture.
     static func tilt(_ id: String) -> Double {

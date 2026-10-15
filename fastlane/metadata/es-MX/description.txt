@@ -1,5 +1,5 @@
 Toma fotos como en 2003: flashazo de fiesta, color CCD bien cargado y la fecha naranja en la esquina. Además: rollo que cargas y revelas, doce cintas de video y cabina de fotos con stickers.
-Incluye todo: cada cámara, rollo, sim de película, look, forma, fechador y cinta. Sin suscripción, sin anuncios, sin cuenta. Las propinas son opcionales y no desbloquean nada.
+Incluye todo: cada cámara, rollo, sim de película, look, forma, fechador y cinta. Sin suscripción, sin anuncios, sin cuenta.
 
 Cinco cámaras: DIGI, FILM, VIDEO, BOOTH y PRO.
 
@@ -13,19 +13,20 @@ DIGI
 • La pantalla es el display de una digicam, con todo y el ícono de batería.
 
 FILM
-• Once rollos basados en fichas técnicas publicadas: ocho a color, del 100 de grano fino al 1600 con un 500T de tungsteno, y tres en blanco y negro hasta 3200.
-• Grano y halación se miden en micras del negativo: en el diminuto 110 todo se ve áspero; en el 120, suave.
+• Once rollos basados en fichas técnicas: ocho a color, del 100 de grano fino al 1600 con un 500T de tungsteno, y tres en blanco y negro hasta 3200.
+• Grano y halación se miden en micras del negativo: en el 110 todo se ve áspero; en el 120, suave.
 • Encuadra en el marco luminoso de una telemétrica de bolsillo, con aguja de exposímetro y parche de enfoque.
-• Frente a la película: lente barato, flash que no llega al fondo, fugas de luz y filtro de niebla. El rollo los tiñe a todos.
+• Frente a la película: lente barato, flash que no llega al fondo, fugas de luz y filtro de niebla.
 • Desliza un rollo arriba para forzarlo un paso, o abajo para subrevelarlo.
 • En el laboratorio: autocorrección de minilab, calidez y tinte de la copia, y preflash.
-• Escaneo de tambor de unos 5600 dpi por defecto: con zoom ves grano, no píxeles. Se guarda en HEIC.
+• Escaneo de tambor (unos 5600 dpi) por defecto: con zoom ves grano, no píxeles. En HEIC.
+• En iPhone Pro con Apple ProRAW, FILM puede revelar desde RAW.
 
 VIDEO: DOCE CINTAS
 • VHS: color suave, líneas de barrido, franja de tracking y el PLAY en pantalla.
 • Película casera de 8mm que parpadea y baila.
 • CCTV: cámara de seguridad gris verdosa, con fecha y hora sobreimpresas.
-• Cintas de bolsillo en baja resolución: píxeles verdes, a color y una franja ancha de 480×240.
+• Cintas de bolsillo de baja resolución: píxeles verdes, a color y franja de 480×240.
 • Slit-scan, trails, motion, stop motion y datamosh para lo raro, y una cinta limpia.
 
 BOOTH
@@ -36,7 +37,7 @@ BOOTH
 
 PRO
 • La foto más grande que da el sensor, en HEIF o JPEG.
-• Botones de lente, histograma en vivo y diales de balance de blancos, exposición, obturación, ISO y enfoque.
+• Cambio de lente, histograma en vivo y diales de balance de blancos, exposición, obturación, ISO y enfoque.
 • Automático, prioridad de obturación o de ISO, o manual total.
 
 HAZLO TUYO
@@ -47,15 +48,15 @@ HAZLO TUYO
 • Combina un sim, un look, una forma y un fechador.
 
 SIEMPRE LISTA
-• Cámara en la pantalla bloqueada y control en el Centro de control.
+• Cámara en la pantalla bloqueada para DIGI, FILM y PRO, y control en el Centro de control.
 • En un iPhone con Control de la Cámara, asígnale XA en Configuración.
 • El Control de la Cámara recorre sims y looks en DIGI, rollos en FILM, cintas en VIDEO, y exposición y zoom en PRO. Presiona para disparar.
 • Los botones de volumen también disparan.
 • Apunta a un QR en DIGI, FILM o PRO y toca para abrir el enlace.
 
 TUS FOTOS
-• Cada foto y video va a Fotos, en un álbum XA. Sin marca de agua.
-• Desliza arriba bajo el visor, o toca el botón del rollo, para ver tu hoja de contactos.
+• Cada foto y video va a Fotos, en un álbum XA cuando XA tiene acceso completo a Fotos. Sin marca de agua.
+• Desliza arriba bajo el visor o toca el rollo para ver tu hoja de contactos.
 
 NO RECOPILA NADA
 • Sin rastreo: sin servidor, sin analíticas, sin datos recopilados.

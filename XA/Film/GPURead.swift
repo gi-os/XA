@@ -11,14 +11,16 @@ enum GPURead {
     static let queue = DispatchQueue(label: "xa.reads", qos: .userInitiated)
 
     /// `img`'s pixels in `bounds` as RGBA floats in the context's working space (no output colour
-    /// management, as `render(_:toBitmap:...colorSpace: nil)` gives), handed to `done` on `queue`.
-    /// False (and `done` never called) when the render couldn't be started.
+    /// management, as `render(_:toBitmap:...colorSpace: nil)` gives), handed to `done` on `queue`;
+    /// nil there if the GPU couldn't draw it. False (and `done` never called) when the render
+    /// couldn't be started.
     @discardableResult
-    static func floats(_ img: CIImage, bounds: CGRect, context: CIContext, done: @escaping ([Float]) -> Void) -> Bool {
+    static func floats(_ img: CIImage, bounds: CGRect, context: CIContext, done: @escaping ([Float]?) -> Void) -> Bool {
         let w = Int(bounds.width), h = Int(bounds.height)
         guard w > 0, h > 0 else { return false }
         let rowBytes = w * 16
         let buf = UnsafeMutableRawPointer.allocate(byteCount: rowBytes * h, alignment: 16)
+        buf.initializeMemory(as: UInt8.self, repeating: 0, count: rowBytes * h)
         let dest = CIRenderDestination(bitmapData: buf, width: w, height: h, bytesPerRow: rowBytes, format: .RGBAf)
         dest.colorSpace = nil
         guard let task = try? context.startTask(toRender: img, from: bounds, to: dest, at: .zero) else {
@@ -26,8 +28,8 @@ enum GPURead {
             return false
         }
         queue.async {
-            _ = try? task.waitUntilCompleted()
-            let px = Array(UnsafeBufferPointer(start: buf.assumingMemoryBound(to: Float.self), count: w * h * 4))
+            let drawn = (try? task.waitUntilCompleted()) != nil
+            let px = drawn ? Array(UnsafeBufferPointer(start: buf.assumingMemoryBound(to: Float.self), count: w * h * 4)) : nil
             buf.deallocate()
             done(px)
         }
@@ -35,15 +37,16 @@ enum GPURead {
     }
 
     /// `img` (its extent at the origin, the buffer's size) drawn into `pb`; `done` gets the copy on
-    /// `queue` once it is there. The camera's own buffer goes back to it as soon as the GPU has read it.
+    /// `queue` once it is there, or nil if the GPU couldn't draw it. The camera's own buffer goes
+    /// back to it as soon as the GPU has read it.
     @discardableResult
-    static func copy(_ img: CIImage, into pb: CVPixelBuffer, context: CIContext, done: @escaping (CIImage) -> Void) -> Bool {
+    static func copy(_ img: CIImage, into pb: CVPixelBuffer, context: CIContext, done: @escaping (CIImage?) -> Void) -> Bool {
         let dest = CIRenderDestination(pixelBuffer: pb)
         dest.colorSpace = sRGB
         guard let task = try? context.startTask(toRender: img, to: dest) else { return false }
         queue.async {
-            _ = try? task.waitUntilCompleted()
-            done(CIImage(cvPixelBuffer: pb, options: [.colorSpace: sRGB]))
+            let drawn = (try? task.waitUntilCompleted()) != nil
+            done(drawn ? CIImage(cvPixelBuffer: pb, options: [.colorSpace: sRGB]) : nil)
         }
         return true
     }

@@ -47,23 +47,31 @@ final class Library: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
 
     /// Saves whatever is waiting, oldest first, and removes each once Photos has it. Add-only
     /// access is enough; files go in by URL (never all loaded into memory at once).
-    func flushPending() {
+    /// `done` once every file it started on has been tried (on the main thread).
+    func flushPending(done: (() -> Void)? = nil) {
         let s = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         guard s == .authorized || s == .limited || PHPhotoLibrary.authorizationStatus(for: .addOnly) == .authorized,
               let dir = Self.pendingFolder,
-              let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return }
+              let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else {
+            if let done { DispatchQueue.main.async(execute: done) }
+            return
+        }
+        let group = DispatchGroup()
         for url in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where !flushing.contains(url) {
             let type = UTType(filenameExtension: url.pathExtension.lowercased()) ?? .jpeg
             flushing.insert(url)
+            group.enter()
             if type.conforms(to: .movie) {
-                save(video: url) { _ in self.flushing.remove(url) }   // moved into Photos on success
+                save(video: url) { _ in self.flushing.remove(url); group.leave() }   // moved into Photos on success
             } else {
                 save(file: url, type: type) { ok in
                     if ok { try? FileManager.default.removeItem(at: url) }
                     self.flushing.remove(url)
+                    group.leave()
                 }
             }
         }
+        if let done { group.notify(queue: .main, execute: done) }
     }
 
     func refresh() { apply(PHPhotoLibrary.authorizationStatus(for: .readWrite)) }

@@ -35,6 +35,8 @@ struct DateScreen: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel(s.name)
+                            .accessibilityAddTraits(on ? .isSelected : [])
                         }
                     }
                     .padding(4)
@@ -48,11 +50,18 @@ struct DateScreen: View {
                 SectionLabel(text: "FORMAT")
                 Segmented(items: [(DateFormat.own, "Style's own"), (.dmy, "28.09.26"), (.long, "SEP 28 2026")], selection: cfgB.format)
                 SectionLabel(text: "INK")
-                HStack(spacing: 12) {
-                    inkButton(nil)
-                    ForEach([RGBA8(255, 138, 43), RGBA8(200, 245, 106), RGBA8(216, 65, 47), RGBA8(255, 255, 255), RGBA8(255, 210, 63)], id: \.self) { inkButton($0) }
-                    Spacer()
-                    Toggle("Time", isOn: cfgB.time).tint(XA.orange).fixedSize()
+                // One row where it fits. On a 375-pt phone the swatches and the Time switch are too
+                // wide together, so the switch goes on a line of its own.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        swatches
+                        Spacer()
+                        Toggle("Time", isOn: cfgB.time).tint(XA.orange).fixedSize()
+                    }
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 12) { swatches }
+                        Toggle("Time", isOn: cfgB.time).tint(XA.orange)
+                    }
                 }
             }
             .padding(16)
@@ -65,7 +74,18 @@ struct DateScreen: View {
         .onChange(of: cfg) { _, _ in render(); camera.syncFrameSettings() }
     }
 
-    private func inkButton(_ c: RGBA8?) -> some View {
+    private static let inks: [(name: String, color: RGBA8)] = [
+        ("Orange ink", RGBA8(255, 138, 43)), ("Lime ink", RGBA8(200, 245, 106)), ("Red ink", RGBA8(216, 65, 47)),
+        ("White ink", RGBA8(255, 255, 255)), ("Yellow ink", RGBA8(255, 210, 63))
+    ]
+
+    /// The style's own ink, then the five colors.
+    @ViewBuilder private var swatches: some View {
+        inkButton(nil, name: "Style's own ink")
+        ForEach(Self.inks.indices, id: \.self) { i in inkButton(Self.inks[i].color, name: Self.inks[i].name) }
+    }
+
+    private func inkButton(_ c: RGBA8?, name: String) -> some View {
         let on = cfg.color == c
         return Button { cfg.color = c } label: {
             ZStack {
@@ -75,7 +95,8 @@ struct DateScreen: View {
             .overlay(Circle().strokeBorder(on ? Color.white : .clear, lineWidth: 2).padding(-4))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(c == nil ? "Style's own ink" : "Ink")
+        .accessibilityLabel(name)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private func render() {

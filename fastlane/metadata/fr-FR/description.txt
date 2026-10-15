@@ -1,5 +1,5 @@
 Photographiez comme en 2003 : flash de soirée qui crame tout, couleurs CCD franches, date orange dans le coin. Et de la pellicule à charger et à développer, douze cassettes vidéo, une cabine photo à stickers.
-Cinq appareils, tout inclus : DIGI, FILM, VIDEO, BOOTH et PRO. Sans abonnement, sans pub, sans compte. Les pourboires, facultatifs, ne débloquent rien.
+Cinq appareils, tout inclus : DIGI, FILM, VIDEO, BOOTH et PRO. Sans abonnement, sans pub, sans compte.
 
 DIGI
 • 1, 2, 3, 5, 8 ou 12 mégapixels.
@@ -18,7 +18,7 @@ FILM
 • Glissez une pellicule vers le haut pour la pousser d'un diaph, vers le bas pour la retenir.
 • Au labo : correction auto du minilab, chaleur et teinte du tirage, préflashage.
 • Scan au tambour par défaut, environ 5600 dpi : au zoom, on voit le grain, pas les pixels. En HEIC.
-• Sur iPhone compatible RAW, FILM peut développer le RAW, sans le traitement de l'iPhone.
+• Sur les iPhone Pro avec Apple ProRAW, FILM peut développer le RAW, sans le traitement de l'iPhone.
 
 VIDEO : DOUZE CASSETTES
 • VHS : couleurs douces, lignes de balayage, bande de tracking, affichage PLAY.
@@ -35,7 +35,7 @@ BOOTH
 
 PRO
 • La résolution maximale du capteur, en HEIF ou JPEG.
-• Choix de l'objectif, histogramme en direct, molettes : balance des blancs, exposition, vitesse, ISO, mise au point.
+• Changement d'objectif, histogramme en direct, molettes : balance des blancs, exposition, vitesse, ISO, mise au point.
 • Auto, priorité vitesse, priorité ISO ou tout manuel.
 
 À VOTRE IMAGE
@@ -46,19 +46,18 @@ PRO
 • Combinez simulation, look, forme et dos dateur.
 
 TOUJOURS PRÊT
-• Un appareil sur l'écran verrouillé, une commande au Centre de contrôle.
-• Commande de l'appareil photo : choisissez XA dans Réglages.
+• Un appareil sur l'écran verrouillé pour DIGI, FILM et PRO, une commande au Centre de contrôle.
+• Sur un iPhone avec Commande de l'appareil photo : choisissez XA dans Réglages.
 • Elle fait défiler simulations et looks (DIGI), pellicules (FILM), cassettes (VIDEO), exposition et zoom (PRO). Un clic, ou un bouton de volume, déclenche.
 • Codes QR : visez en DIGI, FILM ou PRO, touchez pour ouvrir le lien.
 
 VOS PHOTOS
-• Tout va dans un album XA de Photos, sauvegardé si vous utilisez Photos iCloud.
+• Tout va dans Photos, dans un album XA quand XA a l'accès complet à Photos, et se sauvegarde si vous utilisez Photos iCloud.
 • Planche-contact : balayez vers le haut sous le viseur, ou touchez le bouton pellicule.
 • Aucun filigrane.
 
 RIEN N'EST COLLECTÉ
 • Aucun pistage : ni serveur, ni statistiques, ni données collectées.
-• Les pourboires, à la fin de Customize, soutiennent XA.
 • XA est open source (GPLv3) : le code est lisible et vérifiable par tous.
 • Rendu argentique : spektrafilm, la simulation libre d'Andrea Volpato.
 

@@ -1,1 +1,1 @@
-rétro,effet,filtre,caméra,cam,flash,digicam,ccd,photobooth,caméscope,noir,blanc,instantané,8mm,35mm
+rétro,effet,filtre,caméra,cam,flash,digicam,ccd,cabine,caméscope,noir,blanc,instantané,8mm,35mm

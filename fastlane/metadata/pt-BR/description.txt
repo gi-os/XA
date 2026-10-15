@@ -1,5 +1,5 @@
 Fotografe como em 2003: flash de festa estourado, cor de CCD saturada e a data laranja no canto. E mais: filme para carregar e revelar, doze fitas de vídeo e cabine de fotos com adesivos.
-Tudo vem incluso. Sem assinatura, sem anúncios, sem conta. As gorjetas são opcionais e não desbloqueiam nada.
+Tudo vem incluso. Sem assinatura, sem anúncios, sem conta.
 
 Cinco câmeras em um app: DIGI, FILM, VIDEO, BOOTH e PRO.
 
@@ -20,7 +20,7 @@ FILM
 • Deslize o filme: para cima, push de um ponto; para baixo, pull.
 • No laboratório: correção automática de minilab, temperatura e matiz da cópia, e pré-flash.
 • Scanner de tambor por padrão, a cerca de 5600 dpi: no zoom aparece grão, não pixel. Salvo em HEIC.
-• Em iPhones com RAW, o FILM pode revelar do RAW, sem o processamento do iPhone.
+• Em iPhones Pro com Apple ProRAW, o FILM pode revelar do RAW, sem o processamento do iPhone.
 
 VIDEO: DOZE FITAS
 • VHS: cor suave, linhas de varredura, faixa de tracking e o PLAY na tela.
@@ -37,7 +37,7 @@ BOOTH
 
 PRO
 • A maior foto que o sensor faz, salva em HEIF ou JPEG.
-• Botões de lente, histograma ao vivo e controles de balanço de branco, exposição, obturador, ISO e foco.
+• Troca de lentes, histograma ao vivo e controles de balanço de branco, exposição, obturador, ISO e foco.
 • Automático, prioridade de obturador ou de ISO, ou todo manual.
 
 DO SEU JEITO
@@ -48,21 +48,20 @@ DO SEU JEITO
 • Combine uma sim, um look, uma forma e uma data.
 
 SEMPRE PRONTA
-• Uma câmera na Tela Bloqueada e um controle na Central de Controle.
-• Com o Controle da Câmera, faça do XA a câmera do botão em Ajustes.
+• Uma câmera na Tela Bloqueada para DIGI, FILM e PRO, e um controle na Central de Controle.
+• Em iPhones com Controle da Câmera, faça do XA a câmera do botão em Ajustes.
 • O botão passa por sims e looks no DIGI, filmes no FILM, fitas no VIDEO, e exposição e zoom no PRO. Clique para fotografar.
 • Os botões de volume também disparam.
 • Aponte para um QR code no DIGI, FILM ou PRO e toque para abrir.
 
 SUAS FOTOS
-• Toda foto e todo vídeo vão para o app Fotos, num álbum XA.
+• Toda foto e todo vídeo vão para o app Fotos, num álbum XA quando o XA tem acesso total às Fotos.
 • Com as Fotos do iCloud, entram no backup com a sua biblioteca.
 • Deslize para cima sob o visor, ou toque no rolo, para ver a folha de contato.
 • Sem marca d'água.
 
 NADA É COLETADO
 • Sem rastreamento: sem servidor, sem analytics, nenhum dado coletado.
-• Gorjetas opcionais, no fim de Customize, ajudam a manter o XA.
 • O XA é código aberto (GPLv3): qualquer um pode ler o código e conferir.
 • Filme modelado com o spektrafilm, simulação aberta de Andrea Volpato.
 

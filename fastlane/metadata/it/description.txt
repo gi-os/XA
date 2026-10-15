@@ -1,5 +1,5 @@
 Scatta come nel 2003: flash sparato, colori CCD carichi e la data arancione nell'angolo. In più, rullini da stampare, dodici cassette video e una cabina per foto-sticker.
-Tutto incluso: pellicole, simulazioni, look, forme, dorsi datari e cassette. Niente abbonamento, pubblicità o account. Le mance, facoltative, non sbloccano nulla.
+Tutto incluso: pellicole, simulazioni, look, forme, dorsi datari e cassette. Niente abbonamento, pubblicità o account.
 
 Cinque fotocamere: DIGI, FILM, VIDEO, BOOTH e PRO.
 
@@ -20,7 +20,7 @@ FILM
 • Scorri in su una pellicola per tirarla di uno stop, in giù per il pull.
 • In laboratorio: correzione automatica del minilab, temperatura e tinta della stampa, preflash.
 • Di serie, scansione a tamburo a circa 5600 dpi: zoomando vedi la grana, non i pixel. In HEIC.
-• Sugli iPhone con RAW, FILM può sviluppare dal RAW, senza l'elaborazione dell'iPhone.
+• Sugli iPhone Pro con Apple ProRAW, FILM può sviluppare dal RAW, senza l'elaborazione dell'iPhone.
 
 VIDEO: DODICI CASSETTE
 • VHS: colori morbidi, linee di scansione, banda del tracking e scritta PLAY.
@@ -37,7 +37,7 @@ BOOTH
 
 PRO
 • La massima risoluzione del sensore, in HEIF o JPEG.
-• Tasti degli obiettivi, istogramma live, ghiere per bilanciamento del bianco, esposizione, tempi, ISO e messa a fuoco.
+• Cambio obiettivo, istogramma live, ghiere per bilanciamento del bianco, esposizione, tempi, ISO e messa a fuoco.
 • Auto, priorità dei tempi, priorità ISO o manuale completo.
 
 RENDILA TUA
@@ -48,20 +48,19 @@ RENDILA TUA
 • Combina simulazione, look, forma e dorso datario.
 
 SEMPRE PRONTA
-• Fotocamera nella schermata di blocco e controllo nel Centro di Controllo.
+• Fotocamera nella schermata di blocco per DIGI, FILM e PRO e un controllo nel Centro di Controllo.
 • Con Controllo fotocamera, scegli XA per il tasto in Impostazioni.
 • Il tasto scorre simulazioni e look in DIGI, pellicole in FILM, cassette in VIDEO, esposizione e zoom in PRO. Premi per scattare.
 • Scattano anche i tasti del volume.
 • In DIGI, FILM e PRO apre i link dei codici QR.
 
 LE TUE FOTO
-• Foto e video vanno in Foto, nell'album XA.
+• Foto e video vanno in Foto, nell'album XA quando XA ha accesso completo a Foto.
 • Scorri in su sotto il mirino o tocca la miniatura per il provino a contatto.
 • Nessuna filigrana.
 
 NESSUN DATO RACCOLTO
 • Niente tracciamento, server o statistiche d'uso.
-• Le mance, in fondo a CUSTOMIZE, sostengono XA.
 • XA è open source (GPLv3): chiunque può leggere il codice e vedere cosa fa.
 • Simulazione pellicola: spektrafilm, progetto open source di Andrea Volpato.
 
