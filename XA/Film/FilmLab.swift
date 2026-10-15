@@ -87,7 +87,15 @@ enum FilmLab {
         static let couplerK: Float = 0.56, couplerUM: CGFloat = 7.64
         static let couplerTailK: Float = 0.089, couplerTailUM: CGFloat = 193.6
         static let dyeBlurUM: CGFloat = 14.4
-        static let grainClumpUM: CGFloat = 7, grainChroma: Float = 0.06, grainTop: Float = 0.7
+        /// The dye clouds are drawn this many times spektrafilm's size (0.5 to 1.9 µm, smaller than
+        /// a drum scan's pixel) so a drum scan shows them when you zoom in; the strength a phone
+        /// screen's pixel sees (`grainViewUM` of film) stays spektrafilm's.
+        static let cloudScale: CGFloat = 5, grainViewUM: CGFloat = 18
+        /// spektrafilm's blur of the grain (GrainParams.blur), in pixels.
+        static let grainBlurPX: CGFloat = 0.65
+        /// The clouds sit one to a cell of a grid, which adds a little power at their own size: measured
+        /// against spektrafilm's model at drum and lab pitch (FilmGrainTests).
+        static let grainGain: CGFloat = 0.77
         static let sharpen: Float = 0.774, sharpenUM: CGFloat = 20.95
         /// Used only when a stock has no calibrated exposure of its own (stocks.json "ev").
         static let exposureEV: Double = -1.5
@@ -138,6 +146,59 @@ enum FilmLab {
                        greyCode: (m["grey_code"] as? Double) ?? 0.48)
         cache[id] = t
         return t
+    }
+
+    /// spektrafilm's granularity for a stock (tools/filmsim/grain_bake.py): for each sublayer
+    /// (fast, mid, slow), the standard deviation of density times microns at each density from 0
+    /// to `top`, one row per sublayer with R, G and B in the pixel's channels, and the size of the
+    /// sublayer's dye clouds in microns. XA's own films (Natura 1600, the black-and-white ones)
+    /// have no layer data: they take Bowery 400's, scaled by their own grain.
+    struct Grain {
+        let rows: [CIImage]
+        let top: CGFloat
+        let cloudUM: [[CGFloat]]
+        let n: Int
+        var scale: CGFloat = 1
+    }
+    private static var grainCache: [String: Grain] = [:]
+    private static let grainMeta: [String: [String: Any]] = {
+        guard let url = bundle.url(forResource: "grain", withExtension: "json"),
+              let d = try? Data(contentsOf: url),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: [String: Any]] else { return [:] }
+        return j
+    }()
+
+    static func grain(_ stock: FilmStock) -> Grain? {
+        lock.lock(); defer { lock.unlock() }
+        if let g = grainCache[stock.id] { return g }
+        var made: Grain?
+        if let g = readGrain(stock.id) {
+            // spektrafilm's grain is the same for every stock but for its curves: a gentle ladder
+            // by speed keeps Ektar finer than Portra 800, as they are
+            made = g
+            made?.scale = pow(CGFloat(max(stock.rated, 12)) / 400, 0.25)
+        } else if var g = readGrain("bowery400") {
+            g.scale = (stock.grain / 0.010).squareRoot()
+            made = g
+        }
+        if let made { grainCache[stock.id] = made }
+        return made
+    }
+
+    private static func readGrain(_ id: String) -> Grain? {
+        guard let m = grainMeta[id], let top = m["dmax"] as? Double, let clouds = m["cloud_um"] as? [[Double]],
+              let sd = m["sd"] as? [[[Double]]], sd.count == 3, clouds.count == 3,
+              sd.allSatisfy({ $0.count == 3 }), clouds.allSatisfy({ $0.count == 3 }) else { return nil }
+        let n = sd[0][0].count
+        guard n > 1, sd.allSatisfy({ $0.allSatisfy { $0.count == n } }) else { return nil }
+        // one image per sublayer, a single row, so no row order can get mixed up
+        let rows: [CIImage] = (0..<3).map { l in
+            var px = [Float](repeating: 1, count: n * 4)
+            for i in 0..<n { for c in 0..<3 { px[i * 4 + c] = Float(sd[l][c][i]) } }
+            let data = px.withUnsafeBufferPointer { Data(buffer: $0) }
+            return CIImage(bitmapData: data, bytesPerRow: n * 16, size: CGSize(width: n, height: 1), format: .RGBAf, colorSpace: nil)
+        }
+        return Grain(rows: rows, top: CGFloat(top), cloudUM: clouds.map { $0.map { CGFloat($0) } }, n: n)
     }
 
     /// RGB Float32 on disk → the RGBA Float32 a colour cube wants.
@@ -196,25 +257,75 @@ enum FilmLab {
     kernel vec4 xaAddLight(__sample a, __sample b) { return vec4(a.rgb + b.rgb, 1.0); }
     """)
 
-    /// Grain in three layers, as the film is built: red and green at the fitted clump size, the
-    /// blue layer twice as coarse (spektrafilm's particle_scale 1.6, 1.6, 3.2). Each layer has a
-    /// fast emulsion of bigger grains under its slow one, and the thin parts of the negative (the
-    /// shadows) are made mostly by the fast, coarse grains.
-    private static let grainKernel = CIColorKernel(source: """
-    kernel vec4 xaGrain(__sample c, __sample a, __sample b, __sample cc, float rms, float chroma, float top, vec3 norm, vec3 dmin, vec3 dmax) {
+    /// spektrafilm's grain on the negative's density: each dye layer's three sublayers are dye
+    /// clouds at random places, with zero mean and the low-frequency power of unit white noise. A sublayer's granularity at the pixel's own density (the `l` rows, see Grain)
+    /// sets how strong it is. Hashed from the pixel's place, so it never repeats and any tile of
+    /// a big scan draws the same grain as the whole would.
+    /// s0…s2: cloud sizes in pixels per channel; g0…g2: strength per channel.
+    private static let grainKernel = CIKernel(source: """
+    vec3 xaHash33(vec3 p3) {
+        p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));
+        p3 += dot(p3, p3.yxz + 33.33);
+        return fract((p3.xxy + p3.yxx) * p3.zyx);
+    }
+    float xaClouds(vec2 x, float sigma, float salt) {
+        // a cloud is (1 - r²/R²)² out to R (the spread of a Gaussian of `sigma`), so the four
+        // cells nearest the pixel, two clouds wide, hold every cloud that reaches it. Each cell
+        // has six places for a cloud, each taken half the time: about three clouds, overlapping,
+        // all of the same dye, as spektrafilm's particles are.
+        float R = 2.828427 * sigma;
+        float cell = 2.0 * R;
+        vec2 g = floor(x / cell - 0.5);
+        float sum = 0.0;
+        for (int j = 0; j <= 1; j++) {
+            for (int i = 0; i <= 1; i++) {
+                vec2 id = g + vec2(float(i), float(j));
+                for (int k = 0; k < 6; k++) {
+                    vec3 h = xaHash33(vec3(id, salt + float(k) * 1.618));
+                    vec2 d = x - (id + h.xy) * cell;
+                    float q = max(0.0, 1.0 - dot(d, d) / (R * R));
+                    sum += step(0.5, h.z) * q * q;
+                }
+            }
+        }
+        // three clouds a cell on average, the count's variance 1.5
+        float mass = 1.0471976 * R * R;
+        return (sum - 3.0 * mass / (cell * cell)) * cell / (1.2247449 * mass);
+    }
+    kernel vec4 xaDyeGrain(sampler neg, sampler l0, sampler l1, sampler l2, vec3 dmin, vec3 dmax, float top, float n,
+                           vec3 s0, vec3 s1, vec3 s2, vec3 g0, vec3 g1, vec3 g2, float salt, float mono) {
+        vec4 c = sample(neg, samplerCoord(neg));
         vec3 D = c.rgb * (dmax - dmin) + dmin;
-        float l = sqrt(1.0 - chroma);
-        float k = sqrt(chroma);
-        vec3 fine = vec3(l * (a.r - 0.5) + k * (a.g - 0.5) , l * (a.r - 0.5) + k * (a.b - 0.5), l * (b.r - 0.5) + k * (b.a - 0.5)) * vec3(norm.x, norm.x, norm.y);
-        vec3 coarse = vec3(l * (b.r - 0.5) + k * (b.g - 0.5), l * (b.r - 0.5) + k * (b.b - 0.5), l * (cc.r - 0.5) + k * (cc.a - 0.5)) * vec3(norm.y, norm.y, norm.z);
-        vec3 d = max(D - dmin, vec3(0.02));
-        vec3 n = mix(fine, coarse, 0.6 * exp(-d / 0.35));
-        vec3 q = d / top;
-        vec3 amp = rms * sqrt(d) / (vec3(1.0) + q * q);
-        D = D + n * amp;
+        vec2 x = destCoord();
+        vec3 t = 0.5 + clamp(D / top, 0.0, 1.0) * (n - 1.0);
+        vec3 a0 = vec3(sample(l0, samplerTransform(l0, vec2(t.r, 0.5))).r, sample(l0, samplerTransform(l0, vec2(t.g, 0.5))).g,
+                       sample(l0, samplerTransform(l0, vec2(t.b, 0.5))).b) * g0;
+        vec3 a1 = vec3(sample(l1, samplerTransform(l1, vec2(t.r, 0.5))).r, sample(l1, samplerTransform(l1, vec2(t.g, 0.5))).g,
+                       sample(l1, samplerTransform(l1, vec2(t.b, 0.5))).b) * g1;
+        vec3 a2 = vec3(sample(l2, samplerTransform(l2, vec2(t.r, 0.5))).r, sample(l2, samplerTransform(l2, vec2(t.g, 0.5))).g,
+                       sample(l2, samplerTransform(l2, vec2(t.b, 0.5))).b) * g2;
+        vec3 grain;
+        if (mono > 0.5) {
+            // one silver layer: the same grain in every channel
+            grain = vec3(a0.g * xaClouds(x, s0.g, salt) + a1.g * xaClouds(x, s1.g, salt + 33.9) + a2.g * xaClouds(x, s2.g, salt + 67.8));
+        } else {
+            grain = a0 * vec3(xaClouds(x, s0.r, salt), xaClouds(x, s0.g, salt + 11.3), xaClouds(x, s0.b, salt + 22.6))
+                  + a1 * vec3(xaClouds(x, s1.r, salt + 33.9), xaClouds(x, s1.g, salt + 45.2), xaClouds(x, s1.b, salt + 56.5))
+                  + a2 * vec3(xaClouds(x, s2.r, salt + 67.8), xaClouds(x, s2.g, salt + 79.1), xaClouds(x, s2.b, salt + 90.4));
+        }
+        D = D + grain;
         return vec4((D - dmin) / (dmax - dmin), 1.0);
     }
     """)
+
+    /// How much of a unit white noise's variance a box `a` pixels wide keeps, along one side, after
+    /// a Gaussian blur of `sigma` pixels: the strength a pixel of the screen sees.
+    static func boxKeeps(_ a: CGFloat, sigma: CGFloat) -> CGFloat {
+        let s = max(sigma, 1e-3) * 2.squareRoot()
+        func phi(_ t: CGFloat) -> CGFloat { exp(-t * t / (2 * s * s)) / (s * (2 * CGFloat.pi).squareRoot()) }
+        let cdf = 0.5 * (1 + erf(a / s / 2.squareRoot()))
+        return 2 / (a * a) * (a * (cdf - 0.5) - s * s * (phi(0) - phi(a)))
+    }
 
     /// Develop a frame (linear, Core Image's working space) on `stock`, shot `push` stops over
     /// or under box speed. `seed` fixes the grain of a photo; the viewfinder passes a fresh one.
@@ -336,32 +447,34 @@ enum FilmLab {
         }
         trace?("developed", img)
         if !flat { img = blur(img, Fit.dyeBlurUM) }
-        if !flat, let g = grainKernel, let rnd = CIFilter.randomGenerator().outputImage {
-            // Clumps as a scanner sees them (the dye clouds merge into grains of about 14 µm), and
-            // the strength a pixel of that size shows: a smaller pixel averages over fewer grains.
-            let clump = max(0.6, 2 * Fit.grainClumpUM / um / 2.355)
-            let aperture = 1.8 * min(1.6, max(0.4, 12 / um))
-            let shift = CGFloat(seed % 9973) * 37
-            func noise(_ dx: CGFloat, _ dy: CGFloat, _ sigma: CGFloat) -> CIImage {
-                rnd.transformed(by: CGAffineTransform(translationX: dx, y: dy)).cropped(to: full)
-                    .clampedToExtent().applyingGaussianBlur(sigma: Double(sigma)).cropped(to: full)
-            }
-            let a = noise(shift, (shift * 0.7).rounded(), clump)
-            let b = noise((-shift * 1.3).rounded() - 5000, shift + 3000, clump * 2)
-            let c = noise((shift * 0.6).rounded() + 9000, -shift - 7000, clump * 4)
-            // Uniform noise has a spread of 0.289; a blur of `clump` pixels averages it down.
-            func norm(_ s: CGFloat) -> CGFloat { max(1, 2 * s * sqrt(.pi)) / 0.2887 }
-            let rms = Float(stock.grain * aperture * (r?.grain ?? 1) * max(0.5, 1 + 0.3 * Double(push)))
-            let norms = CIVector(x: norm(clump), y: norm(clump * 2), z: norm(clump * 4))
-            if stock.mono {
-                // one silver layer: no colour in the grain (red and green share one noise; the
-                // print is then made neutral). The noise is used raw: a colour matrix would
-                // un-premultiply the generator's random alpha and bias the grain.
-                if let out = g.apply(extent: full, arguments: [img, a, b, c, rms, Float(0), Fit.grainTop, norms, t.dmin, t.dmax]) {
+        if !flat, let k = grainKernel, let gr = grain(stock) {
+            let user = CGFloat(r?.grain ?? 1) * CGFloat(max(0.5, 1 + 0.3 * Double(push)))
+            if user > 0 {
+                // A pixel of the phone's screen, in this frame's pixels: the grain is as strong there
+                // as spektrafilm's, whatever the clouds' size.
+                let view = max(1, Fit.grainViewUM / um)
+                let base = 1.0 / 12 + Fit.grainBlurPX * Fit.grainBlurPX   // the pixel's own area, and spektrafilm's blur
+                var sizes: [CIVector] = [], gains: [CIVector] = []
+                for l in 0..<3 {
+                    var size = [CGFloat](), gain = [CGFloat]()
+                    for c in 0..<3 {
+                        let cloud = gr.cloudUM[l][c] / um
+                        let theirs = (base + cloud * cloud).squareRoot()
+                        let ours = (base + pow(cloud * Fit.cloudScale, 2)).squareRoot()
+                        size.append(ours)
+                        // granularity is density × µm: a pixel of `um` microns sees 1/um of it (Selwyn)
+                        gain.append(boxKeeps(view, sigma: theirs) / boxKeeps(view, sigma: ours) / um * gr.scale * user * Fit.grainGain)
+                    }
+                    sizes.append(CIVector(x: size[0], y: size[1], z: size[2]))
+                    gains.append(CIVector(x: gain[0], y: gain[1], z: gain[2]))
+                }
+                let salt = Float(seed % 9973) * 0.731 + 11
+                let row = CGRect(x: 0, y: 0, width: gr.n, height: 1)
+                if let out = k.apply(extent: full, roiCallback: { i, rect in i == 0 ? rect : row },
+                                     arguments: [img, gr.rows[0], gr.rows[1], gr.rows[2], t.dmin, t.dmax, Float(gr.top), Float(gr.n),
+                                                 sizes[0], sizes[1], sizes[2], gains[0], gains[1], gains[2], salt, Float(stock.mono ? 1 : 0)]) {
                     img = out
                 }
-            } else if let out = g.apply(extent: full, arguments: [img, a, b, c, rms, Fit.grainChroma, Fit.grainTop, norms, t.dmin, t.dmax]) {
-                img = out
             }
         }
         img = img.applyingFilter("CIColorClamp", parameters: ["inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 1),
