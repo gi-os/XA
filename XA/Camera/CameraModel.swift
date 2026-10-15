@@ -52,6 +52,13 @@ final class CameraModel: NSObject, ObservableObject {
     @Published var qrCode: String?
     @Published var stack = Stack(simID: "nocturne") { didSet { stackChanged() } }
     @Published private(set) var authorized: Bool?
+    /// The Lock Screen camera before XA has ever asked for the camera: it can't ask itself.
+    @Published private(set) var needsFirstOpen = false
+    /// Pictures kept in the app because Photos wouldn't take them (access is off): the roll
+    /// button shows it. Main thread.
+    @Published private(set) var kept = 0
+    /// Microphone access is off: VIDEO records silent clips, and its display says so.
+    @Published private(set) var micOff = false
     @Published private(set) var front = false
     @Published private(set) var developing = 0
     @Published private(set) var flash = false
@@ -128,13 +135,16 @@ final class CameraModel: NSObject, ObservableObject {
     private let developQueue = DispatchQueue(label: "xa.develop", qos: .userInitiated)
     private var device: AVCaptureDevice?
     private var input: AVCaptureDeviceInput?
+    /// The back camera's rotation coordinator, made once and kept (see Hold, watchHold). Under `lock`.
     private var rotation: AVCaptureDevice.RotationCoordinator?
     private var frontFlag = false
     private var frameCount = 0
-    private var previewAngle: CGFloat = 90
     private var angleObservation: NSKeyValueObservation?
-    /// How far the photo will be turned from the viewfinder frame, clockwise, in degrees.
-    private var _turn: CGFloat = 0
+    /// How the phone is held (see Hold). Under `lock`.
+    private var holdState = HoldState()
+    /// Camera switches queued or running (a flip, BOOTH coming or going): no shot is taken until
+    /// they are done, so a picture is never turned and mirrored for the other camera. Under `lock`.
+    private var _switches = 0
 
     // Read on the frame queue.
     private let lock = NSLock()
@@ -226,6 +236,8 @@ final class CameraModel: NSObject, ObservableObject {
     // buffers, and whether one is still on its way (under the lock).
     private let uwPool = FramePool(), sidePool = FramePool()
     private var uwBusy = false, sideBusy = false
+    /// When the last side copy was taken, by the frames' clock. On the frame queue.
+    private var lastSideAt: Double = 0
     /// The viewfinder's landscape length (see XAFinder.long), set by the view.
     private var _finderLong: CGFloat = 4
     /// How far the finder's markings have swung with the camera's motion; they settle back.
@@ -439,8 +451,11 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     func start() {
+        // the hold is known before the camera opens: a press in the first moments is turned right
+        watchHold()
         updateMotion()
         loadFavorites()
+        countKept()
         #if DEBUG && targetEnvironment(simulator) && !CAPTURE_EXTENSION
         if Self.demo.active { startDemo(); return }
         #endif
@@ -451,8 +466,14 @@ final class CameraModel: NSObject, ObservableObject {
         }
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         #if CAPTURE_EXTENSION
-        // The Lock Screen camera has the app's camera permission and cannot ask for it: unless
-        // it was refused outright, start the camera.
+        // The Lock Screen camera has the app's camera permission and cannot ask for it. Never
+        // asked yet: it says to open XA once, instead of a black finder.
+        if status == .notDetermined {
+            needsFirstOpen = true
+            authorized = false
+            return
+        }
+        // otherwise, unless it was refused outright, start the camera
         if status != .denied && status != .restricted {
             authorized = true
             sessionQueue.async { self.configure() }
@@ -479,9 +500,22 @@ final class CameraModel: NSObject, ObservableObject {
         // a take is finished and saved before the camera goes, never left open
         if recording { stopRecording() }
         cancelBooth()
+        motion.stopDeviceMotionUpdates()
         sessionQueue.async { if self.session.isRunning { self.session.stopRunning() } }
     }
     func resume() {
+        DispatchQueue.main.async { self.updateMotion() }
+        countKept()
+        noteMic()
+        // Back from Settings with the camera turned on: the camera note goes and the camera opens.
+        if AVCaptureDevice.authorizationStatus(for: .video) == .authorized {
+            DispatchQueue.main.async {
+                if self.authorized != true {
+                    self.authorized = true
+                    if self.mode == .film { self.beginFinderIntro() }
+                }
+            }
+        }
         sessionQueue.async {
             // a camera that couldn't be opened before (another app had it) is tried again
             if self.input == nil {
@@ -698,10 +732,9 @@ final class CameraModel: NSObject, ObservableObject {
 
     private func applyRotation() {
         guard let dev = device else { return }
-        let rc = AVCaptureDevice.RotationCoordinator(device: dev, previewLayer: nil)
-        rotation = rc
+        watchHold(dev)   // made at start() already; this covers a start before the camera was known
         // The viewfinder stays upright for the portrait UI; the photograph turns with the phone.
-        let portrait: CGFloat = 90
+        let portrait: CGFloat = Hold.portraitAngle
         if let c = uwOutput.connection(with: .video) {
             if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = false }
             if c.isVideoRotationAngleSupported(portrait) { c.videoRotationAngle = portrait }
@@ -710,23 +743,57 @@ final class CameraModel: NSObject, ObservableObject {
             // The connection never mirrors: with the selfie camera, mirror and turn together came
             // out upside down. XA turns and mirrors the frames itself (see `upright`).
             if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = false }
-            let a = c.isVideoRotationAngleSupported(portrait) ? portrait : rc.videoRotationAngleForHorizonLevelCapture
             // The selfie camera's frames come in as the sensor reads them and XA turns them.
-            let set: CGFloat = frontFlag ? 0 : a
+            let set: CGFloat = frontFlag ? 0 : portrait
             if c.isVideoRotationAngleSupported(set) { c.videoRotationAngle = set }
-            previewAngle = a
-        }
-        angleObservation = rc.observe(\.videoRotationAngleForHorizonLevelCapture, options: [.initial, .new]) { [weak self] rc, _ in
-            guard let self else { return }
-            var t = rc.videoRotationAngleForHorizonLevelCapture - self.previewAngle
-            while t < 0 { t += 360 }
-            while t >= 360 { t -= 360 }
-            self.lock.lock(); self._turn = t; self.lock.unlock()
         }
     }
 
-    /// The selfie camera's picture is never turned: it is saved the way the viewfinder shows it.
-    private var turn: CGFloat { lock.lock(); defer { lock.unlock() }; return frontFlag ? 0 : _turn }
+    /// How the phone is held comes from the back camera's rotation coordinator, made once and
+    /// kept: a new one for every flip or rebuilt session started from nothing and forgot the
+    /// last hold, and the selfie camera's own sits the other way round (see Hold). On the
+    /// session queue.
+    private func watchHold(_ active: AVCaptureDevice? = nil) {
+        lock.lock()
+        guard rotation == nil, let back = active?.position == .back ? active : Self.backCamera() else { lock.unlock(); return }
+        let rc = AVCaptureDevice.RotationCoordinator(device: back, previewLayer: nil)
+        rotation = rc
+        lock.unlock()
+        // (outside the lock: the first reading arrives right away, and takes it)
+        let watch = rc.observe(\.videoRotationAngleForHorizonLevelCapture, options: [.initial, .new]) { [weak self] rc, _ in
+            guard let self else { return }
+            let t = Hold.turn(backAngle: rc.videoRotationAngleForHorizonLevelCapture)
+            self.lock.lock(); self.holdState.coordinator(turn: t); self.lock.unlock()
+        }
+        lock.lock(); angleObservation = watch; lock.unlock()
+    }
+
+    /// Gravity, to tell a phone held flat (see Hold). Any queue.
+    private func noteGravity() {
+        guard let g = motion.deviceMotion?.gravity else { return }
+        lock.lock(); holdState.gravity(z: g.z); lock.unlock()
+    }
+
+    /// The hold for a shot, read at the press, fresh. BOOTH's sheet is always portrait. Main thread.
+    private func holdTurn(for m: CaptureMode) -> CGFloat {
+        if m == .booth { return 0 }
+        noteGravity()
+        lock.lock(); let rc = rotation; lock.unlock()
+        if let rc {
+            let t = Hold.turn(backAngle: rc.videoRotationAngleForHorizonLevelCapture)
+            lock.lock(); holdState.coordinator(turn: t); lock.unlock()
+        }
+        lock.lock(); defer { lock.unlock() }
+        return holdState.turn
+    }
+
+    /// The turn for the viewfinder's frames and VIDEO's: the hold, the other way round for the
+    /// selfie camera's mirrored frames; BOOTH's sheet stays portrait. Under `lock`.
+    private func frameTurnLocked() -> CGFloat {
+        if _frameMode == .booth { return 0 }
+        return Hold.frameTurn(holdState.turn, front: frontFlag)
+    }
+    private var turn: CGFloat { lock.lock(); defer { lock.unlock() }; return frameTurnLocked() }
 
     /// Turn a frame clockwise by a multiple of 90°, keeping it at the origin.
     /// A viewfinder frame or a selfie made portrait and, for the selfie camera, mirrored the way
@@ -753,6 +820,17 @@ final class CameraModel: NSObject, ObservableObject {
         return out
     }
 
+    /// A selfie photo for a hold: the sensor's frame made portrait (`upright`'s three-quarter
+    /// turn), turned with the hold, then mirrored. At a portrait hold it is exactly
+    /// `upright(_, mirror: true)`.
+    static func selfie(_ native: CIImage, turn: CGFloat) -> CIImage {
+        var out = native
+        if out.extent.width > out.extent.height { out = rotated(out, clockwise: 270) }
+        out = rotated(out, clockwise: Hold.norm(turn))
+        let w = out.extent.width
+        return out.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: w + out.extent.minX * 2, ty: 0))
+    }
+
     static func rotated(_ img: CIImage, clockwise deg: CGFloat) -> CIImage {
         guard deg != 0 else { return img }
         let r = img.transformed(by: CGAffineTransform(rotationAngle: -deg * .pi / 180))
@@ -761,7 +839,9 @@ final class CameraModel: NSObject, ObservableObject {
 
     func flip() {
         guard !recording else { return }   // never mid-take: the take would change camera halfway
+        lock.lock(); _switches += 1; lock.unlock()
         sessionQueue.async {
+            defer { self.lock.lock(); self._switches -= 1; self.lock.unlock() }
             // the selfie camera has no ultra-wide: back to the plain session first
             if self.multiCam { self.rebuildSession(multi: false) }
             self.switchCamera(toFront: !self.frontFlag)
@@ -772,7 +852,11 @@ final class CameraModel: NSObject, ObservableObject {
 
     /// Front or back, whichever it isn't already.
     func setFront(_ want: Bool) {
-        sessionQueue.async { if self.frontFlag != want { self.switchCamera(toFront: want) } }
+        lock.lock(); _switches += 1; lock.unlock()
+        sessionQueue.async {
+            defer { self.lock.lock(); self._switches -= 1; self.lock.unlock() }
+            if self.frontFlag != want { self.switchCamera(toFront: want) }
+        }
     }
 
     /// On the session queue.
@@ -1114,10 +1198,11 @@ final class CameraModel: NSObject, ObservableObject {
         case .authorized: add()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .audio) { ok in
+                self.noteMic()
                 // still in VIDEO by the time the answer comes?
                 if ok { self.sessionQueue.async { if self.frameState().0 == .video { add() } } }
             }
-        default: break
+        default: noteMic()
         }
     }
 
@@ -1138,10 +1223,13 @@ final class CameraModel: NSObject, ObservableObject {
 
     private func startRecording() {
         guard !recording else { return }
+        // the camera is changing: the take would be turned for the other one
+        lock.lock(); let switching = _switches > 0; lock.unlock()
+        if switching { UINotificationFeedbackGenerator().notificationOccurred(.warning); return }
         frameQueue.async { self.fx.reset() }   // the frame queue owns the looks' state
         audioQueue.async { self.pocketAudio.reset() }
         // The turn locks when the clip starts, so a take never flips halfway.
-        lock.lock(); _wantRecord = true; _lockedTurn = _turn; frameSegments = []; lock.unlock()
+        lock.lock(); _wantRecord = true; _lockedTurn = frameTurnLocked(); frameSegments = []; lock.unlock()
         segments = []
         recording = true
         recordSeconds = 0
@@ -1183,6 +1271,7 @@ final class CameraModel: NSObject, ObservableObject {
                     if let dir = self.fallbackFolder {
                         try? FileManager.default.moveItem(at: url, to: dir.appendingPathComponent(url.lastPathComponent))
                     }
+                    self.countKept()
                 }
                 if let lib = self.library {
                     lib.save(video: url) { id in
@@ -1254,21 +1343,34 @@ final class CameraModel: NSObject, ObservableObject {
 
     private func fire(booth: (session: Int, index: Int)?) {
         guard authorized == true, cameraReady else { return }
+        // Which camera takes it and how the phone is held are decided once, here, at the press.
+        lock.lock(); let switching = _switches > 0; let selfie = frontFlag; lock.unlock()
+        if switching {
+            // the camera is changing: it isn't settled which one would take the picture
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            if let booth { boothCollect(booth.session, booth.index, nil, date: Date()) }
+            return
+        }
         let pressed = CACurrentMediaTime()
         skipReview()
         let m = mode
+        let turn = holdTurn(for: m)
         let (settingsP, zero) = photoSettings(m)
         syncFrameSettings()
         var (_, dev) = frameState()
         if let booth { dev.deco = settings.boothDeco.step(booth.index) }
         let id = settingsP.uniqueID
-        var shot = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date(), zero: zero, pressed: pressed, booth: booth, front: front)
+        var shot = Shot(mode: m, develop: dev, crunch: settings.crunch, date: Date(), zero: zero, pressed: pressed, booth: booth,
+                        front: selfie, turn: turn)
         #if CAPTURE_EXTENSION
         shotCount += 1
         shot.name = String(format: "XA-%ld-%04d", run, shotCount)
         lock.lock(); _lockShots[id] = (shot.name, shot.lock); lock.unlock()
         #endif
         pending[id] = shot
+        #if !CAPTURE_EXTENSION
+        shotTasks[id] = UIApplication.shared.beginBackgroundTask(withName: "xa.shot") { [weak self] in self?.outOfTime(id) }
+        #endif
         // Manual exposure (PRO's held shutter or ISO) has no zero shutter lag: the picture is
         // taken when the camera says so, and the click waits for it.
         let manual = m == .pro && (shutterIndex != nil || isoIndex != nil)
@@ -1303,7 +1405,9 @@ final class CameraModel: NSObject, ObservableObject {
                 DispatchQueue.main.async { self.abandon(id) }; return
             }
             if !self.photoOutput.supportedFlashModes.contains(settingsP.flashMode) { settingsP.flashMode = .off }
-            self.lock.lock(); let selfie = self.frontFlag; self.lock.unlock()
+            // the camera the press saw (a switch is refused at the press, so this always holds)
+            self.lock.lock(); let selfieNow = self.frontFlag; self.lock.unlock()
+            guard selfieNow == selfie else { DispatchQueue.main.async { self.abandon(id) }; return }
             if selfie {
                 // The selfie camera is shot exactly as the viewfinder shows it: upright and
                 // mirrored, the same turn and the same mirror as the frames. Its horizon
@@ -1311,10 +1415,9 @@ final class CameraModel: NSObject, ObservableObject {
                 if c.isVideoMirroringSupported { c.automaticallyAdjustsVideoMirroring = false; c.isVideoMirrored = false }
                 if c.isVideoRotationAngleSupported(0) { c.videoRotationAngle = 0 }
             } else {
-                if let rc = self.rotation {
-                    let a = rc.videoRotationAngleForHorizonLevelCapture
-                    if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
-                }
+                // the hold read at the press, not whatever the phone is doing by now
+                let a = Hold.backAngle(turn: turn)
+                if c.isVideoRotationAngleSupported(a) { c.videoRotationAngle = a }
                 if c.isVideoMirroringSupported && !c.automaticallyAdjustsVideoMirroring { c.automaticallyAdjustsVideoMirroring = true }
             }
             self.photoOutput.capturePhoto(with: settingsP, delegate: self)
@@ -1325,6 +1428,7 @@ final class CameraModel: NSObject, ObservableObject {
     /// roll button's spinner never sticks. On the main thread.
     private func abandon(_ id: Int64) {
         guard let shot = pending.removeValue(forKey: id) else { return }
+        endShotTask(id)
         answered.remove(id); quietShots.remove(id)
         developing = max(0, developing - 1)
         if let b = shot.booth { boothCollect(b.session, b.index, nil, date: shot.date) }
@@ -1387,28 +1491,40 @@ final class CameraModel: NSObject, ObservableObject {
     private struct Shot {
         let mode: CaptureMode; let develop: DevelopSettings; let crunch: Double; let date: Date
         var zero = false; var pressed: Double = 0; var booth: (session: Int, index: Int)? = nil; var front = false
+        /// How the phone was held at the press (see Hold).
+        var turn: CGFloat = 0
         /// The Lock Screen camera's file name for this shot (its camera file, recipe and result).
         var name = ""
 
         var lock: LockShot {
             LockShot(mode: mode, stack: develop.stack, megapixels: develop.megapixels, noise: develop.noise, date: develop.date,
-                     recipe: develop.recipe, film: develop.film, filmRecipe: develop.filmRecipe, crunch: crunch, taken: date, front: front)
+                     recipe: develop.recipe, film: develop.film, filmRecipe: develop.filmRecipe, crunch: crunch, taken: date, front: front,
+                     turn: Double(turn))
         }
 
         init(mode: CaptureMode, develop: DevelopSettings, crunch: Double, date: Date, zero: Bool = false, pressed: Double = 0,
-             booth: (session: Int, index: Int)? = nil, front: Bool = false) {
+             booth: (session: Int, index: Int)? = nil, front: Bool = false, turn: CGFloat = 0) {
             self.mode = mode; self.develop = develop; self.crunch = crunch; self.date = date
-            self.zero = zero; self.pressed = pressed; self.booth = booth; self.front = front
+            self.zero = zero; self.pressed = pressed; self.booth = booth; self.front = front; self.turn = turn
         }
 
         init(_ l: LockShot) {
             var d = DevelopSettings()
             d.stack = l.stack; d.megapixels = l.megapixels; d.noise = l.noise; d.date = l.date
             d.recipe = l.recipe; d.film = l.film; d.filmRecipe = l.filmRecipe
-            self.init(mode: l.mode, develop: d, crunch: l.crunch, date: l.taken, front: l.front)
+            self.init(mode: l.mode, develop: d, crunch: l.crunch, date: l.taken, front: l.front, turn: CGFloat(l.turn ?? 0))
         }
     }
     private var pending: [Int64: Shot] = [:]
+    #if !CAPTURE_EXTENSION
+    /// Each shot keeps the app running from the press until its picture is saved, so going to
+    /// the Home Screen mid-develop never loses it. Main thread.
+    private var shotTasks: [Int64: UIBackgroundTaskIdentifier] = [:]
+    /// Each developing shot's camera file, and where it was put if the background time ran out
+    /// first (see outOfTime). Main thread.
+    private var shotFiles: [Int64: (data: Data, front: Bool, turn: CGFloat)] = [:]
+    private var shotKept: [Int64: URL] = [:]
+    #endif
     /// Shots whose system click was dropped, so XA plays its own when the picture is really taken.
     private var quietShots: Set<Int64> = []
 
@@ -1435,14 +1551,21 @@ final class CameraModel: NSObject, ObservableObject {
         let fileProps = src.properties
         var demo: DigicamFX.Conditions? = nil
         if shot.zero, let raw = CIRAWFilter(imageData: data, identifierHint: nil) {
+            // turned the way the camera's file says, never left to the filter's default
+            if let s = CGImageSourceCreateWithData(data as CFData, nil),
+               let p = CGImageSourceCopyPropertiesAtIndex(s, 0, nil) as? [CFString: Any],
+               let tag = (p[kCGImagePropertyOrientation] as? NSNumber)?.uint32Value,
+               let o = CGImagePropertyOrientation(rawValue: tag) {
+                raw.orientation = o
+            }
             raw.boostAmount = 0
             raw.localToneMapAmount = 0
             raw.extendedDynamicRangeAmount = 0
             if let o = raw.outputImage { src = o; demo = DigicamFX.Conditions(properties: fileProps) }
         }
-        // The selfie camera: upright and mirrored, as the viewfinder showed it (PRO too: its
-        // picture is shot at the sensor's angle, so it needs the same turn).
-        if shot.front { src = Self.upright(src, mirror: true) }
+        // The selfie camera: upright for the way the phone was held, and mirrored, as the
+        // viewfinder showed it (PRO too: its picture is shot at the sensor's angle).
+        if shot.front { src = shot.turn == 0 ? Self.upright(src, mirror: true) : Self.selfie(src, turn: shot.turn) }
         // What the camera wrote, for PRO: HEIF or JPEG as it came out.
         var fileType: UTType = .jpeg
         if let s = CGImageSourceCreateWithData(data as CFData, nil), let t = CGImageSourceGetType(s), let u = UTType(t as String) { fileType = u }
@@ -1480,11 +1603,11 @@ final class CameraModel: NSObject, ObservableObject {
             let sm = Darkroom.develop(meter, d, date: shot.date, preview: false, demo: demo).0
             let k = 200 / max(sm.extent.width, 1)
             let s = sm.transformed(by: CGAffineTransform(scaleX: k, y: k))
-            reference = Encoder.gpu.createCGImage(s, from: s.extent.integral)
+            reference = Encoder.context.createCGImage(s, from: s.extent.integral)
         } else {
             let k0: CGFloat = 200 / max(e0.width, 1)
             let small = developed.transformed(by: CGAffineTransform(scaleX: k0, y: k0))
-            reference = Encoder.gpu.createCGImage(small, from: small.extent.integral)
+            reference = Encoder.context.createCGImage(small, from: small.extent.integral)
         }
         guard let cg = Encoder.render(developed, reference: reference) else { return nil }
         let props = Recipe.properties(from: fileProps, recipe: recipe)
@@ -1501,7 +1624,7 @@ final class CameraModel: NSObject, ObservableObject {
         return Developed(out: out, type: type, thumb: reference, booth: booth)
     }
 
-    private func develop(_ data: Data, _ shot: Shot) {
+    private func develop(_ data: Data, _ shot: Shot, id: Int64) {
         developQueue.async {
             defer { DispatchQueue.main.async { self.developing = max(0, self.developing - 1) } }
             let made = self.produce(data, shot)
@@ -1509,7 +1632,22 @@ final class CameraModel: NSObject, ObservableObject {
                 let small = made?.booth
                 DispatchQueue.main.async { self.boothCollect(b.session, b.index, small, date: shot.date) }
             }
-            guard let made else { return }
+            guard let made else {
+                // It couldn't be developed: the camera's own picture is kept rather than nothing
+                // (BOOTH's sheet goes on without it).
+                DispatchQueue.main.async {
+                    #if !CAPTURE_EXTENSION
+                    if shot.booth == nil {
+                        self.dropKept(id)
+                        let original = shot.front ? Self.selfieOriginal(data, turn: shot.turn) : data
+                        self.save(original, Self.fileType(data)) { self.endShotTask(id) }
+                        return
+                    }
+                    #endif
+                    self.endShotTask(id)
+                }
+                return
+            }
             #if CAPTURE_EXTENSION
             self.lockSave(made, name: shot.name)
             #endif
@@ -1519,10 +1657,76 @@ final class CameraModel: NSObject, ObservableObject {
                 self.lastTiming = "taken \(ms(self.timing.taken)) · photo \(ms(self.timing.photo)) · saved \(ms(done))"
                 if let thumb = made.thumb { self.lastShot = UIImage(cgImage: thumb) }
                 #if !CAPTURE_EXTENSION
-                self.save(made.out, made.type)
+                self.dropKept(id)
+                self.save(made.out, made.type) { self.endShotTask(id) }
+                #else
+                self.endShotTask(id)
                 #endif
             }
         }
+    }
+
+    /// The shot is saved (or let go): the app may be suspended again. Main thread.
+    private func endShotTask(_ id: Int64) {
+        #if !CAPTURE_EXTENSION
+        guard Thread.isMainThread else { DispatchQueue.main.async { self.endShotTask(id) }; return }
+        shotFiles[id] = nil
+        if let t = shotTasks.removeValue(forKey: id), t != .invalid { UIApplication.shared.endBackgroundTask(t) }
+        #endif
+    }
+
+    /// The background time ran out before the shot was developed (a big FILM scan on the CPU
+    /// takes long): the camera's own picture goes to the app's waiting folder first, so it can't
+    /// be lost if iOS ends the app now. The develop picks up when the app comes back, and its
+    /// picture replaces that one. Main thread.
+    private func outOfTime(_ id: Int64) {
+        #if !CAPTURE_EXTENSION
+        if let f = shotFiles[id], shotKept[id] == nil {
+            let original = f.front ? Self.selfieOriginal(f.data, turn: f.turn) : f.data
+            shotKept[id] = writeFallback(original, Self.fileType(f.data), name: "XA-\(id)-camera")
+        }
+        endShotTask(id)
+        #endif
+    }
+
+    /// The developed picture replaces the camera file kept when the time ran out. Main thread.
+    private func dropKept(_ id: Int64) {
+        #if !CAPTURE_EXTENSION
+        if let url = shotKept.removeValue(forKey: id) { try? FileManager.default.removeItem(at: url) }
+        #endif
+    }
+
+    /// A camera file's type, from its own bytes.
+    static func fileType(_ data: Data) -> UTType {
+        if let s = CGImageSourceCreateWithData(data as CFData, nil), let t = CGImageSourceGetType(s), let u = UTType(t as String) { return u }
+        return .jpeg
+    }
+
+    /// A selfie's camera file as it came from the sensor (landscape, unmirrored), re-tagged so it
+    /// shows the way the viewfinder did: turned for the hold and mirrored. Lossless (only the
+    /// orientation changes); the file as it was if it can't be re-tagged. Any queue.
+    static func selfieOriginal(_ data: Data, turn: CGFloat) -> Data {
+        // the sensor frame turned 270° + the hold clockwise, then mirrored
+        let tag: Int
+        switch Hold.norm(turn) {
+        case 90: tag = 2
+        case 180: tag = 5
+        case 270: tag = 4
+        default: tag = 7
+        }
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil), let type = CGImageSourceGetType(src) else { return data }
+        let out = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(out, type, 1, nil) else { return data }
+        let opts = [kCGImageDestinationOrientation: tag] as CFDictionary
+        guard CGImageDestinationCopyImageSource(dest, src, opts, nil) else { return data }
+        return out as Data
+    }
+
+    /// Whether VIDEO will have sound. Any queue.
+    func noteMic() {
+        let s = AVCaptureDevice.authorizationStatus(for: .audio)
+        let off = s == .denied || s == .restricted
+        DispatchQueue.main.async { if self.micOff != off { self.micOff = off } }
     }
 
     /// The app develops a shot the Lock Screen camera didn't get to (its recipe and camera file
@@ -1533,17 +1737,29 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     /// Into Photos, or into the pending folder for later when Photos won't take it now.
-    private func save(_ out: Data, _ type: UTType) {
+    private func save(_ out: Data, _ type: UTType, then: @escaping () -> Void = {}) {
         if let lib = library {
             lib.save(data: out, type: type) { ok in
                 if !ok { self.writeFallback(out, type) }
                 #if !CAPTURE_EXTENSION
                 if ok { ReviewPrompt.noteShot() }
                 #endif
+                self.countKept()
+                then()
             }
         } else {
             writeFallback(out, type)
+            countKept()
+            then()
         }
+    }
+
+    /// How many pictures wait in the app for Photos access. Any queue.
+    func countKept() {
+        #if !CAPTURE_EXTENSION
+        let n = Library.pendingCount
+        DispatchQueue.main.async { if self.kept != n { self.kept = n } }
+        #endif
     }
 
     @discardableResult
@@ -1641,6 +1857,7 @@ final class CameraModel: NSObject, ObservableObject {
         let started = sidePool.buffer(width: w, height: h).map { pb in
             GPURead.copy(small, into: pb, context: Looks.context) { copy in
                 // on GPURead's queue, one at a time
+                guard let copy else { self.lock.lock(); self.sideBusy = false; self.lock.unlock(); return }
                 self.lock.lock(); self._latest = copy; self.lock.unlock()
                 if eye { self.trackEye(copy) }
                 if histogram {
@@ -1700,7 +1917,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             let small = raw.transformed(by: CGAffineTransform(scaleX: k, y: k)).cropped(to: CGRect(x: 0, y: 0, width: w, height: h))
             let started = uwPool.buffer(width: w, height: h).map { dst in
                 GPURead.copy(small, into: dst, context: Looks.context) { copy in
-                    self.lock.lock(); self._uw = copy; self.uwBusy = false; self.lock.unlock()
+                    self.lock.lock(); if let copy { self._uw = copy }; self.uwBusy = false; self.lock.unlock()
                 }
             } ?? false
             if !started { lock.lock(); uwBusy = false; lock.unlock() }
@@ -1736,6 +1953,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         }
         // Cleaned at the door: a sensor pixel below the legal video range decodes to NaN, and every
         // blur and resize downstream would spread it into a black square.
+        if frameCount % 3 == 0 { noteGravity() }
         lock.lock(); let mirror = frontFlag; lock.unlock()
         let raw = Self.upright(Sanitize.apply(CIImage(cvPixelBuffer: pb), floor: 0), mirror: mirror)
         let e = raw.extent
@@ -1745,14 +1963,19 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         let (m, dev) = frameState()
         frameCount += 1
         // What reads the picture (the editors, Eye AF, the histogram, the finder's light) works
-        // from a small copy, five times a second, off this queue.
-        if m != .video && frameCount % 6 == 0 { sideCopy(src, mode: m, dev: dev, mirror: mirror) }
+        // from a small copy, five times a second by the frames' own clock (a count of frames
+        // lost step with the frame limiter in Low Power Mode), off this queue.
+        let at = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+        if at.isFinite && (at - lastSideAt >= 0.2 || at < lastSideAt) {
+            lastSideAt = at
+            sideCopy(src, mode: m, dev: dev, mirror: mirror)
+        }
         lock.lock()
         if _switchPending { _switchPending = false; _switchStart = CACurrentMediaTime() }
         let vlook = frameVideoLook
         lock.unlock()
         if m == .video {
-            lock.lock(); let t = _lockedTurn ?? _turn; lock.unlock()
+            lock.lock(); let t = _lockedTurn ?? frameTurnLocked(); lock.unlock()
             let upright = Self.rotated(src, clockwise: t)
             var base = upright
             // (POCKET 3D is the console's camera straight: no film on it)
@@ -1960,8 +2183,11 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
             guard let shot = self.pending.removeValue(forKey: id) else { return }
             self.timing.photo = now - shot.pressed
             self.preparePhotos()
-            guard error == nil, let data else { self.developing = max(0, self.developing - 1); return }
-            self.develop(data, shot)
+            guard error == nil, let data else { self.developing = max(0, self.developing - 1); self.endShotTask(id); return }
+            #if !CAPTURE_EXTENSION
+            self.shotFiles[id] = (data, shot.front, shot.turn)
+            #endif
+            self.develop(data, shot, id: id)
         }
     }
 
@@ -2145,15 +2371,12 @@ extension CameraModel {
 // MARK: FILM's finder
 
 extension CameraModel {
-    /// The phone's motion is read only while FILM's finder needs it.
+    /// The phone's motion: gravity in every mode, to tell a phone held flat (see Hold), and
+    /// FILM's finder's sway and rangefinder patch, which want it more often.
     func updateMotion() {
-        if mode == .film {
-            guard motion.isDeviceMotionAvailable, !motion.isDeviceMotionActive else { return }
-            motion.deviceMotionUpdateInterval = 1.0 / 24
-            motion.startDeviceMotionUpdates()
-        } else if motion.isDeviceMotionActive {
-            motion.stopDeviceMotionUpdates()
-        }
+        guard motion.isDeviceMotionAvailable else { return }
+        motion.deviceMotionUpdateInterval = mode == .film ? 1.0 / 24 : 1.0 / 10
+        if !motion.isDeviceMotionActive { motion.startDeviceMotionUpdates() }
     }
 }
 
@@ -2548,7 +2771,7 @@ extension CameraModel {
         frameQueue.async {
             let d = Self.demo
             guard let win = d.window(CACurrentMediaTime() - d.started, full: true) else {
-                DispatchQueue.main.async { self.developing = max(0, self.developing - 1) }; return
+                DispatchQueue.main.async { self.developing = max(0, self.developing - 1); self.endShotTask(id) }; return
             }
             // the photo at the size the camera would have taken (portrait: the short side across)
             let across = CGFloat(min(dims.width, dims.height))
@@ -2558,8 +2781,8 @@ extension CameraModel {
                                                     options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95])
             if d.photos.count > 1 { d.index += 1; d.load() }
             DispatchQueue.main.async {
-                guard let data else { self.developing = max(0, self.developing - 1); return }
-                self.develop(data, shot)
+                guard let data else { self.developing = max(0, self.developing - 1); self.endShotTask(id); return }
+                self.develop(data, shot, id: id)
             }
         }
     }

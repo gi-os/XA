@@ -54,7 +54,8 @@ struct CustomizeView: View {
                         Text("Make XA the camera: Settings › Camera › Camera Control › Launch Camera › XA. Add the XA control to Control Center or the Lock Screen to open it while locked.")
                             .font(.system(size: 13)).foregroundStyle(XA.dim)
                     }
-                    TipJarView()
+                    if TipJar.enabled { TipJarView() }
+                    AboutGroup().padding(.top, 6)
                 }
                 .padding(16)
             }
@@ -128,7 +129,7 @@ struct CustomizeView: View {
                 row("Date back", "\(settings.filmDate.style.name) · \(Self.placement(settings.filmDate))", accent: true)
             }
             Toggle("XA viewfinder", isOn: $settings.filmRecipe.xaFinder).tint(XA.orange).font(.system(size: 15))
-            Text("Look through an Olympus XA's finder: the photo in a bright frame, the speed scale with its meter needle, the rangefinder patch. Off: the plain viewfinder. Default on.")
+            Text("Look through a 1970s pocket rangefinder's finder: the photo in a bright frame, the speed scale with its meter needle, the rangefinder patch. Off: the plain viewfinder. Default on.")
                 .font(.system(size: 12)).foregroundStyle(XA.faint)
             Toggle("Film in the finder all the time", isOn: $settings.filmAlwaysOn).tint(XA.orange).font(.system(size: 15))
             Text("Off: the finder is plain, like a real camera's, and shows the film accurately for a few seconds each time you change stock, push or a setting, then fades back. Saves battery. On: a quick approximation of the film, always. Default off.")

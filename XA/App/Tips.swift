@@ -7,6 +7,9 @@ import SwiftUI
 final class TipJar: ObservableObject {
     static let shared = TipJar()
     static let ids = ["com.gios.xa.tip.small", "com.gios.xa.tip.medium", "com.gios.xa.tip.large"]
+    /// Off in 1.0: the tips go to App Review with 1.0.1, once the Paid Apps agreement is active.
+    /// Until then the jar never shows, whatever the App Store offers.
+    static let enabled = false
 
     @Published private(set) var products: [Product] = []
     /// The tip being paid for, while the App Store sheet is up.
@@ -15,6 +18,9 @@ final class TipJar: ObservableObject {
     @Published var failed = false
     @Published private(set) var tips = UserDefaults.standard.integer(forKey: "tips")
     private var updates: Task<Void, Never>?
+    /// Transactions already counted: one that arrives both from the purchase and from
+    /// `Transaction.updates` is one tip, not two.
+    private var counted: Set<UInt64> = []
 
     private init() {
         // A tip that finishes away from the button (Ask to Buy approved later, a payment that
@@ -43,7 +49,7 @@ final class TipJar: ObservableObject {
 
     private func finish(_ result: VerificationResult<StoreKit.Transaction>) async {
         guard case .verified(let t) = result else { return }
-        if Self.ids.contains(t.productID), t.revocationDate == nil {
+        if Self.ids.contains(t.productID), t.revocationDate == nil, counted.insert(t.id).inserted {
             tips += 1
             UserDefaults.standard.set(tips, forKey: "tips")
             thanked = true
@@ -74,6 +80,10 @@ struct TipJarView: View {
     }
 
     var body: some View {
+        if TipJar.enabled { jarView }
+    }
+
+    private var jarView: some View {
         VStack(alignment: .leading, spacing: 8) {
             if !offers.isEmpty {
                 SectionLabel(text: "SUPPORT XA")

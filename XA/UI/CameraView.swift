@@ -210,7 +210,7 @@ struct CameraView: View {
         ZStack {
             Color.black
             if camera.authorized == false {
-                CameraDeniedNote()
+                CameraDeniedNote(firstOpen: camera.needsFirstOpen)
             } else {
                 Viewfinder(camera: camera)
                     .aspectRatio(finderAspect, contentMode: .fit)
@@ -591,9 +591,19 @@ private struct ShutterRow: View {
                 }
                 .frame(width: 50, height: 50).clipped()
                 .overlay(Rectangle().strokeBorder(Color.white, lineWidth: 2))
+                .overlay(alignment: .topTrailing) {
+                    // Photos access is off: the pictures are kept in XA (the roll says so and
+                    // opens Settings)
+                    if camera.kept > 0 {
+                        Image(systemName: "exclamationmark")
+                            .font(.system(size: 11, weight: .heavy)).foregroundStyle(.black)
+                            .frame(width: 18, height: 18).background(Circle().fill(XA.orange))
+                            .offset(x: 7, y: -7)
+                    }
+                }
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Open the roll")
+            .accessibilityLabel(camera.kept > 0 ? "Open the roll. Photos access is off: \(camera.kept) \(camera.kept == 1 ? "picture" : "pictures") kept in XA" : "Open the roll")
     }
 }
 
@@ -920,13 +930,16 @@ struct FavoriteStar: View {
 
 /// Camera access was refused: what to do about it, and in the app a way straight there.
 private struct CameraDeniedNote: View {
+    /// The Lock Screen camera before XA has ever asked for the camera.
+    var firstOpen = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(spacing: 12) {
             Text("XA needs the camera.").font(XA.display(18))
             #if CAPTURE_EXTENSION
-            Text("Settings › XA › Camera").font(.system(size: 14)).foregroundStyle(XA.dim)
+            Text(firstOpen ? "Open XA once and allow the camera. Then it works here too." : "Settings › XA › Camera")
+                .font(.system(size: 14)).foregroundStyle(XA.dim)
             #else
             Text("Turn on Camera for XA in Settings.").font(.system(size: 14)).foregroundStyle(XA.dim)
             Button("Open Settings") {

@@ -73,12 +73,36 @@ enum FilmCatalog {
 /// Custom sims live in UserDefaults as JSON.
 enum SimStore {
     static let key = "customSims"
-    static func load() -> [Sim] {
-        guard let d = UserDefaults.standard.data(forKey: key) else { return [] }
-        return (try? JSONDecoder().decode([Sim].self, from: d)) ?? []
+    /// The saved list as it was before a film in it couldn't be read: kept, never overwritten,
+    /// so a later version that can read it again gets everything back.
+    static let backupKey = "customSims.unread"
+
+    /// Film by film: one that can't be read (written by a newer XA, or damaged) is skipped and
+    /// the rest load. A whole list that failed to decode used to come back empty, and the next
+    /// save wrote over every custom film.
+    static func load(_ d: UserDefaults = .standard) -> [Sim] {
+        guard let data = d.data(forKey: key) else { return [] }
+        let (sims, lost) = decode(data)
+        if lost > 0 && d.data(forKey: backupKey) == nil { d.set(data, forKey: backupKey) }
+        return sims
     }
-    static func save(_ list: [Sim]) {
-        if let d = try? JSONEncoder().encode(list) { UserDefaults.standard.set(d, forKey: key) }
+
+    /// The films that could be read, and how many couldn't.
+    static func decode(_ data: Data) -> (sims: [Sim], lost: Int) {
+        if let all = try? JSONDecoder().decode([Sim].self, from: data) { return (all, 0) }
+        guard let items = try? JSONDecoder().decode([Lenient].self, from: data) else { return ([], 1) }
+        let sims = items.compactMap(\.sim)
+        return (sims, items.count - sims.count)
+    }
+
+    static func save(_ list: [Sim], _ d: UserDefaults = .standard) {
+        if let data = try? JSONEncoder().encode(list) { d.set(data, forKey: key) }
+    }
+
+    /// One film of the list that may or may not decode.
+    private struct Lenient: Decodable {
+        let sim: Sim?
+        init(from decoder: Decoder) throws { sim = try? Sim(from: decoder) }
     }
 }
 
@@ -139,7 +163,7 @@ enum Darkroom {
                 // the bitmap's rows go down from the top, Core Image's y goes up
                 let bounds = CGRect(x: 0, y: CGFloat(h - y0 - bh), width: CGFloat(w), height: CGFloat(bh))
                 autoreleasepool {
-                    Encoder.gpu.render(small, toBitmap: base.advanced(by: y0 * rowBytes), rowBytes: rowBytes,
+                    Encoder.context.render(small, toBitmap: base.advanced(by: y0 * rowBytes), rowBytes: rowBytes,
                                        bounds: bounds, format: .RGBAh, colorSpace: nil)
                 }
             }

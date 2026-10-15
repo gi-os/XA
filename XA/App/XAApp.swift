@@ -91,7 +91,7 @@ struct RootView: View {
             pushContext()
             syncThumb()
             // Photos after the camera: the first look at a big library is slow on the main thread.
-            DispatchQueue.main.async { library.refresh(); library.flushPending() }
+            DispatchQueue.main.async { library.refresh(); library.flushPending { camera.countKept() } }
         }
         .onChange(of: phase) { _, p in phaseChanged(p) }
         // The camera sleeps under the roll: no capture, no develop, no hardware shutter.
@@ -106,7 +106,7 @@ struct RootView: View {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             rollMounted = true
             // the tip jar listens for tips that finish later (Ask to Buy), once the camera is up
-            _ = TipJar.shared
+            if TipJar.enabled { _ = TipJar.shared }
         }
         // The Lock Screen camera opened the app (its roll, settings or film buttons).
         .onContinueUserActivity(NSUserActivityTypeLockedCameraCapture) { a in
@@ -126,13 +126,16 @@ struct RootView: View {
 
     private func phaseChanged(_ p: ScenePhase) {
         // Back from Settings with Photos access changed: the roll picks it up.
+        // iOS takes the GPU away in the background: a shot still developing goes on on the CPU
+        if p != .background { Encoder.foreground = true }
         if p == .active {
             openPendingLink()
             if !showRoll { camera.resume() }
-            library.refresh(); library.flushPending()
+            library.refresh(); library.flushPending { camera.countKept() }
             // pictures the Lock Screen camera left while the app wasn't running
             Task { await ingestAll() }
         } else if p == .background {
+            Encoder.foreground = false
             pushContext()   // the Lock Screen camera opens with exactly this
             camera.stop()
             // Coming back always lands on the camera: roll, viewer, pickers and settings close.
@@ -280,9 +283,11 @@ struct RootView: View {
                     let recipeURL = dir.appendingPathComponent("\(s).json")
                     let made: (Data, UTType)? = await Task.detached(priority: .userInitiated) { [camera] in
                         guard let data = try? Data(contentsOf: f) else { return nil }
-                        if let j = try? Data(contentsOf: recipeURL), let r = try? JSONDecoder().decode(LockShot.self, from: j),
-                           let out = camera.developLeftover(data, recipe: r) { return out }
-                        return (data, UTType(filenameExtension: ext) ?? .jpeg)
+                        let r = (try? Data(contentsOf: recipeURL)).flatMap { try? JSONDecoder().decode(LockShot.self, from: $0) }
+                        if let r, let out = camera.developLeftover(data, recipe: r) { return out }
+                        // not developable: the camera's own picture, a selfie re-tagged to show as it was seen
+                        let original = r.map { $0.front ? CameraModel.selfieOriginal(data, turn: CGFloat($0.turn ?? 0)) : data } ?? data
+                        return (original, UTType(filenameExtension: ext) ?? .jpeg)
                     }.value
                     guard let made else { continue }
                     let ok = await withCheckedContinuation { c in library.save(data: made.0, type: made.1) { c.resume(returning: $0) } }

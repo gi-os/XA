@@ -12,3 +12,4 @@ vendor/
 XA/Info.plist
 Capture/Info.plist
 Control/Info.plist
+__pycache__/
