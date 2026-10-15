@@ -287,8 +287,24 @@ enum FilmLab {
         // the scene with its clipped highlights given back.
         var source = scale(scene, gain, gain, gain)
         if r != nil, let k = boostKernel, let b = k.apply(extent: full, arguments: [scene, 1.5, 0.3]) { source = scale(b, gain, gain, gain) }
-        var bounced = scale(blur(source, Fit.halationUM), 4.0 / 7, 4.0 / 7, 4.0 / 7)
-        if r != nil && !preview {
+        var bounced: CIImage
+        if r != nil && !preview && shot?.finder == true {
+            // The finder's peek: the bounces from a half-size copy. A glow is soft, and full size
+            // it was a good part of the peek's work on every frame.
+            let q: CGFloat = 0.5
+            let half = source.transformed(by: CGAffineTransform(scaleX: q, y: q))
+            let he = CGRect(x: 0, y: 0, width: full.width * q, height: full.height * q)
+            func spread(_ microns: CGFloat) -> CIImage {
+                half.clampedToExtent().applyingGaussianBlur(sigma: Double(max(0.3, microns / um * q))).cropped(to: he)
+            }
+            var b = scale(spread(Fit.halationUM), 4.0 / 7, 4.0 / 7, 4.0 / 7)
+            for (k, w) in [(2.0, 2.0 / 7), (3.0, 1.0 / 7)] {
+                b = addLight(b, scale(spread(Fit.halationUM * CGFloat(k.squareRoot())), w, w, w))
+            }
+            bounced = b.clampedToExtent().samplingLinear()
+                .transformed(by: CGAffineTransform(scaleX: 1 / q, y: 1 / q)).cropped(to: full)
+        } else if r != nil && !preview {
+            bounced = scale(blur(source, Fit.halationUM), 4.0 / 7, 4.0 / 7, 4.0 / 7)
             for (k, w) in [(2.0, 2.0 / 7), (3.0, 1.0 / 7)] {
                 bounced = addLight(bounced, scale(blur(source, Fit.halationUM * CGFloat(k.squareRoot())), w, w, w))
             }

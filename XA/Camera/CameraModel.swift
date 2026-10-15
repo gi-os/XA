@@ -222,6 +222,10 @@ final class CameraModel: NSObject, ObservableObject {
     private var _uwRatio: CGFloat = 2
     private var _uwGain = CIVector(x: 1, y: 1, z: 1)
     private var uwCount = 0
+    // Copies taken off the camera's frames without waiting for the GPU (see sideCopy): their
+    // buffers, and whether one is still on its way (under the lock).
+    private let uwPool = FramePool(), sidePool = FramePool()
+    private var uwBusy = false, sideBusy = false
     /// The viewfinder's landscape length (see XAFinder.long), set by the view.
     private var _finderLong: CGFloat = 4
     /// How far the finder's markings have swung with the camera's motion; they settle back.
@@ -1617,6 +1621,60 @@ final class CameraModel: NSObject, ObservableObject {
         let norm = bins.map { $0 / mx }
         DispatchQueue.main.async { self.meters.histogram = norm }
     }
+
+    /// A small copy of the frame (640 wide), drawn without waiting for the GPU, and what reads it:
+    /// the editors' picture, Eye AF, the histogram, the XA finder's light and the ultra-wide's
+    /// colour. They used to read the frame here on the frame queue, each waiting for the GPU,
+    /// and the viewfinder skipped a frame every time. On the frame queue.
+    func sideCopy(_ src: CIImage, mode m: CaptureMode, dev: DevelopSettings, mirror: Bool) {
+        lock.lock(); let busy = sideBusy; if !busy { sideBusy = true }; lock.unlock()
+        guard !busy else { return }
+        let e = src.extent
+        let k: CGFloat = min(1, 640 / max(e.width, 1))
+        let w = Int((e.width * k).rounded(.down)), h = Int((e.height * k).rounded(.down))
+        let small = src.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY))
+            .transformed(by: CGAffineTransform(scaleX: k, y: k))
+            .cropped(to: CGRect(x: 0, y: 0, width: w, height: h))
+        let eye = m != .video && !mirror && settings.afArea == .eye
+        let histogram = m == .pro || (m == .digi && dev.screenDate)
+        let finder = m == .film && dev.filmRecipe.xaFinder
+        let started = sidePool.buffer(width: w, height: h).map { pb in
+            GPURead.copy(small, into: pb, context: Looks.context) { copy in
+                // on GPURead's queue, one at a time
+                self.lock.lock(); self._latest = copy; self.lock.unlock()
+                if eye { self.trackEye(copy) }
+                if histogram {
+                    let s: CGFloat = 160 / CGFloat(max(w, 1))
+                    self.updateHistogram(copy.transformed(by: CGAffineTransform(scaleX: s, y: s)))
+                }
+                if finder { self.readFinderLight(copy) }
+                self.lock.lock(); self.sideBusy = false; self.lock.unlock()
+            }
+        } ?? false
+        if !started { lock.lock(); sideBusy = false; lock.unlock() }
+    }
+
+    /// The XA finder's bright frame is lit by the scene through its window: dim in the dark. And
+    /// the ultra-wide sees colour and exposure its own way: matched to the main camera, slowly.
+    /// On GPURead's queue.
+    private func readFinderLight(_ frame: CIImage) {
+        if let y = XAFinder.brightness(frame) {
+            let target = max(0.14, min(1, 0.1 + y * 2.4))
+            finderLight = finderLight * 0.6 + target * 0.4
+            let lit = finderLight
+            if abs(lit - lastLight) > 0.02 {
+                lastLight = lit
+                DispatchQueue.main.async { self.finderMotion.light = lit }
+            }
+        }
+        lock.lock(); let uw = _uw; let ratio = _uwRatio; lock.unlock()
+        if let uw, let g = XAFinder.matchGain(main: frame, wide: uw, ratio: ratio) {
+            lock.lock()
+            let gain = _uwGain
+            _uwGain = CIVector(x: gain.x * 0.75 + g.x * 0.25, y: gain.y * 0.75 + g.y * 0.25, z: gain.z * 0.75 + g.z * 0.25)
+            lock.unlock()
+        }
+    }
 }
 
 extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
@@ -1630,16 +1688,22 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             return
         }
         if output === uwOutput {
-            // Every other ultra-wide frame, small and copied out so the camera gets its buffer back.
+            // Every third ultra-wide frame, small and copied out so the camera gets its buffer
+            // back; drawn without waiting, the copy takes over once it's there.
             uwCount += 1
             guard uwCount % 3 == 0, let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+            lock.lock(); let busy = uwBusy; if !busy { uwBusy = true }; lock.unlock()
+            guard !busy else { return }
             let raw = CIImage(cvPixelBuffer: pb)
             let k: CGFloat = 480 / max(raw.extent.width, raw.extent.height, 1)
-            let small = raw.transformed(by: CGAffineTransform(scaleX: k, y: k))
-            if let cg = Looks.context.createCGImage(small, from: small.extent.integral) {
-                let img = CIImage(cgImage: cg)
-                lock.lock(); _uw = img; lock.unlock()
-            }
+            let w = Int((raw.extent.width * k).rounded(.down)), h = Int((raw.extent.height * k).rounded(.down))
+            let small = raw.transformed(by: CGAffineTransform(scaleX: k, y: k)).cropped(to: CGRect(x: 0, y: 0, width: w, height: h))
+            let started = uwPool.buffer(width: w, height: h).map { dst in
+                GPURead.copy(small, into: dst, context: Looks.context) { copy in
+                    self.lock.lock(); self._uw = copy; self.uwBusy = false; self.lock.unlock()
+                }
+            } ?? false
+            if !started { lock.lock(); uwBusy = false; lock.unlock() }
             return
         }
         viewfinderFrame(sampleBuffer)
@@ -1662,10 +1726,13 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
             #endif
         }
         if mNow.developed && mNow != .video {
-            let now = CACurrentMediaTime()
-            let gap = lowPower ? 1.0 / 20.5 : 1.0 / 31
-            if now - lastFrameAt < gap { frameCount += 1; return }
-            lastFrameAt = now
+            // By the frames' own clock, not when they happen to arrive: they arrive unevenly, and
+            // one that came a millisecond early (after a slow frame, say) was dropped, a stutter.
+            // At the camera's 30 a second nothing is dropped.
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+            let gap = lowPower ? 1.0 / 20 : 1.0 / 30
+            if pts.isFinite && pts > lastFrameAt && pts - lastFrameAt < gap * 0.8 { frameCount += 1; return }
+            lastFrameAt = pts.isFinite ? pts : 0
         }
         // Cleaned at the door: a sensor pixel below the legal video range decodes to NaN, and every
         // blur and resize downstream would spread it into a black square.
@@ -1677,17 +1744,9 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         let src = raw.transformed(by: CGAffineTransform(scaleX: k, y: k))
         let (m, dev) = frameState()
         frameCount += 1
-        // Eye AF on the rear camera, off this queue (Vision here stalled the viewfinder).
-        if m != .video && !mirror && frameCount % 6 == 3 && settings.afArea == .eye { trackEye(src) }
-        if frameCount % 10 == 0 {
-            // a small copy for the editors' previews, baked so it doesn't hold the camera's buffer
-            let s: CGFloat = 640 / max(src.extent.width, 1)
-            let small = src.transformed(by: CGAffineTransform(scaleX: s, y: s))
-            if let cg = Looks.context.createCGImage(small, from: small.extent.integral) {
-                let img = CIImage(cgImage: cg)
-                lock.lock(); _latest = img; lock.unlock()
-            }
-        }
+        // What reads the picture (the editors, Eye AF, the histogram, the finder's light) works
+        // from a small copy, five times a second, off this queue.
+        if m != .video && frameCount % 6 == 0 { sideCopy(src, mode: m, dev: dev, mirror: mirror) }
         lock.lock()
         if _switchPending { _switchPending = false; _switchStart = CACurrentMediaTime() }
         let vlook = frameVideoLook
@@ -1730,20 +1789,11 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
         let amount = digiAmount()
         if amount <= 0 {
             img = src
-            if m == .pro && frameCount % 6 == 0 {
-                let s: CGFloat = 160 / max(src.extent.width, 1)
-                updateHistogram(src.transformed(by: CGAffineTransform(scaleX: s, y: s)))
-            }
             if m == .pro && frameCount % 15 == 0 { publishMeter() }
         } else {
             // Develop the frame the way the photograph will be turned, so the date back and the
             // shape sit where they will on the print, then turn it back for the viewfinder.
             if frameCount % 15 == 0 { publishMeter() }
-            // DIGI's screen shows a histogram too (a few times a second is plenty), only when it's on.
-            if m == .digi && dev.screenDate && frameCount % 10 == 0 {
-                let s: CGFloat = 160 / max(src.extent.width, 1)
-                updateHistogram(src.transformed(by: CGAffineTransform(scaleX: s, y: s)))
-            }
             let t = turn
             let upright = Self.rotated(src, clockwise: t)
             var dev = dev
@@ -1766,7 +1816,23 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                     dev.accurate = true
                 }
             }
-            var developed = peek > 0 ? Darkroom.develop(upright, dev, date: Date(), preview: true, dateShift: 1 - amount).0 : upright
+            var developed = upright
+            if peek > 0 {
+                // The peek runs the whole lab on every frame: on a smaller copy, so it keeps up,
+                // drawn back at the finder's size.
+                let u = upright.extent
+                let k: CGFloat = dev.accurate ? min(1, 640 / max(u.width, 1)) : 1
+                let small = CGRect(x: 0, y: 0, width: (u.width * k).rounded(.down), height: (u.height * k).rounded(.down))
+                if k < 1, small.width > 8, small.height > 8 {
+                    let input = upright.transformed(by: CGAffineTransform(scaleX: small.width / u.width, y: small.height / u.height)).cropped(to: small)
+                    developed = Darkroom.develop(input, dev, date: Date(), preview: true, dateShift: 1 - amount).0
+                        .clampedToExtent()
+                        .transformed(by: CGAffineTransform(scaleX: u.width / small.width, y: u.height / small.height))
+                        .cropped(to: u)
+                } else {
+                    developed = Darkroom.develop(upright, dev, date: Date(), preview: true, dateShift: 1 - amount).0
+                }
+            }
             if peek > 0 && peek < 1 {
                 let f = CIFilter.dissolveTransition()
                 f.inputImage = upright; f.targetImage = developed; f.time = Float(peek * peek * (3 - 2 * peek))
@@ -1828,22 +1894,8 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAu
                     lastSway = sw
                     DispatchQueue.main.async { self.finderMotion.sway = sw }
                 }
-                // The bright frame is lit by the scene, through its window: dim in the dark.
-                if frameCount % 6 == 0, let y = XAFinder.brightness(shown) {
-                    let target = max(0.14, min(1, 0.1 + y * 2.4))
-                    finderLight = finderLight * 0.6 + target * 0.4
-                    let lit = finderLight
-                    if abs(lit - lastLight) > 0.02 {
-                        lastLight = lit
-                        DispatchQueue.main.async { self.finderMotion.light = lit }
-                    }
-                }
-                lock.lock(); let uw = _uw; let ratio = _uwRatio; var gain = _uwGain; let flong = _finderLong; lock.unlock()
-                if let uw, frameCount % 12 == 0, let g = XAFinder.matchGain(main: shown, wide: uw, ratio: ratio) {
-                    // The ultra-wide sees colour and exposure its own way: matched to the main camera, slowly.
-                    gain = CIVector(x: gain.x * 0.75 + g.x * 0.25, y: gain.y * 0.75 + g.y * 0.25, z: gain.z * 0.75 + g.z * 0.25)
-                    lock.lock(); _uwGain = gain; lock.unlock()
-                }
+                // (the bright frame's light and the ultra-wide's colour are read off the side copy)
+                lock.lock(); let uw = _uw; let ratio = _uwRatio; let gain = _uwGain; let flong = _finderLong; lock.unlock()
                 lock.lock(); let introStart = _introStart; lock.unlock()
                 let raw = CGFloat((CACurrentMediaTime() - introStart) / 0.75)
                 let q = max(0, min(1, raw))

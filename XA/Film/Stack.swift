@@ -233,7 +233,12 @@ enum Darkroom {
         let r = s.filmRecipe
         let frame = r.format.frame(in: img.extent)
         var meter: CIImage?
-        if !preview {
+        if preview && s.accurate {
+            // The finder's peek reads the frame's light (its glare, the lab's levels) from a small
+            // copy too, as a drum scan does: read off the frame itself, the lab drew it twice over.
+            let k = 256 / max(img.extent.width, img.extent.height, 1)
+            meter = img.transformed(by: CGAffineTransform(scaleX: k, y: k))
+        } else if !preview {
             img = img.cropped(to: frame).transformed(by: CGAffineTransform(translationX: -frame.minX, y: -frame.minY))
             // read before the scan's resample, at the camera's own size
             meter = Darkroom.reduced(img, longEdge: 1024)

@@ -166,39 +166,71 @@ enum LabAuto {
     /// under): a thin negative. Only then does the lab's lift turn the shadows muddy and off-colour.
     static func underexposure(_ img: CIImage, preview: Bool) -> Double {
         if preview {
-            lock.lock(); let u = underCached, at = underAt; lock.unlock()
-            if CACurrentMediaTime() - at < 0.3 { return u }
+            // the finder: the last reading at once, and a new one on its way when it is old
+            lock.lock(); let u = underCached, go = due(&underAt, &underBusy); lock.unlock()
+            if go {
+                let started = averageImage(img).map { out in
+                    GPURead.floats(out, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), context: context) { px in
+                        let v = average(from: px).map(under)
+                        lock.lock(); if let v { underCached = v }; underBusy = false; lock.unlock()
+                    }
+                } ?? false
+                if !started { lock.lock(); underBusy = false; lock.unlock() }
+            }
+            return u
         }
         guard let a = average(img) else { return 0 }
+        return under(a)
+    }
+    private static func under(_ a: [CGFloat]) -> Double {
         func lin(_ x: CGFloat) -> CGFloat { x <= 0.04045 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
         let y = max(1e-4, 0.2126 * lin(a[0]) + 0.7152 * lin(a[1]) + 0.0722 * lin(a[2]))
         let t = max(0, min(1, (log2(0.16 / y) - 0.9) / 1.6))
-        let u = Double(t * t * (3 - 2 * t))
-        if preview { lock.lock(); underCached = u; underAt = CACurrentMediaTime(); lock.unlock() }
-        return u
+        return Double(t * t * (3 - 2 * t))
     }
     private static var underCached: Double = 0
     private static var underAt: CFTimeInterval = 0
+    private static var underBusy = false
+
+    /// The finder's readings: a new one is due a few times a second, never two at once. Under `lock`.
+    private static func due(_ at: inout CFTimeInterval, _ busy: inout Bool) -> Bool {
+        let now = CACurrentMediaTime()
+        guard !busy, now - at >= 0.3 else { return false }
+        busy = true; at = now
+        return true
+    }
 
     /// Gains for the linear frame `img`. The viewfinder reads a few times a second and eases.
     static func correction(_ img: CIImage, strength: Double, preview: Bool) -> CIVector {
         let s = CGFloat(max(0, min(1, strength)))
         guard s > 0 else { return CIVector(x: 1, y: 1, z: 1) }
         if preview {
-            lock.lock(); let c = cached, at = cachedAt; lock.unlock()
-            if CACurrentMediaTime() - at < 0.3 { return c }
+            // the last reading at once; a new one, eased into it, when it is old
+            lock.lock(); let c = cached, go = due(&cachedAt, &cachedBusy); lock.unlock()
+            if go {
+                let started = averageImage(img).map { out in
+                    GPURead.floats(out, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), context: context) { px in
+                        lock.lock()
+                        if let a = average(from: px) {
+                            let v = gains(a, s)
+                            let c = read ? cached : v
+                            cached = CIVector(x: c.x * 0.5 + v.x * 0.5, y: c.y * 0.5 + v.y * 0.5, z: c.z * 0.5 + v.z * 0.5)
+                            read = true
+                        }
+                        cachedBusy = false
+                        lock.unlock()
+                    }
+                } ?? false
+                if !started { lock.lock(); cachedBusy = false; lock.unlock() }
+            }
+            return c
         }
         guard let a = average(img) else { return CIVector(x: 1, y: 1, z: 1) }
-        var v = gains(a, s)
-        if preview {
-            lock.lock()
-            let c = cachedAt == 0 ? v : cached
-            v = CIVector(x: c.x * 0.5 + v.x * 0.5, y: c.y * 0.5 + v.y * 0.5, z: c.z * 0.5 + v.z * 0.5)
-            cached = v; cachedAt = CACurrentMediaTime()
-            lock.unlock()
-        }
-        return v
+        return gains(a, s)
     }
+    private static var cachedBusy = false
+    /// The finder has had a reading (the first is taken as it is, the rest eased into it).
+    private static var read = false
 
     /// The gains from the frame's average (encoded sRGB, as a scanner meters).
     static func gains(_ a: [CGFloat], _ s: CGFloat) -> CIVector {
@@ -235,20 +267,29 @@ enum LabAuto {
         let s = CGFloat(max(0, min(1, strength)))
         guard s > 0 else { return CIVector(x: 0, y: 1, z: 1) }
         if preview {
-            lock.lock(); let c = scanCached, at = scanAt; lock.unlock()
-            if CACurrentMediaTime() - at < 0.3 { return c }
+            lock.lock(); let c = scanCached, go = due(&scanAt, &scanBusy); lock.unlock()
+            if go {
+                let started = statsImage(img, encoded: encoded).map { small in
+                    GPURead.floats(small, bounds: small.extent, context: context) { px in
+                        lock.lock()
+                        if let st = stats(from: px) {
+                            let v = levels(lo: st.lo, hi: st.hi, chroma: mono ? 1 : st.chroma, s)
+                            let c = scanRead ? scanCached : v
+                            scanCached = CIVector(x: c.x * 0.5 + v.x * 0.5, y: c.y * 0.5 + v.y * 0.5, z: c.z * 0.5 + v.z * 0.5)
+                            scanRead = true
+                        }
+                        scanBusy = false
+                        lock.unlock()
+                    }
+                } ?? false
+                if !started { lock.lock(); scanBusy = false; lock.unlock() }
+            }
+            return c
         }
         guard let st = stats(img, encoded: encoded) else { return CIVector(x: 0, y: 1, z: 1) }
-        var v = levels(lo: st.lo, hi: st.hi, chroma: mono ? 1 : st.chroma, s)
-        if preview {
-            lock.lock()
-            let c = scanAt == 0 ? v : scanCached
-            v = CIVector(x: c.x * 0.5 + v.x * 0.5, y: c.y * 0.5 + v.y * 0.5, z: c.z * 0.5 + v.z * 0.5)
-            scanCached = v; scanAt = CACurrentMediaTime()
-            lock.unlock()
-        }
-        return v
+        return levels(lo: st.lo, hi: st.hi, chroma: mono ? 1 : st.chroma, s)
     }
+    private static var scanBusy = false, scanRead = false
 
     /// From the frame's 2nd and 98th percentile (encoded luma) and its mean colourfulness.
     static func levels(lo: CGFloat, hi: CGFloat, chroma: CGFloat, _ s: CGFloat) -> CIVector {
@@ -279,19 +320,29 @@ enum LabAuto {
     }
 
     private static func stats(_ img: CIImage, encoded: Bool) -> (lo: CGFloat, hi: CGFloat, chroma: CGFloat)? {
+        guard let small = statsImage(img, encoded: encoded) else { return nil }
+        let b = small.extent
+        var px = [Float](repeating: 0, count: Int(b.width) * Int(b.height) * 4)
+        px.withUnsafeMutableBytes { raw in
+            context.render(small, toBitmap: raw.baseAddress!, rowBytes: Int(b.width) * 16, bounds: b, format: .RGBAf, colorSpace: nil)
+        }
+        return stats(from: px)
+    }
+
+    /// The frame at 64 px on its long side, encoded, at whole pixels: what `stats` reads.
+    private static func statsImage(_ img: CIImage, encoded: Bool) -> CIImage? {
         let e = img.extent
         guard e.width > 1, e.height > 1, e.width.isFinite else { return nil }
         let k = 64 / max(e.width, e.height)
-        var small = img.transformed(by: CGAffineTransform(scaleX: k, y: k))
+        var small = img.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY)).transformed(by: CGAffineTransform(scaleX: k, y: k))
         if !encoded { small = small.applyingFilter("CILinearToSRGBToneCurve") }
-        let b = small.extent.integral
-        let w = Int(b.width), h = Int(b.height)
-        guard w > 2, h > 2 else { return nil }
-        var px = [Float](repeating: 0, count: w * h * 4)
-        px.withUnsafeMutableBytes { raw in
-            context.render(small, toBitmap: raw.baseAddress!, rowBytes: w * 16, bounds: b, format: .RGBAf, colorSpace: nil)
-        }
-        var ys: [Float] = []; ys.reserveCapacity(w * h)
+        let b = CGRect(x: 0, y: 0, width: (e.width * k).rounded(.down), height: (e.height * k).rounded(.down))
+        guard b.width > 2, b.height > 2 else { return nil }
+        return small.cropped(to: b)
+    }
+
+    private static func stats(from px: [Float]) -> (lo: CGFloat, hi: CGFloat, chroma: CGFloat)? {
+        var ys: [Float] = []; ys.reserveCapacity(px.count / 4)
         var chroma: Float = 0
         for i in stride(from: 0, to: px.count, by: 4) {
             let r = px[i], g = px[i + 1], bl = px[i + 2]
@@ -306,6 +357,14 @@ enum LabAuto {
     }
 
     private static func average(_ img: CIImage) -> [CGFloat]? {
+        guard let out = averageImage(img) else { return nil }
+        var px = [Float](repeating: 0, count: 4)
+        context.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        return average(from: px)
+    }
+
+    /// The frame's mean colour (encoded) as one pixel at the origin.
+    private static func averageImage(_ img: CIImage) -> CIImage? {
         let e = img.extent
         guard e.width > 1, e.height > 1, e.width.isFinite else { return nil }
         let k = 64 / max(e.width, e.height)
@@ -313,10 +372,11 @@ enum LabAuto {
         let f = CIFilter.areaAverage()
         f.inputImage = small
         f.extent = small.extent
-        guard let out = f.outputImage else { return nil }
-        var px = [Float](repeating: 0, count: 4)
-        context.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
-        guard px.allSatisfy({ $0.isFinite }) else { return nil }
+        return f.outputImage
+    }
+
+    private static func average(from px: [Float]) -> [CGFloat]? {
+        guard px.count >= 4, px.allSatisfy({ $0.isFinite }) else { return nil }
         return px.prefix(3).map { CGFloat(max(0, min(1, $0))) }
     }
 }

@@ -26,6 +26,9 @@ final class PreviewView: MTKView {
         colorPixelFormat = .bgra8Unorm
         backgroundColor = .black
         contentMode = .scaleAspectFill
+        // Two drawables, not three: after a slow frame the next one waits for the screen rather
+        // than queueing behind it, so the finder never runs a frame or two behind the camera.
+        (layer as? CAMetalLayer)?.maximumDrawableCount = 2
     }
 
     required init(coder: NSCoder) { fatalError("not used") }
