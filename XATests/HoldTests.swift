@@ -66,6 +66,66 @@ final class HoldTests: XCTestCase {
         s.coordinator(turn: 180); XCTAssertEqual(s.turn, 180)
     }
 
+    // MARK: gravity decides
+
+    func testGravityGivesTheHold() {
+        // upright, the left edge down (top to the right), upside down, the right edge down
+        XCTAssertEqual(Hold.turn(gravityX: 0, y: -1), 0)
+        XCTAssertEqual(Hold.turn(gravityX: -1, y: 0), 90)
+        XCTAssertEqual(Hold.turn(gravityX: 0, y: 1), 180)
+        XCTAssertEqual(Hold.turn(gravityX: 1, y: 0), 270)
+        // tilted back 60°, still upright
+        XCTAssertEqual(Hold.turn(gravityX: 0.05, y: -0.5), 0)
+    }
+
+    func testGravityAgreesWithTheCaptureAngle() {
+        // the photo connection angle the hold gives, for each edge down: the coordinator's own
+        // numbers for the back camera (90 portrait, 0 top to the left, 180 top to the right)
+        XCTAssertEqual(Hold.backAngle(turn: Hold.turn(gravityX: 0, y: -1)), 90)
+        XCTAssertEqual(Hold.backAngle(turn: Hold.turn(gravityX: 1, y: 0)), 0)
+        XCTAssertEqual(Hold.backAngle(turn: Hold.turn(gravityX: -1, y: 0)), 180)
+        XCTAssertEqual(Hold.backAngle(turn: Hold.turn(gravityX: 0, y: 1)), 270)
+    }
+
+    func testGravityHoldsOnPastTheDiagonal() {
+        func g(_ deg: Double) -> (Double, Double) { (-sin(deg * .pi / 180), -cos(deg * .pi / 180)) }  // turning clockwise
+        var (x, y) = g(48)
+        XCTAssertEqual(Hold.turn(gravityX: x, y: y, was: 0), 0, "just past 45°: still portrait")
+        (x, y) = g(60)
+        XCTAssertEqual(Hold.turn(gravityX: x, y: y, was: 0), 90, "well past: landscape")
+        (x, y) = g(42)
+        XCTAssertEqual(Hold.turn(gravityX: x, y: y, was: 90), 90, "and on the way back it holds on too")
+        (x, y) = g(30)
+        XCTAssertEqual(Hold.turn(gravityX: x, y: y, was: 90), 0)
+    }
+
+    func testGravityBeatsAStuckCoordinator() {
+        // the Lock Screen camera: opened in portrait, the coordinator never moved again
+        var s = HoldState()
+        s.coordinator(turn: 0)
+        s.gravity(x: 1, y: 0, z: 0.1)
+        XCTAssertEqual(s.turn, 270, "turned to landscape: gravity says so")
+        s.coordinator(turn: 0)
+        XCTAssertEqual(s.turn, 270, "the coordinator's stale reading doesn't undo it")
+        s.gravity(x: 0, y: -1, z: 0)
+        XCTAssertEqual(s.turn, 0)
+        // and opened in landscape, then held upright
+        var t = HoldState()
+        t.coordinator(turn: 90)
+        t.gravity(x: 0.02, y: -0.98, z: 0.1)
+        XCTAssertEqual(t.turn, 0)
+    }
+
+    func testFlatKeepsTheLastGravityHold() {
+        var s = HoldState()
+        s.gravity(x: -0.9, y: 0, z: 0.3)
+        XCTAssertEqual(s.turn, 90)
+        s.gravity(x: 0.2, y: -0.1, z: 0.97)
+        XCTAssertEqual(s.turn, 90, "pointing at the table: which way is up can't be told")
+        s.gravity(x: 0, y: 0.9, z: 0.3)
+        XCTAssertEqual(s.turn, 180)
+    }
+
     // MARK: pixels: a 4 x 3 frame, every pixel different, top row first
 
     private let sensor: [[UInt8]] = [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11]]

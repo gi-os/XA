@@ -501,6 +501,7 @@ final class CameraModel: NSObject, ObservableObject {
         if recording { stopRecording() }
         cancelBooth()
         motion.stopDeviceMotionUpdates()
+        motion.stopAccelerometerUpdates()
         sessionQueue.async { if self.session.isRunning { self.session.stopRunning() } }
     }
     func resume() {
@@ -768,10 +769,14 @@ final class CameraModel: NSObject, ObservableObject {
         lock.lock(); angleObservation = watch; lock.unlock()
     }
 
-    /// Gravity, to tell a phone held flat (see Hold). Any queue.
+    /// Gravity: how the phone is held, and whether it's flat (see Hold). Device motion's
+    /// gravity, or the raw accelerometer when device motion isn't coming in. Any queue.
     private func noteGravity() {
-        guard let g = motion.deviceMotion?.gravity else { return }
-        lock.lock(); holdState.gravity(z: g.z); lock.unlock()
+        let g: (x: Double, y: Double, z: Double)
+        if let d = motion.deviceMotion?.gravity { g = (d.x, d.y, d.z) }
+        else if let a = motion.accelerometerData?.acceleration { g = (a.x, a.y, a.z) }
+        else { return }
+        lock.lock(); holdState.gravity(x: g.x, y: g.y, z: g.z); lock.unlock()
     }
 
     /// The hold for a shot, read at the press, fresh. BOOTH's sheet is always portrait. Main thread.
@@ -1228,7 +1233,8 @@ final class CameraModel: NSObject, ObservableObject {
         if switching { UINotificationFeedbackGenerator().notificationOccurred(.warning); return }
         frameQueue.async { self.fx.reset() }   // the frame queue owns the looks' state
         audioQueue.async { self.pocketAudio.reset() }
-        // The turn locks when the clip starts, so a take never flips halfway.
+        // The turn locks when the clip starts, so a take never flips halfway. Gravity first, fresh.
+        noteGravity()
         lock.lock(); _wantRecord = true; _lockedTurn = frameTurnLocked(); frameSegments = []; lock.unlock()
         segments = []
         recording = true
@@ -2371,9 +2377,14 @@ extension CameraModel {
 // MARK: FILM's finder
 
 extension CameraModel {
-    /// The phone's motion: gravity in every mode, to tell a phone held flat (see Hold), and
-    /// FILM's finder's sway and rangefinder patch, which want it more often.
+    /// The phone's motion: gravity in every mode, for how the phone is held (see Hold), and
+    /// FILM's finder's sway and rangefinder patch, which want it more often. The accelerometer
+    /// runs too, slowly, so the hold still has gravity to go on if device motion never arrives.
     func updateMotion() {
+        if motion.isAccelerometerAvailable {
+            motion.accelerometerUpdateInterval = 1.0 / 10
+            if !motion.isAccelerometerActive { motion.startAccelerometerUpdates() }
+        }
         guard motion.isDeviceMotionAvailable else { return }
         motion.deviceMotionUpdateInterval = mode == .film ? 1.0 / 24 : 1.0 / 10
         if !motion.isDeviceMotionActive { motion.startDeviceMotionUpdates() }
