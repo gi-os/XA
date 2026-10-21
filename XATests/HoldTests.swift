@@ -179,9 +179,11 @@ final class HoldTests: XCTestCase {
     private func turned(_ a: [[UInt8]], _ deg: Int) -> [[UInt8]] { (0..<((deg / 90) % 4)).reduce(a) { m, _ in cw(m) } }
     private func mirrored(_ a: [[UInt8]]) -> [[UInt8]] { a.map { Array($0.reversed()) } }
 
-    private func image(_ rows: [[UInt8]]) -> CIImage {
+    /// `gray`: the value in every channel, for a trip through JPEG. A JPEG keeps the colour at half
+    /// size (iOS 27's even at full quality), which blurs a red-only test pattern; grey has no colour.
+    private func image(_ rows: [[UInt8]], gray: Bool = false) -> CIImage {
         var bytes = [UInt8]()
-        for r in rows { for v in r { bytes += [v * 20, 0, 0, 255] } }
+        for r in rows { for v in r { bytes += gray ? [v * 20, v * 20, v * 20, 255] : [v * 20, 0, 0, 255] } }
         return CIImage(bitmapData: Data(bytes), bytesPerRow: rows[0].count * 4,
                        size: CGSize(width: rows[0].count, height: rows.count), format: .RGBA8, colorSpace: nil)
     }
@@ -260,7 +262,7 @@ final class HoldTests: XCTestCase {
     func testASelfieKeptAsItCameIsTaggedToShowAsItWasSeen() throws {
         // the camera's file of a selfie: the sensor frame, untagged (a JPEG at full quality)
         let plain = CIContext(options: [.useSoftwareRenderer: true, .workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
-        let cg = try XCTUnwrap(plain.createCGImage(image(sensor), from: CGRect(x: 0, y: 0, width: 4, height: 3),
+        let cg = try XCTUnwrap(plain.createCGImage(image(sensor, gray: true), from: CGRect(x: 0, y: 0, width: 4, height: 3),
                                                    format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB()))
         let file = NSMutableData()
         let d = try XCTUnwrap(CGImageDestinationCreateWithData(file, UTType.jpeg.identifier as CFString, 1, nil))
