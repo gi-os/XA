@@ -193,7 +193,7 @@ struct ProPanel: View {
     }
 }
 
-private struct EVScale: View {
+struct EVScale: View {
     let ev: Float
     let ink: Color
     var body: some View {
@@ -216,7 +216,7 @@ private struct EVScale: View {
 }
 
 /// PRO's histogram, redrawn on its own as the meter moves.
-private struct LivePanelHisto: View {
+struct LivePanelHisto: View {
     @ObservedObject var meters: LiveMeters
     let ink: Color
     var body: some View { PanelHisto(bins: meters.histogram, ink: ink) }

@@ -107,6 +107,8 @@ targets:
       - path: XA/UI/XAFinderView.swift
       - path: XA/UI/Collar.swift
       - path: XA/UI/ProPanel.swift
+      - path: XA/UI/DuoCameraView.swift
+      - path: XA/UI/DuoScreens.swift
       - path: XA/Resources/Stocks
         buildPhase: resources
       - path: XA/Resources/Boxes

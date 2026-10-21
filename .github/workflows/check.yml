@@ -15,8 +15,11 @@ concurrency:
 
 jobs:
   check:
-    runs-on: macos-15
+    # The Xcode 27 image: Xcode 27.1 is the first that builds for iPhone Duo's full screens.
+    runs-on: xcode-27
     timeout-minutes: 45
+    env:
+      XCODE_VERSION: "27.1"
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode

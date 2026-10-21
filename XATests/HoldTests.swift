@@ -126,6 +126,52 @@ final class HoldTests: XCTestCase {
         XCTAssertEqual(s.turn, 180)
     }
 
+    // MARK: iPhone Duo
+
+    func testTheFinderTurnsByWhatTheScreenNeeds() {
+        // the phone's own portrait (and the outer display): the frames are already upright
+        XCTAssertEqual(Hold.finderTurn(preview: 90, front: false), 0)
+        // the inner display held tall, either way round
+        XCTAssertEqual(Hold.finderTurn(preview: 0, front: false), 270)
+        XCTAssertEqual(Hold.finderTurn(preview: 180, front: false), 90)
+        // no reading yet: no turn
+        XCTAssertEqual(Hold.finderTurn(preview: nil, front: false), 0)
+    }
+
+    func testASelfieFinderTurnsTheOtherWay() {
+        XCTAssertEqual(Hold.finderTurn(preview: 90, front: true), 0)
+        XCTAssertEqual(Hold.finderTurn(preview: 0, front: true), 90)
+        XCTAssertEqual(Hold.finderTurn(preview: 180, front: true), 270)
+    }
+
+    func testTheInnerDisplayHandsTheHoldBackToTheCoordinator() {
+        var s = HoldState()
+        s.coordinator(turn: 0)
+        s.gravity(x: -0.9, y: 0, z: 0.2)
+        XCTAssertEqual(s.turn, 90, "closed: gravity says the hold")
+        s.coordinator(turn: 270)
+        XCTAssertEqual(s.turn, 90)
+        // opened: gravity's x and y no longer count
+        s.forgetGravity()
+        XCTAssertEqual(s.turn, 270, "the coordinator's reading, at once")
+        s.coordinator(turn: 180)
+        XCTAssertEqual(s.turn, 180)
+        // flat still holds the last hold
+        s.gravity(z: 0.97)
+        s.coordinator(turn: 0)
+        XCTAssertEqual(s.turn, 180)
+        s.gravity(z: 0.2)
+        XCTAssertEqual(s.turn, 0, "picked up again: the coordinator again")
+    }
+
+    func testOnlyTheInnerDisplayIsTallEnoughForTheBack() {
+        XCTAssertTrue(Duo.innerTall(CGSize(width: 669, height: 951)))
+        XCTAssertFalse(Duo.innerTall(CGSize(width: 951, height: 669)), "held wide")
+        XCTAssertFalse(Duo.innerTall(CGSize(width: 466, height: 678)), "the outer display")
+        XCTAssertFalse(Duo.innerTall(CGSize(width: 440, height: 956)), "the biggest iPhone")
+        XCTAssertFalse(Duo.innerTall(.zero))
+    }
+
     // MARK: pixels: a 4 x 3 frame, every pixel different, top row first
 
     private let sensor: [[UInt8]] = [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11]]
