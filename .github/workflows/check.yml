@@ -27,6 +27,7 @@ jobs:
       - name: Generate project
         run: brew install xcodegen >/dev/null && xcodegen generate
       - name: Unit tests
+        timeout-minutes: 35
         run: bash ci/test.sh
       - name: Compile for device (unsigned)
         run: bash ci/build-unsigned.sh
