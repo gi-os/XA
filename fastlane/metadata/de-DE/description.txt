@@ -1,5 +1,5 @@
 Fotografier wie 2003: greller Partyblitz, knackige CCD-Farben und das orange Datum in der Ecke. Dazu Film zum Einlegen und Entwickeln, zwölf Videokassetten und ein Sticker-Fotoautomat.
-Alle Kameras, Filme, Filmsims, Looks, Formen, Datenrückwände und Kassetten sind dabei. Kein Abo, keine Werbung, kein Konto. Trinkgeld ist freiwillig und schaltet nichts frei.
+Alle Kameras, Filme, Filmsims, Looks, Formen, Datenrückwände und Kassetten sind dabei. Kein Abo, keine Werbung, kein Konto.
 
 Fünf Kameras in einer App.
 
@@ -20,7 +20,7 @@ FILM
 • Film nach oben wischen: eine Blende pushen. Nach unten: pullen.
 • Im Labor: Minilab-Autokorrektur, Wärme und Tönung des Abzugs, Vorbelichtung.
 • Standardmäßig ein Trommelscan mit etwa 5600 dpi: Beim Zoomen siehst du Korn, keine Pixel. Als HEIC gespeichert.
-• Mit RAW-fähigem iPhone entwickelt FILM auf Wunsch direkt aus RAW.
+• Auf iPhone-Pro-Modellen mit Apple ProRAW entwickelt FILM auf Wunsch direkt aus RAW.
 
 VIDEO: ZWÖLF KASSETTEN
 • VHS: weiche Farben, Scanlines, Tracking-Streifen und die PLAY-Anzeige.
@@ -37,7 +37,7 @@ BOOTH
 
 PRO
 • Das größte Foto, das der Sensor liefert, als HEIF oder JPEG.
-• Objektivtasten, Live-Histogramm, Regler für Weißabgleich, Belichtung, Verschlusszeit, ISO und Fokus.
+• Objektivwechsel, Live-Histogramm, Regler für Weißabgleich, Belichtung, Verschlusszeit, ISO und Fokus.
 • Automatik, Zeitvorwahl, ISO-Vorwahl oder komplett manuell.
 
 GANZ DEINS
@@ -48,20 +48,19 @@ GANZ DEINS
 • Kombiniere Sim, Look, Form und Datenrückwand.
 
 IMMER BEREIT
-• Kamera auf dem Sperrbildschirm, Steuerelement im Kontrollzentrum.
-• XA lässt sich in den Einstellungen auf die Kamerasteuerung legen.
+• Kamera auf dem Sperrbildschirm für DIGI, FILM und PRO, Steuerelement im Kontrollzentrum.
+• Auf einem iPhone mit Kamerasteuerung legst du in den Einstellungen XA als Kamera der Taste fest.
 • Die Kamerasteuerung wechselt Sims und Looks (DIGI), Filme (FILM), Kassetten (VIDEO), Belichtung und Zoom (PRO). Drücken löst aus.
 • Auch die Lautstärketasten lösen aus.
 • QR-Codes im Sucher (DIGI, FILM, PRO) antippen und den Link öffnen.
 
 DEINE FOTOS
-• Fotos und Videos landen in der Fotos-App, im XA-Album, ohne Wasserzeichen.
+• Fotos und Videos landen in der Fotos-App, im XA-Album, wenn XA vollen Zugriff auf Fotos hat. Ohne Wasserzeichen.
 • Mit iCloud-Fotos gleich mitgesichert.
 • Unter dem Sucher nach oben wischen oder Roll-Taste tippen: dein Film als Kontaktbogen.
 
 NICHTS GESAMMELT
 • Kein Tracking: kein Server, keine Analyse, keine Datenerfassung.
-• Trinkgeld (am Ende von CUSTOMIZE) unterstützt XA.
 • XA ist Open Source (GPLv3): Jeder kann den Code lesen und prüfen.
 • Filmmodellierung: spektrafilm, die offene Filmsimulation von Andrea Volpato.
 

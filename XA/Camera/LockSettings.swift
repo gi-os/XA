@@ -155,4 +155,6 @@ struct LockShot: Codable {
     var crunch: Double
     var taken: Date
     var front: Bool
+    /// How the phone was held (see Hold). Optional: recipes from before it decode as portrait.
+    var turn: Double? = nil
 }

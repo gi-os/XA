@@ -11,6 +11,17 @@ import UIKit
 enum Encoder {
     static let gpu = CIContext(options: [.cacheIntermediates: false])
     static let cpu = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+
+    /// The app is on screen. In the background iOS doesn't let it use the GPU and a GPU render
+    /// comes back black, so a shot still developing then is drawn on the CPU. Set by the app.
+    static var foreground: Bool {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _foreground }
+        set { stateLock.lock(); _foreground = newValue; stateLock.unlock() }
+    }
+    private static let stateLock = NSLock()
+    private static var _foreground = true
+    /// The GPU on screen, the CPU in the background.
+    static var context: CIContext { foreground ? gpu : cpu }
     static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
 
     /// Mean of the brightest channel over a tiny copy of the picture, 0…255.
@@ -33,7 +44,7 @@ enum Encoder {
 
     static func render(_ img: CIImage, reference: CGImage?) -> CGImage? {
         let e = img.extent.integral
-        if let cg = draw(img, e, gpu), verified(cg, reference: reference) {
+        if foreground, let cg = draw(img, e, gpu), verified(cg, reference: reference) {
             return cg
         }
         return draw(img, e, cpu)

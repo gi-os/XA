@@ -1,5 +1,5 @@
 Dispara como en 2003: flashazo de fiesta, color CCD saturado y la fecha naranja en la esquina. Además, carrete para revelar, doce cintas de vídeo y una cabina de fotos.
-Cinco cámaras (DIGI, FILM, VIDEO, BOOTH y PRO) con todo incluido. Sin suscripción, anuncios ni cuenta. Las propinas son opcionales y no desbloquean nada.
+Cinco cámaras (DIGI, FILM, VIDEO, BOOTH y PRO) con todo incluido. Sin suscripción, anuncios ni cuenta.
 
 DIGI
 • Elige 1, 2, 3, 5, 8 o 12 megapíxeles.
@@ -18,7 +18,7 @@ FILM
 • Desliza una película hacia arriba para forzarla un paso; abajo, para subrevelarla.
 • En el laboratorio: autocorrección de minilab, calidez y tinte de la copia, y preexposición.
 • Escaneo de tambor a unos 5600 ppp por defecto: al ampliar ves grano, no píxeles. Se guarda en HEIC.
-• Si tu iPhone dispara en RAW, FILM puede revelarlo sin el procesado del iPhone.
+• En los iPhone Pro con Apple ProRAW, FILM puede revelar desde RAW y saltarse el procesado del iPhone.
 
 VIDEO: DOCE CINTAS
 • VHS: color suave, líneas de barrido, banda de tracking y el indicador PLAY.
@@ -35,7 +35,7 @@ BOOTH
 
 PRO
 • La foto más grande que da el sensor, en HEIF o JPEG.
-• Botones de objetivo, histograma en directo y diales de balance de blancos, exposición, velocidad, ISO y enfoque.
+• Cambio de objetivo, histograma en directo y diales de balance de blancos, exposición, velocidad, ISO y enfoque.
 • Automático, prioridad de obturación, prioridad ISO o manual.
 
 HAZLA TUYA
@@ -46,21 +46,20 @@ HAZLA TUYA
 • Combínalos: simulación, look, forma y fechador.
 
 SIEMPRE A MANO
-• Cámara en la pantalla de bloqueo y botón en el centro de control.
+• Cámara en la pantalla de bloqueo para DIGI, FILM y PRO, y botón en el centro de control.
 • Si tu iPhone tiene Control de Cámara, elige XA como su cámara en Ajustes.
 • Con Control de Cámara recorres simulaciones y looks en DIGI, películas en FILM, cintas en VIDEO, y exposición y zoom en PRO. Púlsalo para disparar.
 • Los botones de volumen también disparan.
 • Apunta a un QR en DIGI, FILM o PRO y tócalo para abrir el enlace.
 
 TUS FOTOS
-• Todo se guarda en Fotos, en un álbum XA.
+• Todo se guarda en Fotos, en un álbum XA cuando XA tiene acceso completo a Fotos.
 • Con Fotos de iCloud, se suben a la nube con tu fototeca.
 • Desliza hacia arriba bajo el visor, o toca el botón del carrete, para ver tu hoja de contactos.
 • Sin marca de agua.
 
 NO RECOPILA NADA
 • Sin rastreo: ni servidor, ni analíticas, ni recopilación de datos.
-• Las propinas opcionales (al final de Customize) ayudan a mantener XA.
 • XA es de código abierto (GPLv3): cualquiera puede leer el código y ver qué hace.
 • Simulación de película: spektrafilm, el simulador abierto de Andrea Volpato.
 

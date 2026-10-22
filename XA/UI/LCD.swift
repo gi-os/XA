@@ -54,6 +54,8 @@ struct LCDStrip: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { if slideFrom == nil { withAnimation(.easeIn(duration: 0.25)) { showZoom = false } } }
             })
         .accessibilityElement(children: camera.mode == .pro ? .contain : .combine)
+        .accessibilityValue("Zoom \(Self.zoomText(camera.zoom * camera.zoomMultiplier))")
+        .accessibilityHint("Swipe up or down to change the zoom.")
         .accessibilityAdjustableAction { dir in
             camera.setZoom(camera.zoom * (dir == .increment ? 1.25 : 0.8), ramp: true)
         }
@@ -241,14 +243,17 @@ private struct BoothLCD: View {
 struct Wake: ViewModifier {
     enum Axis { case vertical, horizontal }
     let axis: Axis
+    /// With Reduce Motion on, the screen is simply there: nothing sweeps.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var on = false
     func body(content: Content) -> some View {
         content
             .mask(alignment: axis == .vertical ? .top : .leading) {
                 GeometryReader { g in
+                    let lit = on || reduceMotion
                     Rectangle()
-                        .frame(width: axis == .horizontal ? (on ? g.size.width : 0) : g.size.width,
-                               height: axis == .vertical ? (on ? g.size.height : 0) : g.size.height)
+                        .frame(width: axis == .horizontal ? (lit ? g.size.width : 0) : g.size.width,
+                               height: axis == .vertical ? (lit ? g.size.height : 0) : g.size.height)
                 }
             }
             .onAppear { withAnimation(.linear(duration: axis == .vertical ? 0.22 : 0.3).delay(0.18)) { on = true } }
@@ -302,6 +307,7 @@ private struct Histo: View {
 
 private struct VideoLCD: View {
     @ObservedObject var camera: CameraModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var glass = true
     private let ink = Color(hex: "#2A1406"), off = Color(red: 0.16, green: 0.08, blue: 0.02).opacity(0.08), shade = Color(red: 0.35, green: 0.16, blue: 0).opacity(0.25)
 
@@ -319,11 +325,14 @@ private struct VideoLCD: View {
                         Circle().fill(camera.recording ? ink : off).frame(width: 7, height: 7)
                         label(camera.recording ? "REC" : "STBY", 9)
                     }
-                    .phaseAnimator(camera.recording ? [1.0, 0.25] : [1.0]) { v, a in v.opacity(a) } animation: { _ in .easeInOut(duration: 0.5) }
+                    // REC pulses while recording; with Reduce Motion on it stays lit (the word says REC).
+                    .phaseAnimator(camera.recording && !reduceMotion ? [1.0, 0.25] : [1.0]) { v, a in v.opacity(a) } animation: { _ in .easeInOut(duration: 0.5) }
                     SevenSeg(text: counter, height: 18, on: ink, off: off, shade: shade)
                     VStack(alignment: .leading, spacing: 1) {
                         label(camera.videoLook.title, 9)
-                        label("SP · \(fps)P", 8)
+                        // Microphone access is off: the clips are silent, and the tape says so.
+                        label(camera.micOff ? "NO MIC" : "SP · \(fps)P", 8)
+                            .accessibilityLabel(camera.micOff ? "Microphone off: videos record without sound" : "\(fps) frames a second")
                     }
                     Spacer(minLength: 0)
                 }
@@ -344,68 +353,81 @@ private struct VideoLCD: View {
 
 /// A backlight coming on: a few uneven flickers, then steady.
 private struct PowerOn: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var go = false
-    func body(content: Content) -> some View {
-        content
-            .keyframeAnimator(initialValue: 0.0, trigger: go) { view, b in
-                view.brightness(b).saturation(1 + b)
-            } keyframes: { _ in
-                KeyframeTrack {
-                    MoveKeyframe(-0.7)
-                    LinearKeyframe(0.25, duration: 0.05)
-                    LinearKeyframe(-0.6, duration: 0.05)
-                    LinearKeyframe(0.12, duration: 0.07)
-                    LinearKeyframe(-0.45, duration: 0.05)
-                    LinearKeyframe(0.2, duration: 0.1)
-                    LinearKeyframe(0, duration: 0.25)
+    @ViewBuilder func body(content: Content) -> some View {
+        if reduceMotion {
+            // Reduce Motion: no flashes, the backlight is just on.
+            content
+        } else {
+            content
+                .keyframeAnimator(initialValue: 0.0, trigger: go) { view, b in
+                    view.brightness(b).saturation(1 + b)
+                } keyframes: { _ in
+                    KeyframeTrack {
+                        MoveKeyframe(-0.7)
+                        LinearKeyframe(0.25, duration: 0.05)
+                        LinearKeyframe(-0.6, duration: 0.05)
+                        LinearKeyframe(0.12, duration: 0.07)
+                        LinearKeyframe(-0.45, duration: 0.05)
+                        LinearKeyframe(0.2, duration: 0.1)
+                        LinearKeyframe(0, duration: 0.25)
+                    }
                 }
-            }
-            .onAppear { go.toggle() }
+                .onAppear { go.toggle() }
+        }
     }
 }
 
 /// A fluorescent backlight striking: dark while the screen grows, then a stutter of flashes.
 private struct Flicker: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var go = false
-    func body(content: Content) -> some View {
-        content
-            .keyframeAnimator(initialValue: Lamp(), trigger: go) { view, l in
-                view.opacity(l.on).brightness(l.flash)
-            } keyframes: { _ in
-                KeyframeTrack(\.on) {
-                    MoveKeyframe(0.06)
-                    LinearKeyframe(0.06, duration: 0.26)
-                    LinearKeyframe(1, duration: 0.03)
-                    LinearKeyframe(0.15, duration: 0.05)
-                    LinearKeyframe(0.95, duration: 0.03)
-                    LinearKeyframe(0.3, duration: 0.07)
-                    LinearKeyframe(1, duration: 0.03)
-                    LinearKeyframe(0.6, duration: 0.05)
-                    LinearKeyframe(1, duration: 0.08)
+    @ViewBuilder func body(content: Content) -> some View {
+        if reduceMotion {
+            // Reduce Motion: no stutter and no flashes, the backlight is just on.
+            content
+        } else {
+            content
+                .keyframeAnimator(initialValue: Lamp(), trigger: go) { view, l in
+                    view.opacity(l.on).brightness(l.flash)
+                } keyframes: { _ in
+                    KeyframeTrack(\.on) {
+                        MoveKeyframe(0.06)
+                        LinearKeyframe(0.06, duration: 0.26)
+                        LinearKeyframe(1, duration: 0.03)
+                        LinearKeyframe(0.15, duration: 0.05)
+                        LinearKeyframe(0.95, duration: 0.03)
+                        LinearKeyframe(0.3, duration: 0.07)
+                        LinearKeyframe(1, duration: 0.03)
+                        LinearKeyframe(0.6, duration: 0.05)
+                        LinearKeyframe(1, duration: 0.08)
+                    }
+                    KeyframeTrack(\.flash) {
+                        MoveKeyframe(0)
+                        LinearKeyframe(0, duration: 0.29)
+                        LinearKeyframe(0.35, duration: 0.03)
+                        LinearKeyframe(0, duration: 0.15)
+                        LinearKeyframe(0.2, duration: 0.03)
+                        LinearKeyframe(0, duration: 0.2)
+                    }
                 }
-                KeyframeTrack(\.flash) {
-                    MoveKeyframe(0)
-                    LinearKeyframe(0, duration: 0.29)
-                    LinearKeyframe(0.35, duration: 0.03)
-                    LinearKeyframe(0, duration: 0.15)
-                    LinearKeyframe(0.2, duration: 0.03)
-                    LinearKeyframe(0, duration: 0.2)
-                }
-            }
-            .onAppear { go.toggle() }
+                .onAppear { go.toggle() }
+        }
     }
     struct Lamp { var on: Double = 0.06; var flash: Double = 0 }
 }
 
 /// A CRT coming on: a thin bright line opens to the full picture, then the glow comes up slowly.
 private struct TubeWarmup: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var open = false
     @State private var warm = false
     func body(content: Content) -> some View {
         content
-            .scaleEffect(x: 1, y: open ? 1 : 0.05, anchor: .center)
-            .brightness(warm ? 0 : -0.55)
-            .saturation(warm ? 1 : 0.35)
+            .scaleEffect(x: 1, y: (open || reduceMotion) ? 1 : 0.05, anchor: .center)
+            .brightness((warm || reduceMotion) ? 0 : -0.55)
+            .saturation((warm || reduceMotion) ? 1 : 0.35)
             .onAppear {
                 withAnimation(.easeOut(duration: 0.2).delay(0.16)) { open = true }
                 withAnimation(.easeIn(duration: 1.6).delay(0.3)) { warm = true }
@@ -415,20 +437,22 @@ private struct TubeWarmup: ViewModifier {
 
 /// The new readings slide in once the backlight is up.
 private struct SlideWake: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shown = false
     func body(content: Content) -> some View {
         content
-            .offset(x: shown ? 0 : 18).opacity(shown ? 1 : 0)
+            .offset(x: (shown || reduceMotion) ? 0 : 18).opacity((shown || reduceMotion) ? 1 : 0)
             .onAppear { withAnimation(.easeOut(duration: 0.3).delay(0.32)) { shown = true } }
     }
 }
 
 /// A reflective LCD left unused for years: the crystals answer slowly and the text swims in.
 private struct ColdWake: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shown = false
     func body(content: Content) -> some View {
         content
-            .opacity(shown ? 1 : 0).blur(radius: shown ? 0 : 1.6)
+            .opacity((shown || reduceMotion) ? 1 : 0).blur(radius: (shown || reduceMotion) ? 0 : 1.6)
             .onAppear { withAnimation(.easeInOut(duration: 2.0).delay(0.3)) { shown = true } }
     }
 }

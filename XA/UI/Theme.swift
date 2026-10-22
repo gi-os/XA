@@ -66,6 +66,7 @@ struct Segmented<T: Hashable>: View {
                         .background(on ? Color.white : Color.clear)
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
         .padding(3).background(XA.fill)
@@ -85,12 +86,27 @@ struct FlatSlider: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
+                // The slider below speaks the name and the value; VoiceOver skips these two.
                 Text(label).font(.system(size: 14))
                     .onTapGesture(count: 2) { if let standard { value = standard } }
+                    .accessibilityHidden(true)
                 Spacer()
                 Text(format(value)).font(XA.mono(13)).foregroundStyle(XA.orange)
+                    .accessibilityHidden(true)
             }
             Slider(value: $value, in: range).tint(XA.orange)
+                .accessibilityLabel(label)
+                .accessibilityValue(format(value))
+                // Swipe up or down: 20 steps across the range.
+                .accessibilityAdjustableAction { direction in
+                    let step = (range.upperBound - range.lowerBound) / 20
+                    let next = value + (direction == .increment ? step : -step)
+                    value = min(range.upperBound, max(range.lowerBound, next))
+                }
+                // The double-tap on the name, for VoiceOver.
+                .accessibilityActions {
+                    if let standard { Button("Reset to default") { value = standard } }
+                }
             if note != nil || standard != nil {
                 let d = standard.map { "Default \(format($0))." } ?? ""
                 Text([note, d].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " "))

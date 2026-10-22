@@ -204,26 +204,22 @@ struct PhotoEditor: View {
     private func save() {
         guard let d = fullData, let full = CIImage(data: d, options: [.applyOrientationProperty: true]) else { return }
         saving = true
-        let a = adjust, alpha = hasAlpha
+        let a = adjust, alpha = hasAlpha, small = source
         DispatchQueue.global(qos: .userInitiated).async {
-            var out = a.apply(to: full)
+            let out = a.apply(to: full)
             var props = full.properties
             let simPart = a.simID.flatMap { FilmCatalog.sim($0) }.map { " · \($0.title)" } ?? ""
             let note = "XA EDIT" + simPart + (a.look != .none ? " + \(a.look.title)" : "")
             props = Recipe.properties(from: props, recipe: note)
-            out = out.settingProperties(props)
-            guard let cs = CGColorSpace(name: CGColorSpace.sRGB) else {
-                DispatchQueue.main.async { saving = false; failed = true }
-                return
+            // Through the Encoder, as every photo is: a 48 MP original drawn in one go came back
+            // black. The small copy's own render is what each tile is checked against.
+            let reference = small.flatMap { s -> CGImage? in
+                let r = a.apply(to: s)
+                return Looks.context.createCGImage(r, from: r.extent.integral)
             }
-            let data: Data?
-            let type: UTType
-            if alpha {
-                data = Looks.context.pngRepresentation(of: out, format: .RGBA8, colorSpace: cs)
-                type = .png
-            } else {
-                data = Looks.context.jpegRepresentation(of: out, colorSpace: cs, options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.92])
-                type = .jpeg
+            let type: UTType = alpha ? .png : .jpeg
+            let data = Encoder.render(out, reference: reference).flatMap {
+                Encoder.encode($0, type: type, quality: 0.92, properties: props)
             }
             DispatchQueue.main.async {
                 guard let data else { saving = false; failed = true; return }

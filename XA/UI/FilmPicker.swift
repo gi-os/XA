@@ -123,6 +123,8 @@ struct FilmPicker: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(item.title)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     /// Load a film, with the look and shape a saved stack carries, in one change (the

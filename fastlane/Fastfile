@@ -140,7 +140,7 @@ platform :ios do
       force: true,
       app_review_information: review,
       submit_for_review: ENV["SUBMIT"] == "true",
-      automatic_release: false,
+      automatic_release: true,   # live as soon as App Review approves it
       run_precheck_before_submit: false,
       submission_information: {
         add_id_info_uses_idfa: false,

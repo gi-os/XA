@@ -264,7 +264,8 @@ enum FilmLab {
     /// s0…s2: cloud sizes in pixels per channel; g0…g2: strength per channel.
     private static let grainKernel = CIKernel(source: """
     vec3 xaHash33(vec3 p3) {
-        p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));
+        // long fractions: a short one (0.103) repeated the grain every 1000 cells
+        p3 = fract(p3 * vec3(0.1031, 0.10303, 0.0973));
         p3 += dot(p3, p3.yxz + 33.33);
         return fract((p3.xxy + p3.yxx) * p3.zyx);
     }

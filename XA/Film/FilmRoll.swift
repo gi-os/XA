@@ -158,6 +158,11 @@ enum LabAuto {
     /// camera's frames stayed display-encoded and every frame metered about half a stop bright.
     private static let context = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB) as Any,
                                                      .cacheIntermediates: false])
+    /// The same on the CPU, for a photo developing while the app is in the background, where
+    /// iOS refuses the GPU and a reading would come back black (see Encoder.foreground).
+    private static let cpuContext = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB) as Any,
+                                                        .useSoftwareRenderer: true, .cacheIntermediates: false])
+    private static var meterContext: CIContext { Encoder.foreground ? context : cpuContext }
     private static let lock = NSLock()
     private static var cached = CIVector(x: 1, y: 1, z: 1)
     private static var cachedAt: CFTimeInterval = 0
@@ -171,7 +176,7 @@ enum LabAuto {
             if go {
                 let started = averageImage(img).map { out in
                     GPURead.floats(out, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), context: context) { px in
-                        let v = average(from: px).map(under)
+                        let v = px.flatMap(average(from:)).map(under)
                         lock.lock(); if let v { underCached = v }; underBusy = false; lock.unlock()
                     }
                 } ?? false
@@ -211,7 +216,7 @@ enum LabAuto {
                 let started = averageImage(img).map { out in
                     GPURead.floats(out, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), context: context) { px in
                         lock.lock()
-                        if let a = average(from: px) {
+                        if let a = px.flatMap(average(from:)) {
                             let v = gains(a, s)
                             let c = read ? cached : v
                             cached = CIVector(x: c.x * 0.5 + v.x * 0.5, y: c.y * 0.5 + v.y * 0.5, z: c.z * 0.5 + v.z * 0.5)
@@ -272,7 +277,7 @@ enum LabAuto {
                 let started = statsImage(img, encoded: encoded).map { small in
                     GPURead.floats(small, bounds: small.extent, context: context) { px in
                         lock.lock()
-                        if let st = stats(from: px) {
+                        if let st = px.flatMap(stats(from:)) {
                             let v = levels(lo: st.lo, hi: st.hi, chroma: mono ? 1 : st.chroma, s)
                             let c = scanRead ? scanCached : v
                             scanCached = CIVector(x: c.x * 0.5 + v.x * 0.5, y: c.y * 0.5 + v.y * 0.5, z: c.z * 0.5 + v.z * 0.5)
@@ -324,7 +329,7 @@ enum LabAuto {
         let b = small.extent
         var px = [Float](repeating: 0, count: Int(b.width) * Int(b.height) * 4)
         px.withUnsafeMutableBytes { raw in
-            context.render(small, toBitmap: raw.baseAddress!, rowBytes: Int(b.width) * 16, bounds: b, format: .RGBAf, colorSpace: nil)
+            meterContext.render(small, toBitmap: raw.baseAddress!, rowBytes: Int(b.width) * 16, bounds: b, format: .RGBAf, colorSpace: nil)
         }
         return stats(from: px)
     }
@@ -359,7 +364,7 @@ enum LabAuto {
     private static func average(_ img: CIImage) -> [CGFloat]? {
         guard let out = averageImage(img) else { return nil }
         var px = [Float](repeating: 0, count: 4)
-        context.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        meterContext.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
         return average(from: px)
     }
 

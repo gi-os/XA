@@ -82,7 +82,7 @@ extension Booth {
         guard (try? handler.perform([req])) != nil, let pb = req.results?.first?.pixelBuffer else { return nil }
         // copied out, so Vision's buffer goes back to it
         let m0 = CIImage(cvPixelBuffer: pb)
-        guard let cg = Looks.context.createCGImage(m0, from: m0.extent) else { return nil }
+        guard let cg = (Encoder.foreground ? Looks.context : Encoder.cpu).createCGImage(m0, from: m0.extent) else { return nil }
         let m = CIImage(cgImage: cg)
         let e = img.extent
         let sx = e.width / max(m.extent.width, 1), sy = e.height / max(m.extent.height, 1)

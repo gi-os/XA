@@ -28,6 +28,13 @@ struct StackRow: View {
                 .overlay(Rectangle().strokeBorder(name == nil ? Color.white.opacity(0.25) : XA.orange.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: name == nil ? [3, 3] : [])))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(Self.spoken(name, index))
+    }
+    /// The slot's kind with what is in it ("Look, Vivid"), or an offer to fill it ("Add look").
+    private static func spoken(_ name: String?, _ index: Int) -> String {
+        let kind = index == 0 ? "Sim" : (index == 1 ? "Look" : "Shape")
+        guard let name else { return "Add \(kind.lowercased())" }
+        return "\(kind), \(name)"
     }
 }
 
