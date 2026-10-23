@@ -99,20 +99,8 @@ struct ToolRow<Corner: View>: View {
 
     var body: some View {
         HStack {
-            HStack(spacing: 4) {
-                RoundButton(size: 38, action: onCustomize) { Image(systemName: "slider.horizontal.3").font(.system(size: 16)) }
-                    .accessibilityLabel("Customize")
-                if camera.mode != .video {
-                    // Flash: off, auto, on. A shot the flash lit gets DIGI's party-flash look.
-                    RoundButton(size: 38, action: { settings.flash = settings.flash.next; camera.flashChanged() }) {
-                        Image(systemName: settings.flash.icon).font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(settings.flash == .on ? XA.orange : .white)
-                    }
-                    .accessibilityLabel(settings.flash.label)
-                    .transition(.opacity)
-                }
-            }
-            .frame(width: 80, alignment: .leading)
+            ToolKeys(camera: camera, settings: settings, onCustomize: onCustomize)
+                .frame(width: 80, alignment: .leading)
             Spacer(minLength: 4)
             ZoomToggle(camera: camera)
             Spacer(minLength: 4)
@@ -122,12 +110,41 @@ struct ToolRow<Corner: View>: View {
     }
 }
 
-/// The lenses as the system camera shows them: .5, 1×, 2, 5.
+/// Customize and the flash: side by side in the tool row, or stacked in the rail beside the
+/// viewfinder on iPhone Duo's outer display.
+struct ToolKeys: View {
+    @ObservedObject var camera: CameraModel
+    @ObservedObject var settings: AppSettings
+    var onCustomize: () -> Void
+    var vertical = false
+
+    var body: some View {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 4))
+        layout {
+            RoundButton(size: 38, action: onCustomize) { Image(systemName: "slider.horizontal.3").font(.system(size: 16)) }
+                .accessibilityLabel("Customize")
+            if camera.mode != .video {
+                // Flash: off, auto, on. A shot the flash lit gets DIGI's party-flash look.
+                RoundButton(size: 38, action: { settings.flash = settings.flash.next; camera.flashChanged() }) {
+                    Image(systemName: settings.flash.icon).font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(settings.flash == .on ? XA.orange : .white)
+                }
+                .accessibilityLabel(settings.flash.label)
+                .transition(.opacity)
+            }
+        }
+    }
+}
+
+/// The lenses as the system camera shows them: .5, 1×, 2, 5. Stacked in the outer display's
+/// rail, the longest lens is on top.
 struct ZoomToggle: View {
     @ObservedObject var camera: CameraModel
+    var vertical = false
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(camera.lenses) { l in
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 2))
+        layout {
+            ForEach(vertical ? Array(camera.lenses.reversed()) : camera.lenses) { l in
                 let on = abs(camera.zoom - l.factor) / l.factor < 0.08
                 Button { camera.setZoom(l.factor, ramp: true); UISelectionFeedbackGenerator().selectionChanged() } label: {
                     Text(on ? LCDStrip.zoomText(camera.zoom * camera.zoomMultiplier).replacingOccurrences(of: ".0×", with: "×") : l.label)
