@@ -14,6 +14,10 @@ struct DuoCameraView: View {
     var modes: [CaptureMode]
     var lockScreen: Bool
     var onLink: ((URL) -> Void)?
+    /// Held sideways, the whole back is turned this far (clockwise) against the window, to
+    /// stand as it does held tall (see CameraView). The safe areas are the window's, so they're
+    /// left out then.
+    var turnedBack: CGFloat = 0
     /// PRO: the field the command wheel changes.
     @State private var proField: ProField = .shutter
     /// The film shelf over the top half (tap the film box).
@@ -23,7 +27,7 @@ struct DuoCameraView: View {
 
     var body: some View {
         GeometryReader { g in
-            let ins = g.safeAreaInsets
+            let ins = turnedBack == 0 ? g.safeAreaInsets : EdgeInsets()
             let mid = g.size.height / 2
             let w = max(0, g.size.width - ins.leading - ins.trailing)
             let topH = max(0, mid - Duo.foldGap - ins.top)
@@ -35,7 +39,7 @@ struct DuoCameraView: View {
                     .frame(width: w, height: topH)
                     .position(x: ins.leading + w / 2, y: ins.top + topH / 2)
                 DuoDeck(camera: camera, settings: settings, proField: $proField, lamp: lamp,
-                        onRoll: onRoll, onCustomize: onCustomize, onLink: onLink)
+                        onRoll: onRoll, onCustomize: onCustomize, onLink: onLink, turnedBack: turnedBack)
                     .frame(width: w, height: bottomH)
                     .position(x: ins.leading + w / 2, y: mid + Duo.foldGap + bottomH / 2)
             }
@@ -536,13 +540,14 @@ struct DuoDeck: View {
     var onRoll: () -> Void
     var onCustomize: () -> Void
     var onLink: ((URL) -> Void)?
+    var turnedBack: CGFloat = 0
 
     var body: some View {
         GeometryReader { g in
             let k = min(g.size.width / 400, g.size.height / 270)
             ZStack(alignment: .topLeading) {
                 // the viewfinder as big as the half allows: the keys beside it are a slim column
-                DuoFinder(camera: camera, settings: settings, onLink: onLink).f5(3, 7, 337, 226, k)
+                DuoFinder(camera: camera, settings: settings, onLink: onLink, turnedBack: turnedBack).f5(3, 7, 337, 226, k)
                 strip.f5(5, 238, 333, 26, k)
                 RareKey(title: "GRID", value: settings.grid ? "ON" : "OFF", lit: settings.grid, k: k) { settings.grid.toggle() }
                     .f5(346, 110, 50, 32, k)
@@ -581,11 +586,14 @@ struct DuoFinder: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
     var onLink: ((URL) -> Void)?
+    /// The back turned against the window (see DuoCameraView): the rotation coordinator's angle
+    /// is for the window, so the picture turns that much less.
+    var turnedBack: CGFloat = 0
     /// Pinch anchor: the zoom when the pinch started.
     @State private var pinchFrom: CGFloat?
 
     var body: some View {
-        let turn = Hold.finderTurn(preview: camera.front ? camera.previewFrontAngle : camera.previewBackAngle, front: camera.front)
+        let turn = Hold.norm(Hold.finderTurn(preview: camera.front ? camera.previewFrontAngle : camera.previewBackAngle, front: camera.front) - turnedBack)
         let sideways = Int(turn.rounded()) % 180 != 0
         GeometryReader { g in
             // the picture's own box: as the frames come, before the turn
@@ -648,6 +656,31 @@ struct DuoFinder: View {
             .onAppear { if film { camera.setFinderShape(h / max(w, 1)) } }
             .onChange(of: film) { _, on in if on { camera.setFinderShape(h / max(w, 1)) } }
     }
+}
+
+/// Reports which way the window stands, whenever it is laid out (a turn lays it out again).
+struct SceneOrientationReader: UIViewRepresentable {
+    let changed: (UIInterfaceOrientation) -> Void
+
+    final class Reader: UIView {
+        var changed: ((UIInterfaceOrientation) -> Void)?
+        override func didMoveToWindow() { super.didMoveToWindow(); report() }
+        override func layoutSubviews() { super.layoutSubviews(); report() }
+        private func report() {
+            guard let o = window?.windowScene?.interfaceOrientation else { return }
+            // not in the middle of a layout pass
+            DispatchQueue.main.async { [changed] in changed?(o) }
+        }
+    }
+
+    func makeUIView(context: Context) -> Reader {
+        let v = Reader()
+        v.isUserInteractionEnabled = false
+        v.changed = changed
+        return v
+    }
+
+    func updateUIView(_ uiView: Reader, context: Context) { uiView.changed = changed }
 }
 
 /// An empty view whose layer tells the camera which screen the viewfinder is on (see

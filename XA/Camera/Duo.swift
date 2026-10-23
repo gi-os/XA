@@ -11,6 +11,13 @@ enum Duo {
         size.width >= 560 && size.height >= size.width * 1.2
     }
 
+    /// The inner display held sideways (951 × 669 points). It doesn't keep to XA's portrait
+    /// lock, so the back of the camera is turned back to stand as it does held tall. No iPhone
+    /// screen turned sideways is 560 points high.
+    static func innerWide(_ size: CGSize) -> Bool {
+        size.width >= 560 && size.height >= 560 && size.width > size.height
+    }
+
     /// The outer display (or any phone screen as short): wider for its height than any iPhone
     /// (they are over 2:1), with room for a rail of controls beside the viewfinder.
     static func outer(_ size: CGSize) -> Bool {

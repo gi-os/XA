@@ -15,8 +15,6 @@ enum XAFinder {
     static let LH: CGFloat = 3
     /// Room for the speed scale on one side, just enough for the bars elsewhere: the frame is as big as the screen allows.
     static let scaleMargin: CGFloat = 0.40, farMargin: CGFloat = 0.16, topMargin: CGFloat = 0.14
-    /// The least room either side of the frame and its scale, clear of the eyepiece's falloff.
-    static let edgeRoom: CGFloat = 0.22
 
     /// The landscape length for a viewfinder of this shape (height over width).
     static func long(_ hOverW: CGFloat) -> CGFloat { max(3.2, LH * hOverW) }
@@ -28,9 +26,6 @@ enum XAFinder {
         var fw = min(aw, ah * a)
         var fh = fw / a
         if fh > ah { fh = ah; fw = fh * a }
-        // A short finder (iPhone Duo's inner display, nearly 4:3) fitted the frame by its width,
-        // and the speed scale ended up in the eyepiece's dark edge. Some room is kept either side.
-        if (aw - fw) / 2 < edgeRoom { fw = aw - 2 * edgeRoom; fh = fw / a }
         return CGRect(x: scaleMargin + (aw - fw) / 2, y: (LH - fh) / 2, width: fw, height: fh)
     }
 
