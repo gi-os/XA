@@ -24,9 +24,9 @@ enum Duo {
         size.width > 0 && size.width < 560 && size.height < size.width * 1.7
     }
 
-    /// The outer display's top right has the clock, battery and the camera light: the rail
-    /// beside the viewfinder starts below them.
-    static let statusClearance: CGFloat = 88
+    /// The outer display's sidebar has the clock, battery and the camera light at its top: the
+    /// rail in it starts below them.
+    static let statusClearance: CGFloat = 96
 
     /// Points kept clear either side of the fold.
     static let foldGap: CGFloat = 22
