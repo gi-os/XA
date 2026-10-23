@@ -92,20 +92,29 @@ struct CameraView: View {
     /// right of the shutter. PRO's panel and keys still open under the viewfinder.
     private var outer: some View {
         GeometryReader { g in
-            VStack(spacing: 8) {
-                HStack(alignment: .top, spacing: 8) {
+            // The outer display keeps a sidebar down its right edge for the clock, battery and the
+            // camera light (a safe area). The rail stands in it, under them; the viewfinder and
+            // the deck take everything to its left.
+            let side = g.safeAreaInsets.trailing
+            let inSidebar = side >= 44
+            HStack(alignment: .top, spacing: inSidebar ? 0 : 8) {
+                VStack(spacing: 8) {
                     finder
+                    if camera.mode == .pro { LCDStrip(camera: camera, settings: settings, proField: $proField) }
+                    modeRows
+                    deck {
+                        ShutterRow(camera: camera, settings: settings, onRoll: onRoll, flipButton: false) { corner }
+                    }
+                }
+                .padding(.bottom, 6)
+                rail
+                    .frame(width: inSidebar ? side : 56)
                     // the clearance counts from the top of the screen, safe area included
-                    rail.padding(.top, max(0, Duo.statusClearance - g.safeAreaInsets.top))
-                }
-                if camera.mode == .pro { LCDStrip(camera: camera, settings: settings, proField: $proField) }
-                modeRows
-                deck {
-                    ShutterRow(camera: camera, settings: settings, onRoll: onRoll, flipButton: false) { corner }
-                }
+                    .padding(.top, max(0, Duo.statusClearance - g.safeAreaInsets.top))
             }
-            .padding(.horizontal, 11)
-            .padding(.bottom, 6)
+            .padding(.leading, 11)
+            .padding(.trailing, inSidebar ? 0 : 11)
+            .frame(width: g.size.width + (inSidebar ? side : 0), alignment: .leading)
         }
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
@@ -139,8 +148,8 @@ struct CameraView: View {
         .frame(width: 56)
         .animation(.snappy(duration: 0.3), value: camera.mode)
     }
-    /// The screen strip's length on its side in the rail.
-    private static let railStrip: CGFloat = 170
+    /// The screen strip's longest on its side in the rail: room for the film's whole name and the date.
+    private static let railStrip: CGFloat = 260
 
     /// The viewfinder with its taps, swipes, pinch and QR chip.
     private var finder: some View {
