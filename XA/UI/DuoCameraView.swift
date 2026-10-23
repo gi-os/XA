@@ -531,19 +531,20 @@ struct DuoDeck: View {
         GeometryReader { g in
             let k = min(g.size.width / 400, g.size.height / 270)
             ZStack(alignment: .topLeading) {
-                DuoFinder(camera: camera, settings: settings, onLink: onLink).f5(3, 7, 299, 224, k)
-                strip.f5(5, 238, 295, 26, k)
+                // the viewfinder as big as the half allows: the keys beside it are a slim column
+                DuoFinder(camera: camera, settings: settings, onLink: onLink).f5(3, 7, 337, 226, k)
+                strip.f5(5, 238, 333, 26, k)
                 RareKey(title: "GRID", value: settings.grid ? "ON" : "OFF", lit: settings.grid, k: k) { settings.grid.toggle() }
-                    .f5(310, 110, 84, 32, k)
+                    .f5(346, 110, 50, 32, k)
                 RareKey(title: "AF AREA", value: settings.afArea.label.uppercased(), k: k) {
                     let all = AFArea.allCases
                     settings.afArea = all[((all.firstIndex(of: settings.afArea) ?? 0) + 1) % all.count]
                 }
-                .f5(310, 150, 84, 32, k)
+                .f5(346, 150, 50, 32, k)
                 RareKey(title: "MENU", k: k, action: onCustomize)
-                    .f5(310, 190, 84, 32, k)
+                    .f5(346, 190, 50, 32, k)
                 RareKey(title: "ROLL", value: camera.kept > 0 ? "\(camera.kept) KEPT" : nil, lit: camera.kept > 0, k: k, action: onRoll)
-                    .f5(310, 230, 84, 32, k)
+                    .f5(346, 230, 50, 32, k)
             }
             .frame(width: 400 * k, height: 270 * k, alignment: .topLeading)
             .position(x: g.size.width / 2, y: g.size.height / 2)
@@ -712,6 +713,7 @@ struct RareKey: View {
             VStack(spacing: 2 * k) {
                 Text(title).font(F5.print(8 * k)).tracking(0.6 * k)
                     .foregroundStyle(lit ? XA.orange : F5.ink)
+                    .lineLimit(1).minimumScaleFactor(0.7)
                 if let value {
                     Text(value).font(F5.print(6 * k)).foregroundStyle(F5.ink.opacity(0.55))
                 }
