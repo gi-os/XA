@@ -34,6 +34,8 @@ struct CameraView: View {
             if Duo.innerTall(screen) {
                 DuoCameraView(camera: camera, settings: settings, onRoll: onRoll, onCustomize: onCustomize, onFilm: onFilm,
                               modes: modes, lockScreen: lockScreen, onLink: onLink)
+            } else if Duo.outer(screen) {
+                outer
             } else {
                 phone
             }
@@ -46,73 +48,20 @@ struct CameraView: View {
         .ignoresSafeArea())
     }
 
-    /// The phone layout, and iPhone Duo's outer display.
+    /// The phone layout.
     private var phone: some View {
         VStack(spacing: 8) {
-            // The tap layer is part of the view the gestures sit on: laid over it afterwards, it
-            // swallowed every touch and the pinch and swipes never arrived.
-            viewfinder
-                .overlay { FocusTapLayer(camera: camera, filmOpen: $filmOpen) }
-                // above the tap layer, or a tap on it only aimed focus
-                .overlay(alignment: .bottom) {
-                    if CameraModel.readsCodes(camera.mode), let code = camera.qrCode {
-                        // above DIGI's screen junk, whose bottom rows sit where the chip would
-                        QRChip(code: code, open: onLink).id(code)
-                            .padding(.bottom, camera.mode == .digi && settings.digiOSD ? 64 : 14)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
-                .animation(.snappy, value: camera.qrCode)
-                .onReceive(NotificationCenter.default.publisher(for: .xaBackToCamera)) { _ in filmOpen = false }
-                .contentShape(Rectangle())
-                .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded(swipe))
-                .simultaneousGesture(
-                    MagnifyGesture()
-                        .onChanged { v in
-                            if pinchFrom == nil { pinchFrom = camera.zoom }
-                            camera.setZoom((pinchFrom ?? 1) * v.magnification)
-                        }
-                        .onEnded { _ in pinchFrom = nil }
-                )
+            finder
             LCDStrip(camera: camera, settings: settings, proField: $proField)
-            ZStack {
-                switch camera.mode {
-                case .digi, .film:
-                    if filmOpen { FilmControls(camera: camera, open: $filmOpen, onFilm: onFilm).transition(Self.rows) }
-                case .video:
-                    if filmOpen || camera.recording { VideoRows(camera: camera, open: $filmOpen, onFilm: onFilm).transition(Self.rows) }
-                case .pro:
-                    ProKeys(camera: camera, settings: settings, field: $proField, onCustomize: onCustomize).transition(Self.expand)
-                case .booth:
-                    EmptyView()
-                }
-            }
-            .animation(.snappy(duration: 0.32), value: camera.mode)
-            VStack(spacing: 8) {
+            modeRows
+            deck {
                 // PRO keeps settings and flash by the command wheel; the others have this row.
                 if camera.mode != .pro {
                     ToolRow(camera: camera, settings: settings, onCustomize: onCustomize) { corner }
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
                 ShutterRow(camera: camera, settings: settings, onRoll: onRoll)
-                // Under the shutter, in the space the home bar leaves: the viewfinder keeps the room.
-                ModeRibbon(camera: camera, modes: modes, drag: $ribbonDrag)
             }
-            .animation(.snappy(duration: 0.3), value: camera.mode)
-            .contentShape(Rectangle())
-            // The deck: swipe sideways to change mode, like the iPhone camera; up opens the roll.
-            // Drag sideways and the ribbon follows the finger: let go on the mode you want.
-            .gesture(DragGesture(minimumDistance: 24)
-                .onChanged { v in
-                    let dx = v.translation.width, dy = v.translation.height
-                    if !camera.recording && abs(dx) > abs(dy) * 1.3 { ribbonDrag = dx }
-                }
-                .onEnded { v in
-                    let dx = v.translation.width, dy = v.translation.height
-                    if dy < -60 && abs(dy) > abs(dx) { if !lockScreen { onRoll() } }
-                    else if !camera.recording && abs(dx) > abs(dy) * 1.3 { ModeRibbon.land(drag: dx, modes, camera) }
-                    withAnimation(.snappy(duration: 0.28)) { ribbonDrag = 0 }
-                })
         }
         .padding(.horizontal, 11)
         // The shutter sits where the system camera's does, so thumbs find it without looking;
@@ -120,6 +69,132 @@ struct CameraView: View {
         .padding(.bottom, 6)
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
+    }
+
+    /// iPhone Duo's outer display: wider for its height than a phone, so the screen strip,
+    /// the lenses, settings and the flash stand in a rail beside the viewfinder, below the clock
+    /// and battery in the top right, and the viewfinder takes the rest. The loaded film sits
+    /// right of the shutter. PRO's panel and keys still open under the viewfinder.
+    private var outer: some View {
+        GeometryReader { g in
+            VStack(spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    finder
+                    // the clearance counts from the top of the screen, safe area included
+                    rail.padding(.top, max(0, Duo.statusClearance - g.safeAreaInsets.top))
+                }
+                if camera.mode == .pro { LCDStrip(camera: camera, settings: settings, proField: $proField) }
+                modeRows
+                deck {
+                    ShutterRow(camera: camera, settings: settings, onRoll: onRoll, flipButton: false) { corner }
+                }
+            }
+            .padding(.horizontal, 11)
+            .padding(.bottom, 6)
+        }
+        .background(Color.black.ignoresSafeArea())
+        .preferredColorScheme(.dark)
+    }
+
+    /// The outer display's rail: the screen strip on its side, the lenses, settings and the flash
+    /// (PRO keeps those two by its command wheel), and the flip button.
+    private var rail: some View {
+        VStack(spacing: 10) {
+            if camera.mode != .pro {
+                // The strip turned a quarter, reading top to bottom. It gives up length before
+                // anything else in the rail when the screen is short.
+                GeometryReader { r in
+                    LCDStrip(camera: camera, settings: settings, proField: $proField)
+                        .frame(width: r.size.height)
+                        .rotationEffect(.degrees(90))
+                        .position(x: r.size.width / 2, y: r.size.height / 2)
+                }
+                .frame(width: LCDStrip.height(camera.mode) + 6)
+                .frame(minHeight: 72, maxHeight: Self.railStrip)
+            }
+            ZoomToggle(camera: camera, vertical: true)
+            if camera.mode != .pro {
+                ToolKeys(camera: camera, settings: settings, onCustomize: onCustomize, vertical: true)
+            }
+            if settings.showFlipButton {
+                RoundButton(size: 38, action: { camera.flip() }) { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 15, weight: .medium)) }
+                    .accessibilityLabel("Switch camera")
+            }
+        }
+        .frame(width: 56)
+        .animation(.snappy(duration: 0.3), value: camera.mode)
+    }
+    /// The screen strip's length on its side in the rail.
+    private static let railStrip: CGFloat = 170
+
+    /// The viewfinder with its taps, swipes, pinch and QR chip.
+    private var finder: some View {
+        // The tap layer is part of the view the gestures sit on: laid over it afterwards, it
+        // swallowed every touch and the pinch and swipes never arrived.
+        viewfinder
+            .overlay { FocusTapLayer(camera: camera, filmOpen: $filmOpen) }
+            // above the tap layer, or a tap on it only aimed focus
+            .overlay(alignment: .bottom) {
+                if CameraModel.readsCodes(camera.mode), let code = camera.qrCode {
+                    // above DIGI's screen junk, whose bottom rows sit where the chip would
+                    QRChip(code: code, open: onLink).id(code)
+                        .padding(.bottom, camera.mode == .digi && settings.digiOSD ? 64 : 14)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.snappy, value: camera.qrCode)
+            .onReceive(NotificationCenter.default.publisher(for: .xaBackToCamera)) { _ in filmOpen = false }
+            .contentShape(Rectangle())
+            .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded(swipe))
+            .simultaneousGesture(
+                MagnifyGesture()
+                    .onChanged { v in
+                        if pinchFrom == nil { pinchFrom = camera.zoom }
+                        camera.setZoom((pinchFrom ?? 1) * v.magnification)
+                    }
+                    .onEnded { _ in pinchFrom = nil }
+            )
+    }
+
+    /// What a mode opens under the screen: the film rows, VIDEO's rows, PRO's keys.
+    private var modeRows: some View {
+        ZStack {
+            switch camera.mode {
+            case .digi, .film:
+                if filmOpen { FilmControls(camera: camera, open: $filmOpen, onFilm: onFilm).transition(Self.rows) }
+            case .video:
+                if filmOpen || camera.recording { VideoRows(camera: camera, open: $filmOpen, onFilm: onFilm).transition(Self.rows) }
+            case .pro:
+                ProKeys(camera: camera, settings: settings, field: $proField, onCustomize: onCustomize).transition(Self.expand)
+            case .booth:
+                EmptyView()
+            }
+        }
+        .animation(.snappy(duration: 0.32), value: camera.mode)
+    }
+
+    /// The deck: `rows`, then the mode ribbon under them.
+    private func deck<Rows: View>(@ViewBuilder _ rows: () -> Rows) -> some View {
+        VStack(spacing: 8) {
+            rows()
+            // Under the shutter, in the space the home bar leaves: the viewfinder keeps the room.
+            ModeRibbon(camera: camera, modes: modes, drag: $ribbonDrag)
+        }
+        .animation(.snappy(duration: 0.3), value: camera.mode)
+        .contentShape(Rectangle())
+        // The deck: swipe sideways to change mode, like the iPhone camera; up opens the roll.
+        // Drag sideways and the ribbon follows the finger: let go on the mode you want.
+        .gesture(DragGesture(minimumDistance: 24)
+            .onChanged { v in
+                let dx = v.translation.width, dy = v.translation.height
+                if !camera.recording && abs(dx) > abs(dy) * 1.3 { ribbonDrag = dx }
+            }
+            .onEnded { v in
+                let dx = v.translation.width, dy = v.translation.height
+                if dy < -60 && abs(dy) > abs(dx) { if !lockScreen { onRoll() } }
+                else if !camera.recording && abs(dx) > abs(dy) * 1.3 { ModeRibbon.land(drag: dx, modes, camera) }
+                withAnimation(.snappy(duration: 0.28)) { ribbonDrag = 0 }
+            })
     }
 
     /// The corner of the tool row: the loaded film folded into an angled box (swipe it for the
@@ -564,15 +639,21 @@ private struct MPMenu: View {
     private var spec: String { "\(settings.digiMegapixels)MP" }
 }
 
-private struct ShutterRow: View {
+private struct ShutterRow<Trailing: View>: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
     var onRoll: () -> Void
+    /// The flip button right of the shutter; without it, `trailing` sits there (the outer
+    /// display's rail has the flip button).
+    var flipButton = true
+    @ViewBuilder var trailing: () -> Trailing
     var body: some View {
         HStack(spacing: 28) {
             if settings.showRollButton { rollButton } else { Color.clear.frame(width: 50, height: 50) }
             shutter
-            if settings.showFlipButton {
+            if !flipButton {
+                trailing().frame(width: 80)
+            } else if settings.showFlipButton {
                 RoundButton(size: 50, action: { camera.flip() }) { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 20, weight: .medium)) }
                     .accessibilityLabel("Switch camera")
             } else { Color.clear.frame(width: 50, height: 50) }
@@ -625,6 +706,12 @@ private struct ShutterRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(camera.kept > 0 ? "Open the roll. Photos access is off: \(camera.kept) \(camera.kept == 1 ? "picture" : "pictures") kept in XA" : "Open the roll")
+    }
+}
+
+extension ShutterRow where Trailing == EmptyView {
+    init(camera: CameraModel, settings: AppSettings, onRoll: @escaping () -> Void) {
+        self.init(camera: camera, settings: settings, onRoll: onRoll, flipButton: true) { EmptyView() }
     }
 }
 

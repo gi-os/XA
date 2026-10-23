@@ -11,6 +11,16 @@ enum Duo {
         size.width >= 560 && size.height >= size.width * 1.2
     }
 
+    /// The outer display (or any phone screen as short): wider for its height than any iPhone
+    /// (they are over 2:1), with room for a rail of controls beside the viewfinder.
+    static func outer(_ size: CGSize) -> Bool {
+        size.width > 0 && size.width < 560 && size.height < size.width * 1.7
+    }
+
+    /// The outer display's top right has the clock, battery and the camera light: the rail
+    /// beside the viewfinder starts below them.
+    static let statusClearance: CGFloat = 88
+
     /// Points kept clear either side of the fold.
     static let foldGap: CGFloat = 22
 }
