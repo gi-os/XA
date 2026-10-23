@@ -10,6 +10,11 @@ struct XAFinderView: View {
     @ObservedObject var camera: CameraModel
     let format: FilmFormat
     var leaving = false
+    /// What the eyepiece falls off into: black on the phone, the body's colour on iPhone Duo's
+    /// back, so the finder doesn't sit in a black box.
+    var surround: Color = .black
+    /// The eased black at the top, under the phone's Dynamic Island. Not on iPhone Duo's back.
+    var fadesTop = true
     fileprivate static let cream = Color(red: 0.957, green: 0.925, blue: 0.835)
     /// Black to clear along a smoothstep, so neither end of the fade shows as a line.
     private static let topFade: [Gradient.Stop] = stride(from: 0.0, through: 1.0, by: 0.1).map { x in
@@ -30,12 +35,12 @@ struct XAFinderView: View {
                 SwayLayer(motion: camera.finderMotion) {
                   ZStack {
                     RadialGradient(stops: [.init(color: .clear, location: 0.8),
-                                           .init(color: .black.opacity(0.5), location: 0.92),
-                                           .init(color: .black.opacity(0.95), location: 1)],
+                                           .init(color: surround.opacity(0.5), location: 0.92),
+                                           .init(color: surround.opacity(0.95), location: 1)],
                                    center: .center, startRadius: 0, endRadius: hypot(g.size.width, g.size.height) / 2)
-                    Rectangle().stroke(Color.black, lineWidth: min(g.size.width, g.size.height) * 0.1)
+                    Rectangle().stroke(surround, lineWidth: min(g.size.width, g.size.height) * 0.1)
                         .blur(radius: min(g.size.width, g.size.height) * 0.05)
-                    Rectangle().stroke(Color.black, lineWidth: 80).padding(-40)
+                    Rectangle().stroke(surround, lineWidth: 80).padding(-40)
                   }
                 }
                 // The top of the finder, under the Dynamic Island: the scene behind the speed scale
@@ -43,10 +48,12 @@ struct XAFinderView: View {
                 // half dark there, a straight line across the screen. This one stays put and is
                 // fully black at the edge, eased, so the finder melts into the black above it.
                 // Under the markings: the scale stays as bright as the rest of them.
-                VStack(spacing: 0) {
-                    LinearGradient(stops: Self.topFade, startPoint: .top, endPoint: .bottom)
-                        .frame(height: max(56, g.size.height * 0.11))
-                    Spacer(minLength: 0)
+                if fadesTop {
+                    VStack(spacing: 0) {
+                        LinearGradient(stops: Self.topFade, startPoint: .top, endPoint: .bottom)
+                            .frame(height: max(56, g.size.height * 0.11))
+                        Spacer(minLength: 0)
+                    }
                 }
                 // the finder, in its own landscape space, turned with the body
                 SwayLayer(motion: camera.finderMotion, turned: true) {
