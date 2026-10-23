@@ -6,6 +6,12 @@ import UIKit
 final class AppDelegate: NSObject, UIApplicationDelegate {
     static var allowed: UIInterfaceOrientationMask = .portrait
 
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        LaunchLog.mark("app delegate")
+        Diagnostics.shared.start()
+        return true
+    }
+
     func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
         Self.allowed
     }
