@@ -29,6 +29,17 @@ enum Hold {
     /// mirrored, so it turns the other way: turned, then mirrored, is mirrored, then turned back.
     static func frameTurn(_ t: CGFloat, front: Bool) -> CGFloat { front ? norm(360 - t) : t }
 
+    /// iPhone Duo: how far the viewfinder's picture turns, clockwise, on the screen it is on. The
+    /// frames come upright for the phone's own portrait (`portraitAngle`); the inner display held
+    /// tall is that portrait on its side. A rotation coordinator given a layer on the screen says
+    /// the angle the frames would need there (`a`): the difference is the turn. A selfie frame is
+    /// mirrored, so it turns the other way. No reading, no turn.
+    static func finderTurn(preview a: CGFloat?, front: Bool) -> CGFloat {
+        guard let a else { return 0 }
+        let d = norm(a - portraitAngle)
+        return front ? norm(360 - d) : d
+    }
+
     /// Gravity's z (out of the screen) says the phone is nearly horizontal: which way is up can't
     /// be told. In above 0.85 (about 32° from flat), out below 0.75, so it doesn't flicker.
     static func isFlat(z: Double, was: Bool) -> Bool { abs(z) > (was ? 0.75 : 0.85) }
@@ -78,6 +89,14 @@ struct HoldState: Equatable {
         let t = Hold.turn(gravityX: x, y: y, was: fromGravity)
         fromGravity = t
         confident = t
+    }
+
+    /// Gravity's x and y stop counting (iPhone Duo open on the inner display, where the motion
+    /// frame needn't be the camera's): from here the coordinator says the hold again.
+    mutating func forgetGravity() {
+        fromGravity = nil
+        flat = false
+        if let raw { confident = raw }
     }
 
     /// Only how flat the phone is (no x and y to go on): the coordinator decides.

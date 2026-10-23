@@ -142,6 +142,14 @@ final class CameraModel: NSObject, ObservableObject {
     private var angleObservation: NSKeyValueObservation?
     /// How the phone is held (see Hold). Under `lock`.
     private var holdState = HoldState()
+    /// iPhone Duo: the back of the camera is up on the inner display (see noteGravity). Under `lock`.
+    private var _duoInner = false
+    /// iPhone Duo: the angle each camera's frames would need on the screen the viewfinder is on,
+    /// from rotation coordinators given a layer there (see previewJoined). Main thread.
+    @Published private(set) var previewBackAngle: CGFloat?
+    @Published private(set) var previewFrontAngle: CGFloat?
+    private var previewCoordinators: [AVCaptureDevice.RotationCoordinator] = []
+    private var previewWatches: [NSKeyValueObservation] = []
     /// Camera switches queued or running (a flip, BOOTH coming or going): no shot is taken until
     /// they are done, so a picture is never turned and mirrored for the other camera. Under `lock`.
     private var _switches = 0
@@ -776,7 +784,11 @@ final class CameraModel: NSObject, ObservableObject {
         if let d = motion.deviceMotion?.gravity { g = (d.x, d.y, d.z) }
         else if let a = motion.accelerometerData?.acceleration { g = (a.x, a.y, a.z) }
         else { return }
-        lock.lock(); holdState.gravity(x: g.x, y: g.y, z: g.z); lock.unlock()
+        lock.lock()
+        // iPhone Duo open on the inner display: the motion frame needn't be the camera's, so only
+        // how flat the phone is counts, and the rotation coordinator says the hold.
+        if _duoInner { holdState.gravity(z: g.z) } else { holdState.gravity(x: g.x, y: g.y, z: g.z) }
+        lock.unlock()
     }
 
     /// The hold for a shot, read at the press, fresh. BOOTH's sheet is always portrait. Main thread.
@@ -2799,3 +2811,48 @@ extension CameraModel {
     }
 }
 #endif
+
+// MARK: iPhone Duo
+
+extension CameraModel {
+    /// The inner display's viewfinder joined a window. Held tall, the inner display is the phone's
+    /// own portrait on its side, so frames that come upright for that portrait need a turn to sit
+    /// upright there. A rotation coordinator given a layer on the screen says how far, for each
+    /// camera (see Hold.finderTurn). A coordinator made without a layer never reports a preview
+    /// angle, so these are made here, apart from the one that says how the phone is held. Main thread.
+    func previewJoined(_ layer: CALayer) {
+        previewWatches.forEach { $0.invalidate() }
+        previewWatches = []
+        previewCoordinators = []
+        let cameras: [(front: Bool, device: AVCaptureDevice?)] = [
+            (false, Self.backCamera()),
+            (true, AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front))
+        ]
+        for (front, device) in cameras {
+            guard let device else { continue }
+            let rc = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: layer)
+            previewCoordinators.append(rc)
+            notePreview(rc.videoRotationAngleForHorizonLevelPreview, front: front)
+            previewWatches.append(rc.observe(\.videoRotationAngleForHorizonLevelPreview, options: [.new]) { [weak self] rc, _ in
+                let a = rc.videoRotationAngleForHorizonLevelPreview
+                DispatchQueue.main.async { self?.notePreview(a, front: front) }
+            })
+        }
+    }
+
+    private func notePreview(_ a: CGFloat, front: Bool) {
+        if front { if previewFrontAngle != a { previewFrontAngle = a } }
+        else if previewBackAngle != a { previewBackAngle = a }
+    }
+
+    /// The back of the camera came up on the inner display, or went. While it is up, gravity's x
+    /// and y don't say the hold (see noteGravity). Main thread.
+    func setDuoInner(_ on: Bool) {
+        lock.lock()
+        if _duoInner != on {
+            _duoInner = on
+            if on { holdState.forgetGravity() }
+        }
+        lock.unlock()
+    }
+}
