@@ -28,12 +28,26 @@ struct CameraView: View {
     /// The whole screen, safe areas and all: iPhone Duo's inner display held tall gets the back
     /// of the camera instead of the phone layout.
     @State private var screen: CGSize = .zero
+    /// Which way the window stands: on iPhone Duo's inner display held sideways, the back of
+    /// the camera is turned against it.
+    @State private var sceneOrientation: UIInterfaceOrientation = .portrait
 
     var body: some View {
         Group {
             if Duo.innerTall(screen) {
                 DuoCameraView(camera: camera, settings: settings, onRoll: onRoll, onCustomize: onCustomize, onFilm: onFilm,
                               modes: modes, lockScreen: lockScreen, onLink: onLink)
+            } else if Duo.innerWide(screen) {
+                // Held sideways, the inner display turns the window anyway (it doesn't keep to
+                // the portrait lock): the back of the camera is turned back, so it stays put on
+                // the glass as it is held tall, the shutter under the same thumb.
+                let back: CGFloat = sceneOrientation == .landscapeLeft ? 90 : -90
+                DuoCameraView(camera: camera, settings: settings, onRoll: onRoll, onCustomize: onCustomize, onFilm: onFilm,
+                              modes: modes, lockScreen: lockScreen, onLink: onLink, turnedBack: back)
+                    .frame(width: screen.height, height: screen.width)
+                    .rotationEffect(.degrees(Double(back)))
+                    .frame(width: screen.width, height: screen.height)
+                    .ignoresSafeArea()
             } else if Duo.outer(screen) {
                 outer
             } else {
@@ -46,6 +60,7 @@ struct CameraView: View {
                 .onChange(of: g.size) { _, s in screen = s }
         }
         .ignoresSafeArea())
+        .background(SceneOrientationReader { o in if o != sceneOrientation { sceneOrientation = o } })
     }
 
     /// The phone layout.

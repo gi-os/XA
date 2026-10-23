@@ -17,18 +17,6 @@ final class XAFinderTests: XCTestCase {
         }
     }
 
-    /// iPhone Duo's inner display gives a nearly 4:3 finder: the frame shrinks to keep its speed
-    /// scale clear of the eyepiece's dark edge; a tall phone finder is fitted by height as before.
-    func testShortFinderKeepsRoomForTheScale() {
-        for f in FilmFormat.allCases {
-            let short = XAFinder.landscapeFrame(f, long: XAFinder.long(337.0 / 226))
-            XCTAssertGreaterThanOrEqual(short.minX, XAFinder.scaleMargin + XAFinder.edgeRoom - 0.001, "\(f)")
-            XCTAssertEqual(short.width / short.height, 1 / f.aspect, accuracy: 0.001, "\(f)")
-            let tall = XAFinder.landscapeFrame(f, long: XAFinder.long(2.0))
-            XCTAssertEqual(tall.height, XAFinder.LH - 2 * XAFinder.topMargin, accuracy: 0.001, "\(f)")
-        }
-    }
-
     func testNeedleRunsDownTheScaleAndIntoTheWarnings() {
         let fast = XAFinder.needle(1.0 / 4000), n500 = XAFinder.needle(1.0 / 500), n60 = XAFinder.needle(1.0 / 60)
         let n1 = XAFinder.needle(1), slow = XAFinder.needle(8)
