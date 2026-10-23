@@ -31,7 +31,7 @@ struct DuoCameraView: View {
             ZStack(alignment: .topLeading) {
                 F5.body
                 DuoBack(camera: camera, settings: settings, proField: $proField, shelf: $shelf, lamp: $lamp,
-                        onFilm: onFilm, modes: modes)
+                        onFilm: onFilm, modes: Self.unfoldedModes(modes))
                     .frame(width: w, height: topH)
                     .position(x: ins.leading + w / 2, y: ins.top + topH / 2)
                 DuoDeck(camera: camera, settings: settings, proField: $proField, lamp: lamp,
@@ -44,10 +44,20 @@ struct DuoCameraView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             camera.setDuoInner(true)
-            // The back of a camera faces away from you: the back camera, except in BOOTH.
-            if camera.front && camera.mode != .booth { camera.setFront(false) }
+            backCameraOnly()
         }
+        .onChange(of: camera.mode) { _, _ in backCameraOnly() }
+        .onChange(of: camera.front) { _, _ in backCameraOnly() }
         .onDisappear { camera.setDuoInner(false) }
+    }
+
+    /// Open, the Duo is the back of a camera: no BOOTH and no selfie camera. BOOTH (from the
+    /// outer display, or the Lock Screen camera's settings) comes back as DIGI.
+    static func unfoldedModes(_ modes: [CaptureMode]) -> [CaptureMode] { modes.filter { $0 != .booth } }
+
+    private func backCameraOnly() {
+        if camera.mode == .booth { camera.mode = Self.unfoldedModes(modes).first ?? .digi }
+        if camera.front { camera.setFront(false) }
     }
 }
 
@@ -531,19 +541,20 @@ struct DuoDeck: View {
         GeometryReader { g in
             let k = min(g.size.width / 400, g.size.height / 270)
             ZStack(alignment: .topLeading) {
-                DuoFinder(camera: camera, settings: settings, onLink: onLink).f5(3, 7, 299, 224, k)
-                strip.f5(5, 238, 295, 26, k)
+                // the viewfinder as big as the half allows: the keys beside it are a slim column
+                DuoFinder(camera: camera, settings: settings, onLink: onLink).f5(3, 7, 337, 226, k)
+                strip.f5(5, 238, 333, 26, k)
                 RareKey(title: "GRID", value: settings.grid ? "ON" : "OFF", lit: settings.grid, k: k) { settings.grid.toggle() }
-                    .f5(310, 110, 84, 32, k)
+                    .f5(346, 110, 50, 32, k)
                 RareKey(title: "AF AREA", value: settings.afArea.label.uppercased(), k: k) {
                     let all = AFArea.allCases
                     settings.afArea = all[((all.firstIndex(of: settings.afArea) ?? 0) + 1) % all.count]
                 }
-                .f5(310, 150, 84, 32, k)
+                .f5(346, 150, 50, 32, k)
                 RareKey(title: "MENU", k: k, action: onCustomize)
-                    .f5(310, 190, 84, 32, k)
+                    .f5(346, 190, 50, 32, k)
                 RareKey(title: "ROLL", value: camera.kept > 0 ? "\(camera.kept) KEPT" : nil, lit: camera.kept > 0, k: k, action: onRoll)
-                    .f5(310, 230, 84, 32, k)
+                    .f5(346, 230, 50, 32, k)
             }
             .frame(width: 400 * k, height: 270 * k, alignment: .topLeading)
             .position(x: g.size.width / 2, y: g.size.height / 2)
@@ -581,7 +592,8 @@ struct DuoFinder: View {
             let w = sideways ? g.size.height : g.size.width
             let h = sideways ? g.size.width : g.size.height
             ZStack {
-                Color.black
+                // FILM's eyepiece falls off into the body, not into a black box around it
+                camera.mode == .film && settings.filmRecipe.xaFinder ? F5.body : Color.black
                 if camera.authorized == false {
                     CameraDeniedNote(firstOpen: camera.needsFirstOpen)
                 } else {
@@ -624,9 +636,9 @@ struct DuoFinder: View {
             .overlay { if settings.grid && !film { GridLines() } }
             .overlay {
                 if film {
-                    XAFinderView(camera: camera, format: settings.filmRecipe.format)
+                    XAFinderView(camera: camera, format: settings.filmRecipe.format, surround: F5.body, fadesTop: false)
                 } else if camera.leavingFilm {
-                    XAFinderView(camera: camera, format: settings.filmRecipe.format, leaving: true)
+                    XAFinderView(camera: camera, format: settings.filmRecipe.format, leaving: true, surround: F5.body, fadesTop: false)
                 } else {
                     FocusBracket(camera: camera)
                 }
@@ -712,6 +724,7 @@ struct RareKey: View {
             VStack(spacing: 2 * k) {
                 Text(title).font(F5.print(8 * k)).tracking(0.6 * k)
                     .foregroundStyle(lit ? XA.orange : F5.ink)
+                    .lineLimit(1).minimumScaleFactor(0.7)
                 if let value {
                     Text(value).font(F5.print(6 * k)).foregroundStyle(F5.ink.opacity(0.55))
                 }
@@ -778,16 +791,12 @@ struct Grip: View {
     let k: CGFloat
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            hatch
-                .frame(width: 89 * k, height: 104 * k)
-                .clipShape(UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(topLeading: 0, bottomLeading: 70 * k, bottomTrailing: 0, topTrailing: 0)))
-            hatch
-                .frame(width: 36 * k, height: 166 * k)
-                .offset(x: 53 * k, y: 104 * k)
-        }
-        .frame(width: 89 * k, height: 270 * k, alignment: .topLeading)
-        .allowsHitTesting(false)
+        // One outline and one hatch: as two pieces, the rounded pad and the strip under it had a
+        // seam where they met, and the pad's curve ran into the strip with a step.
+        hatch
+            .frame(width: 89 * k, height: 270 * k)
+            .clipShape(GripShape())
+            .allowsHitTesting(false)
     }
 
     private var hatch: some View {
@@ -803,6 +812,25 @@ struct Grip: View {
             }
             ctx.stroke(p, with: .color(Color.white.opacity(0.035)), lineWidth: max(0.5, 0.8 * k))
         }
+    }
+}
+
+/// The grip: the thumb pad at the top, curving down into the strip along the edge. In the
+/// grip's 89 × 270 units, scaled to the frame it is given.
+struct GripShape: Shape {
+    func path(in r: CGRect) -> Path {
+        let sx = r.width / 89, sy = r.height / 270
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: r.minX + x * sx, y: r.minY + y * sy) }
+        var path = Path()
+        path.move(to: p(0, 0))
+        path.addLine(to: p(89, 0))
+        path.addLine(to: p(89, 270))
+        path.addLine(to: p(53, 270))
+        path.addLine(to: p(53, 118))
+        // down the strip's edge and out round the pad, with no corner where they meet
+        path.addCurve(to: p(0, 34), control1: p(53, 72), control2: p(0, 82))
+        path.closeSubpath()
+        return path
     }
 }
 
