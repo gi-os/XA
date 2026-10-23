@@ -8,6 +8,7 @@ import StoreKit
 @main
 struct XAApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    init() { LaunchLog.begin() }
     var body: some Scene {
         WindowGroup { RootView() }
     }
@@ -33,6 +34,7 @@ struct RootView: View {
     @Environment(\.requestReview) private var requestReview
 
     init() {
+        LaunchLog.mark("root view")
         let s = AppSettings()
         _settings = StateObject(wrappedValue: s)
         // made once (a StateObject's value is made lazily, on first use), and the camera starts
@@ -82,6 +84,7 @@ struct RootView: View {
     private func lifecycle<V: View>(_ v: V) -> some View {
         v
         .onAppear {
+            LaunchLog.mark("first screen")
             camera.onStackChange = { pushContext() }
             camera.start()
             CameraSounds.shared.prepare()
@@ -104,9 +107,13 @@ struct RootView: View {
         .task { await ingestLockScreenShots() }
         .task {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
+            LaunchLog.mark("roll")
             rollMounted = true
             // the tip jar listens for tips that finish later (Ask to Buy), once the camera is up
             if TipJar.enabled { _ = TipJar.shared }
+            // up and running for a while: the launch is over, nothing more is written
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            LaunchLog.end()
         }
         // The Lock Screen camera opened the app (its roll, settings or film buttons).
         .onContinueUserActivity(NSUserActivityTypeLockedCameraCapture) { a in

@@ -442,6 +442,7 @@ final class CameraModel: NSObject, ObservableObject {
         if Self.demo.active { return }
         #endif
         guard !openedEarly, AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { return }
+        LaunchLog.mark("camera opens early")
         openedEarly = true
         let multi = wantsUltraWide
         lock.lock(); _launchMulti = multi; lock.unlock()
@@ -459,8 +460,10 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     func start() {
+        LaunchLog.mark("camera start")
         // the hold is known before the camera opens: a press in the first moments is turned right
         watchHold()
+        LaunchLog.mark("motion")
         updateMotion()
         loadFavorites()
         countKept()
@@ -548,8 +551,10 @@ final class CameraModel: NSObject, ObservableObject {
         // once, by the first configure only.
         lock.lock(); let multi = _launchMulti; _launchMulti = false; lock.unlock()
         guard input == nil else { return }
+        LaunchLog.mark("configure\(multi ? " (two cameras)" : "")")
         if multi && !multiCamFailed && !multiCam {
             if configureMulti() { multiCam = true; return }
+            LaunchLog.mark("two cameras failed: one camera")
             // Not marked as failed: the camera may only have been busy a moment. The plain
             // session opens, and updateUltraWide tries the two cameras again as it always did.
             input = nil; device = nil; uwInput = nil
@@ -566,6 +571,7 @@ final class CameraModel: NSObject, ObservableObject {
             return
         }
         configureTries = 0
+        LaunchLog.mark("camera \(dev.deviceType.rawValue)")
         session.addInput(inp)
         device = dev; input = inp
         if session.canAddOutput(photoOutput) { session.addOutput(photoOutput) }
@@ -578,18 +584,26 @@ final class CameraModel: NSObject, ObservableObject {
         let raw = photoOutput.isAppleProRAWSupported
         applyCapturePolicy(flash: settings.flash != .off)
         let m = frameState().0
+        LaunchLog.mark("photo output")
         setupPhotoOutput(dev, m)
+        LaunchLog.mark("camera control")
         addControls(dev, m)
+        LaunchLog.mark("commit")
         session.commitConfiguration()
+        LaunchLog.mark("lenses")
         setupLenses(dev)
+        LaunchLog.mark("rotation")
         applyRotation()
+        LaunchLog.mark("mode \(m)")
         // Everything the mode needs goes on before the camera starts: added to a running session,
         // the QR reader, the microphone or BOOTH's selfie camera each rebuilt the camera's whole
         // pipeline a moment after it opened, holding up the first frames.
         updateQR(m)
         if m == .video { addAudioIfNeeded() }
         if m == .booth { switchCamera(toFront: true) }
+        LaunchLog.mark("start running")
         session.startRunning()
+        LaunchLog.mark("running")
         applyProOnQueue(m)
         DispatchQueue.main.async {
             // remembered: a launch straight into FILM's two cameras never asks the plain session
@@ -760,12 +774,23 @@ final class CameraModel: NSObject, ObservableObject {
 
     /// How the phone is held comes from the back camera's rotation coordinator, made once and
     /// kept: a new one for every flip or rebuilt session started from nothing and forgot the
-    /// last hold, and the selfie camera's own sits the other way round (see Hold). On the
-    /// session queue.
+    /// last hold, and the selfie camera's own sits the other way round (see Hold). Main thread
+    /// (from start) or the session queue (from applyRotation).
+    ///
+    /// The camera and the coordinator are looked up outside `lock`. At launch this runs on the
+    /// main thread while openEarly's configure() is on the session queue, inside the session's
+    /// begin/commitConfiguration, taking `lock` for the mode and the photo sizes. Holding `lock`
+    /// across AVFoundation's own calls here could leave each side waiting on the other: only on a
+    /// phone with a camera (the simulator finds none), and a launch stuck like that is killed by
+    /// the system without a crash report.
     private func watchHold(_ active: AVCaptureDevice? = nil) {
-        lock.lock()
-        guard rotation == nil, let back = active?.position == .back ? active : Self.backCamera() else { lock.unlock(); return }
+        lock.lock(); let made = rotation != nil; lock.unlock()
+        guard !made, let back = active?.position == .back ? active : Self.backCamera() else { return }
+        LaunchLog.mark("rotation coordinator")
         let rc = AVCaptureDevice.RotationCoordinator(device: back, previewLayer: nil)
+        lock.lock()
+        // start() and applyRotation() can both get here first: the first one made is kept
+        guard rotation == nil else { lock.unlock(); return }
         rotation = rc
         lock.unlock()
         // (outside the lock: the first reading arrives right away, and takes it)
@@ -2460,6 +2485,7 @@ extension CameraModel {
         guard let wide = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
               let uw = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back),
               let wIn = try? AVCaptureDeviceInput(device: wide), let uIn = try? AVCaptureDeviceInput(device: uw) else { return false }
+        LaunchLog.mark("two cameras: \(wide.deviceType.rawValue), \(uw.deviceType.rawValue)")
         let ms = AVCaptureMultiCamSession()
         session = ms
         ms.beginConfiguration()
@@ -2490,8 +2516,11 @@ extension CameraModel {
         photoOutput.maxPhotoQualityPrioritization = .quality
         applyCapturePolicy(flash: settings.flash != .off)
         let m = frameState().0
+        LaunchLog.mark("two cameras: photo output")
         setupPhotoOutput(wide, m)
+        LaunchLog.mark("two cameras: camera control")
         addControls(wide, m)
+        LaunchLog.mark("two cameras: commit")
         ms.commitConfiguration()
         // Too much for this phone at this quality: drop the ultra-wide rather than the photo.
         // (The cameras are only taken on once the session is known to run: set before this,
@@ -2503,7 +2532,9 @@ extension CameraModel {
         lock.lock(); _uwRatio = CGFloat(ratio.isFinite && ratio > 1 ? ratio : 2); _uwGain = CIVector(x: 1, y: 1, z: 1); lock.unlock()
         setupLenses(wide)
         applyRotation()
+        LaunchLog.mark("two cameras: start running")
         ms.startRunning()
+        LaunchLog.mark("two cameras: running")
         applyProOnQueue(m)
         DispatchQueue.main.async { self.preparePhotos() }
         return true

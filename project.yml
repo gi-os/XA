@@ -39,6 +39,10 @@ targets:
         NSPhotoLibraryAddUsageDescription: XA saves the pictures and videos you take to Photos.
         NSPhotoLibraryUsageDescription: XA files your pictures in an XA album and shows them as its roll.
         PHPhotoLibraryPreventAutomaticLimitedAccessAlert: true
+        # Files > On My iPhone > XA: the launch logs and iOS's crash reports (Diagnostics), and
+        # pictures waiting for Photos access (Pending). See LaunchLog.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
         UIUserInterfaceStyle: Dark
         NSUserActivityTypes:
           - NSUserActivityTypeLockedCameraCapture
