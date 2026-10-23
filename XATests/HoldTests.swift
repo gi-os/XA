@@ -126,6 +126,52 @@ final class HoldTests: XCTestCase {
         XCTAssertEqual(s.turn, 180)
     }
 
+    // MARK: iPhone Duo
+
+    func testTheFinderTurnsByWhatTheScreenNeeds() {
+        // the phone's own portrait (and the outer display): the frames are already upright
+        XCTAssertEqual(Hold.finderTurn(preview: 90, front: false), 0)
+        // the inner display held tall, either way round
+        XCTAssertEqual(Hold.finderTurn(preview: 0, front: false), 270)
+        XCTAssertEqual(Hold.finderTurn(preview: 180, front: false), 90)
+        // no reading yet: no turn
+        XCTAssertEqual(Hold.finderTurn(preview: nil, front: false), 0)
+    }
+
+    func testASelfieFinderTurnsTheOtherWay() {
+        XCTAssertEqual(Hold.finderTurn(preview: 90, front: true), 0)
+        XCTAssertEqual(Hold.finderTurn(preview: 0, front: true), 90)
+        XCTAssertEqual(Hold.finderTurn(preview: 180, front: true), 270)
+    }
+
+    func testTheInnerDisplayHandsTheHoldBackToTheCoordinator() {
+        var s = HoldState()
+        s.coordinator(turn: 0)
+        s.gravity(x: -0.9, y: 0, z: 0.2)
+        XCTAssertEqual(s.turn, 90, "closed: gravity says the hold")
+        s.coordinator(turn: 270)
+        XCTAssertEqual(s.turn, 90)
+        // opened: gravity's x and y no longer count
+        s.forgetGravity()
+        XCTAssertEqual(s.turn, 270, "the coordinator's reading, at once")
+        s.coordinator(turn: 180)
+        XCTAssertEqual(s.turn, 180)
+        // flat still holds the last hold
+        s.gravity(z: 0.97)
+        s.coordinator(turn: 0)
+        XCTAssertEqual(s.turn, 180)
+        s.gravity(z: 0.2)
+        XCTAssertEqual(s.turn, 0, "picked up again: the coordinator again")
+    }
+
+    func testOnlyTheInnerDisplayIsTallEnoughForTheBack() {
+        XCTAssertTrue(Duo.innerTall(CGSize(width: 669, height: 951)))
+        XCTAssertFalse(Duo.innerTall(CGSize(width: 951, height: 669)), "held wide")
+        XCTAssertFalse(Duo.innerTall(CGSize(width: 466, height: 678)), "the outer display")
+        XCTAssertFalse(Duo.innerTall(CGSize(width: 440, height: 956)), "the biggest iPhone")
+        XCTAssertFalse(Duo.innerTall(.zero))
+    }
+
     // MARK: pixels: a 4 x 3 frame, every pixel different, top row first
 
     private let sensor: [[UInt8]] = [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11]]
@@ -133,9 +179,11 @@ final class HoldTests: XCTestCase {
     private func turned(_ a: [[UInt8]], _ deg: Int) -> [[UInt8]] { (0..<((deg / 90) % 4)).reduce(a) { m, _ in cw(m) } }
     private func mirrored(_ a: [[UInt8]]) -> [[UInt8]] { a.map { Array($0.reversed()) } }
 
-    private func image(_ rows: [[UInt8]]) -> CIImage {
+    /// `gray`: the value in every channel, for a trip through JPEG. A JPEG keeps the colour at half
+    /// size (iOS 27's even at full quality), which blurs a red-only test pattern; grey has no colour.
+    private func image(_ rows: [[UInt8]], gray: Bool = false) -> CIImage {
         var bytes = [UInt8]()
-        for r in rows { for v in r { bytes += [v * 20, 0, 0, 255] } }
+        for r in rows { for v in r { bytes += gray ? [v * 20, v * 20, v * 20, 255] : [v * 20, 0, 0, 255] } }
         return CIImage(bitmapData: Data(bytes), bytesPerRow: rows[0].count * 4,
                        size: CGSize(width: rows[0].count, height: rows.count), format: .RGBA8, colorSpace: nil)
     }
@@ -214,7 +262,7 @@ final class HoldTests: XCTestCase {
     func testASelfieKeptAsItCameIsTaggedToShowAsItWasSeen() throws {
         // the camera's file of a selfie: the sensor frame, untagged (a JPEG at full quality)
         let plain = CIContext(options: [.useSoftwareRenderer: true, .workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
-        let cg = try XCTUnwrap(plain.createCGImage(image(sensor), from: CGRect(x: 0, y: 0, width: 4, height: 3),
+        let cg = try XCTUnwrap(plain.createCGImage(image(sensor, gray: true), from: CGRect(x: 0, y: 0, width: 4, height: 3),
                                                    format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB()))
         let file = NSMutableData()
         let d = try XCTUnwrap(CGImageDestinationCreateWithData(file, UTType.jpeg.identifier as CFString, 1, nil))

@@ -92,7 +92,7 @@ struct LCDStrip: View {
 // MARK: panels
 
 /// Old green reflective LCD: no backlight, faint pixel grid, glare.
-private struct GreenPanel: View {
+struct GreenPanel: View {
     var body: some View {
         LinearGradient(colors: [Color(hex: "#AAB697"), Color(hex: "#96A382")], startPoint: .top, endPoint: .bottom)
             .overlay(PixelGrid(alpha: 0.04))
@@ -102,7 +102,7 @@ private struct GreenPanel: View {
 }
 
 /// Backlit panel: bright in the middle, falling off at the edges, glowing past its frame.
-private struct LitPanel: View {
+struct LitPanel: View {
     let center: Color, mid: Color, edge: Color, glow: Color
     var body: some View {
         RadialGradient(colors: [center, mid, edge], center: UnitPoint(x: 0.46, y: 0.38), startRadius: 0, endRadius: 220)

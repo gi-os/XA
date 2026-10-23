@@ -25,8 +25,29 @@ struct CameraView: View {
     @State private var proField: ProField = .shutter
     /// The deck's sideways drag, for the ribbon to follow.
     @State private var ribbonDrag: CGFloat = 0
+    /// The whole screen, safe areas and all: iPhone Duo's inner display held tall gets the back
+    /// of the camera instead of the phone layout.
+    @State private var screen: CGSize = .zero
 
     var body: some View {
+        Group {
+            if Duo.innerTall(screen) {
+                DuoCameraView(camera: camera, settings: settings, onRoll: onRoll, onCustomize: onCustomize, onFilm: onFilm,
+                              modes: modes, lockScreen: lockScreen, onLink: onLink)
+            } else {
+                phone
+            }
+        }
+        .background(GeometryReader { g in
+            Color.clear
+                .onAppear { screen = g.size }
+                .onChange(of: g.size) { _, s in screen = s }
+        }
+        .ignoresSafeArea())
+    }
+
+    /// The phone layout, and iPhone Duo's outer display.
+    private var phone: some View {
         VStack(spacing: 8) {
             // The tap layer is part of the view the gestures sit on: laid over it afterwards, it
             // swallowed every touch and the pinch and swipes never arrived.
@@ -242,7 +263,7 @@ struct CameraView: View {
     }
 }
 
-private struct GridLines: View {
+struct GridLines: View {
     var body: some View {
         GeometryReader { g in
             Path { p in
@@ -262,7 +283,7 @@ private struct GridLines: View {
 
 /// Three rows, SIM, LOOK and SHAPE: swipe up and down to change row, sideways to pick. After a
 /// few seconds untouched they fold into one button showing what is loaded.
-private struct FilmControls: View {
+struct FilmControls: View {
     @ObservedObject var camera: CameraModel
     @Binding var open: Bool
     var onFilm: () -> Void
@@ -440,7 +461,7 @@ struct FilmStrip: View {
 // MARK: VIDEO
 
 /// Video looks as tapes and cartridges, and the sim they are shot through.
-private struct VideoRows: View {
+struct VideoRows: View {
     @ObservedObject var camera: CameraModel
     @Binding var open: Bool
     var onFilm: () -> Void
@@ -609,7 +630,7 @@ private struct ShutterRow: View {
 
 /// The on-screen shutter fires the instant a finger lands. Modes change by swiping the deck
 /// around it, never on the button, so nothing has to wait to find out what the finger meant.
-private struct ShutterKey<Label: View>: View {
+struct ShutterKey<Label: View>: View {
     @ObservedObject var camera: CameraModel
     @ViewBuilder var label: () -> Label
     /// Resets itself when the touch ends or is taken away (a system swipe, a sheet), so a
@@ -630,7 +651,7 @@ private struct ShutterKey<Label: View>: View {
 }
 
 /// Tap to aim focus; the first tap folds the film rows if they are open. Double-tap flips.
-private struct FocusTapLayer: View {
+struct FocusTapLayer: View {
     @ObservedObject var camera: CameraModel
     @Binding var filmOpen: Bool
     var body: some View {
@@ -648,7 +669,7 @@ private struct FocusTapLayer: View {
 }
 
 /// Four thin corners where focus is aimed: orange while it hunts, white once locked. Fades when idle.
-private struct FocusBracket: View {
+struct FocusBracket: View {
     @ObservedObject var camera: CameraModel
     @State private var visible = false
     var body: some View {
@@ -846,7 +867,7 @@ private struct Unfold: ViewModifier {
 
 /// The viewfinder's blink as the shutter fires: white like a phone, black like an SLR's mirror
 /// flipping up, or nothing. BOOTH's is its flash, so it is always white.
-private struct ShutterBlinkView: View {
+struct ShutterBlinkView: View {
     @ObservedObject var camera: CameraModel
     @ObservedObject var settings: AppSettings
     var body: some View {
@@ -878,7 +899,7 @@ enum QRLink {
     }
 }
 
-private struct QRChip: View {
+struct QRChip: View {
     let code: String
     var open: ((URL) -> Void)?
     @State private var copied = false
@@ -929,7 +950,7 @@ struct FavoriteStar: View {
 }
 
 /// Camera access was refused: what to do about it, and in the app a way straight there.
-private struct CameraDeniedNote: View {
+struct CameraDeniedNote: View {
     /// The Lock Screen camera before XA has ever asked for the camera.
     var firstOpen = false
     @Environment(\.openURL) private var openURL
