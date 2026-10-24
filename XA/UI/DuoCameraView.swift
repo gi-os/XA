@@ -653,8 +653,6 @@ struct DuoFinder: View {
             }
             .overlay { FocusTapLayer(camera: camera, filmOpen: .constant(false)) }
             .overlay { ShutterBlinkView(camera: camera, settings: settings) }
-            .onAppear { if film { camera.setFinderShape(h / max(w, 1)) } }
-            .onChange(of: film) { _, on in if on { camera.setFinderShape(h / max(w, 1)) } }
     }
 }
 

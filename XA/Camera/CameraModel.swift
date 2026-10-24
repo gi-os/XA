@@ -248,6 +248,8 @@ final class CameraModel: NSObject, ObservableObject {
     private var lastSideAt: Double = 0
     /// The viewfinder's landscape length (see XAFinder.long), set by the view.
     private var _finderLong: CGFloat = 4
+    /// The finder view whose shape `_finderLong` is (see claimFinderShape). Main thread.
+    private var finderOwner: UUID?
     /// How far the finder's markings have swung with the camera's motion; they settle back.
     /// How far the finder's markings have swung with the camera's motion. Its own object, so the
     /// 30 updates a second move only the finder, not every view that watches the camera.
@@ -2571,6 +2573,18 @@ extension CameraModel {
     func setFinderShape(_ hOverW: CGFloat) {
         let l = XAFinder.long(hOverW)
         lock.lock(); _finderLong = l; lock.unlock()
+    }
+
+    /// The finder on screen claims the shape when it appears, and only it changes it after. On
+    /// iPhone Duo, folding or unfolding swaps one layout's finder for another's, and the one
+    /// going away could report its size last: the picture was then composed for the other
+    /// screen's finder, small inside the frame lines drawn for this one. Main thread.
+    func claimFinderShape(_ owner: UUID, _ hOverW: CGFloat) {
+        finderOwner = owner
+        setFinderShape(hOverW)
+    }
+    func updateFinderShape(_ owner: UUID, _ hOverW: CGFloat) {
+        if finderOwner == owner { setFinderShape(hOverW) }
     }
 
     /// A point on the XA finder (normalised to the finder) → the same point on the camera's

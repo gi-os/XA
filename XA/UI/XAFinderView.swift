@@ -24,6 +24,8 @@ struct XAFinderView: View {
     private var cream: Color { Self.cream }
     /// Arriving: the finder starts too big for the screen and steps back to fit.
     @State private var arrived = false
+    /// This finder, to the camera (see CameraModel.claimFinderShape).
+    @State private var id = UUID()
 
     var body: some View {
         GeometryReader { g in
@@ -72,6 +74,9 @@ struct XAFinderView: View {
             }
             .opacity(arrived ? 1 : 0.0001)
             .overlay(Color.clear)
+            // the picture is composed for exactly this box, so it sits in these frame lines
+            .onAppear { camera.claimFinderShape(id, g.size.height / max(g.size.width, 1)) }
+            .onChange(of: g.size) { _, s in camera.updateFinderShape(id, s.height / max(s.width, 1)) }
             .onAppear {
                 if leaving {
                     arrived = true
