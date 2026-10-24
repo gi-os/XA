@@ -243,43 +243,50 @@ private struct Masonry: View {
     @Namespace private var table
     /// The table's width, measured. (Inside a GeometryReader the piles had no height of their
     /// own in the scroll view, so it was guessed, and a guess off by a print cut the day short
-    /// or left a hole under it.)
+    /// or left a hole under it.) Measured on an empty row that takes exactly the width it is
+    /// offered: measured on the columns themselves, a first guess wider than the room (the
+    /// main screen's width, on iPhone Duo wider than the roll) held the columns at that width
+    /// for good, prints cut off on both sides.
     @State private var width: CGFloat = UIScreen.main.bounds.width - 24
 
     var body: some View {
         let gap: CGFloat = columns == 2 ? 16 : (columns == 3 ? 12 : 9)
         let cw = max(1, (width - gap * CGFloat(columns - 1)) / CGFloat(columns))
         let cols = layout(width: cw, gap: gap)
-        HStack(alignment: .top, spacing: gap) {
-            ForEach(0..<columns, id: \.self) { c in
-                VStack(spacing: gap + 8) {
-                    ForEach(cols.items[c], id: \.id) { p in
-                        PileView(pile: p, width: cw, library: library, onStep: onStep, onRestack: { onAction(p, .restack) })
-                            // Every print is the same print wherever it lies: fanning a pile
-                            // slides its prints out of it into their places, and restacking
-                            // slides them back in, across columns.
-                            .matchedGeometryEffect(id: p.id, in: table)
-                            .background {
-                                if p.fanOf == nil && p.assets.count > 1 {
-                                    ZStack {
-                                        ForEach(p.assets.dropFirst(), id: \.localIdentifier) { a in
-                                            Color.clear.matchedGeometryEffect(id: a.localIdentifier, in: table)
+        VStack(alignment: .leading, spacing: 0) {
+            Color.clear.frame(height: 0)
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { w in
+                    if w > 0 && abs(w - width) > 0.5 { width = w }
+                }
+            HStack(alignment: .top, spacing: gap) {
+                ForEach(0..<columns, id: \.self) { c in
+                    VStack(spacing: gap + 8) {
+                        ForEach(cols.items[c], id: \.id) { p in
+                            PileView(pile: p, width: cw, library: library, onStep: onStep, onRestack: { onAction(p, .restack) })
+                                // Every print is the same print wherever it lies: fanning a pile
+                                // slides its prints out of it into their places, and restacking
+                                // slides them back in, across columns.
+                                .matchedGeometryEffect(id: p.id, in: table)
+                                .background {
+                                    if p.fanOf == nil && p.assets.count > 1 {
+                                        ZStack {
+                                            ForEach(p.assets.dropFirst(), id: \.localIdentifier) { a in
+                                                Color.clear.matchedGeometryEffect(id: a.localIdentifier, in: table)
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            .onTapGesture { onTap(p) }
-                            .contextMenu { menu(p) }
-                            .transition(.asymmetric(insertion: .identity, removal: .opacity.animation(.easeIn(duration: 0.12).delay(0.25))))
+                                .onTapGesture { onTap(p) }
+                                .contextMenu { menu(p) }
+                                .transition(.asymmetric(insertion: .identity, removal: .opacity.animation(.easeIn(duration: 0.12).delay(0.25))))
+                        }
                     }
+                    .frame(width: cw)
                 }
-                .frame(width: cw)
             }
+            .frame(width: width, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { w in
-            if w > 0 && abs(w - width) > 0.5 { width = w }
-        }
     }
 
     @ViewBuilder private func menu(_ p: Pile) -> some View {
