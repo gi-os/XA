@@ -31,24 +31,30 @@ struct CameraView: View {
     /// Which way the window stands: on iPhone Duo's inner display held sideways, the back of
     /// the camera is turned against it.
     @State private var sceneOrientation: UIInterfaceOrientation = .portrait
+    /// The window's own size, read from UIKit at every layout. Folding the Duo could leave
+    /// `screen` holding the inner display's size, and the outer display came up with the
+    /// inner display's back turned sideways; the window's size is always the screen it is on.
+    @State private var window: CGSize = .zero
+    /// What picks the layout: the window's size, or the measured one until it is known.
+    private var shape: CGSize { window == .zero ? screen : window }
 
     var body: some View {
         Group {
-            if Duo.innerTall(screen) {
+            if Duo.innerTall(shape) {
                 DuoCameraView(camera: camera, settings: settings, onRoll: onRoll, onCustomize: onCustomize, onFilm: onFilm,
                               modes: modes, lockScreen: lockScreen, onLink: onLink)
-            } else if Duo.innerWide(screen) {
+            } else if Duo.innerWide(shape) {
                 // Held sideways, the inner display turns the window anyway (it doesn't keep to
                 // the portrait lock): the back of the camera is turned back, so it stays put on
                 // the glass as it is held tall, the shutter under the same thumb.
                 let back: CGFloat = sceneOrientation == .landscapeLeft ? 90 : -90
                 DuoCameraView(camera: camera, settings: settings, onRoll: onRoll, onCustomize: onCustomize, onFilm: onFilm,
                               modes: modes, lockScreen: lockScreen, onLink: onLink, turnedBack: back)
-                    .frame(width: screen.height, height: screen.width)
+                    .frame(width: shape.height, height: shape.width)
                     .rotationEffect(.degrees(Double(back)))
-                    .frame(width: screen.width, height: screen.height)
+                    .frame(width: shape.width, height: shape.height)
                     .ignoresSafeArea()
-            } else if Duo.outer(screen) {
+            } else if Duo.outer(shape) {
                 outer
             } else {
                 phone
@@ -60,7 +66,10 @@ struct CameraView: View {
                 .onChange(of: g.size) { _, s in screen = s }
         }
         .ignoresSafeArea())
-        .background(SceneOrientationReader { o in if o != sceneOrientation { sceneOrientation = o } })
+        .background(SceneOrientationReader { o, size in
+            if o != sceneOrientation { sceneOrientation = o }
+            if size != window { window = size }
+        })
     }
 
     /// The phone layout.
@@ -116,6 +125,9 @@ struct CameraView: View {
             .padding(.trailing, inSidebar ? 0 : 11)
             .frame(width: g.size.width + (inSidebar ? side : 0), alignment: .leading)
         }
+        // how the phone is held comes from the rotation coordinator here (see noteGravity)
+        .onAppear { camera.setDuoOuter(true) }
+        .onDisappear { camera.setDuoOuter(false) }
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
     }
