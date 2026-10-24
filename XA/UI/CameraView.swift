@@ -116,6 +116,9 @@ struct CameraView: View {
             .padding(.trailing, inSidebar ? 0 : 11)
             .frame(width: g.size.width + (inSidebar ? side : 0), alignment: .leading)
         }
+        // how the phone is held comes from the rotation coordinator here (see noteGravity)
+        .onAppear { camera.setDuoOuter(true) }
+        .onDisappear { camera.setDuoOuter(false) }
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
     }

@@ -144,6 +144,8 @@ final class CameraModel: NSObject, ObservableObject {
     private var holdState = HoldState()
     /// iPhone Duo: the back of the camera is up on the inner display (see noteGravity). Under `lock`.
     private var _duoInner = false
+    /// iPhone Duo folded, on the outer display (see noteGravity). Under `lock`.
+    private var _duoOuter = false
     /// iPhone Duo: the angle each camera's frames would need on the screen the viewfinder is on,
     /// from rotation coordinators given a layer there (see previewJoined). Main thread.
     @Published private(set) var previewBackAngle: CGFloat?
@@ -812,9 +814,11 @@ final class CameraModel: NSObject, ObservableObject {
         else if let a = motion.accelerometerData?.acceleration { g = (a.x, a.y, a.z) }
         else { return }
         lock.lock()
-        // iPhone Duo open on the inner display: the motion frame needn't be the camera's, so only
-        // how flat the phone is counts, and the rotation coordinator says the hold.
-        if _duoInner { holdState.gravity(z: g.z) } else { holdState.gravity(x: g.x, y: g.y, z: g.z) }
+        // iPhone Duo, open or folded: the motion frame needn't be the camera's (folded, the outer
+        // display faces the other way from the half the sensors are in, and every photo came out
+        // upside down), so only how flat the phone is counts, and the rotation coordinator,
+        // which follows the display the camera is used from, says the hold.
+        if _duoInner || _duoOuter { holdState.gravity(z: g.z) } else { holdState.gravity(x: g.x, y: g.y, z: g.z) }
         lock.unlock()
     }
 
@@ -2896,6 +2900,17 @@ extension CameraModel {
         lock.lock()
         if _duoInner != on {
             _duoInner = on
+            if on { holdState.forgetGravity() }
+        }
+        lock.unlock()
+    }
+
+    /// The outer display's layout came up, or went: the same for the hold as the inner display.
+    /// Main thread.
+    func setDuoOuter(_ on: Bool) {
+        lock.lock()
+        if _duoOuter != on {
+            _duoOuter = on
             if on { holdState.forgetGravity() }
         }
         lock.unlock()
