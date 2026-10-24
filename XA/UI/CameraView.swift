@@ -316,11 +316,8 @@ struct CameraView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay { XAFinderView(camera: camera, format: settings.filmRecipe.format, leaving: false) }
                 .overlay { ShutterBlinkView(camera: camera, settings: settings) }
-                .background(GeometryReader { g in
-                    Color.black
-                        .onAppear { camera.setFinderShape(g.size.height / max(g.size.width, 1)) }
-                        .onChange(of: g.size) { _, s in camera.setFinderShape(s.height / max(s.width, 1)) }
-                })
+                // the finder's shape comes from XAFinderView, which sits on exactly this box
+                .background(Color.black)
         } else {
             standardFinder
         }
