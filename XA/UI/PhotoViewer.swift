@@ -29,11 +29,14 @@ struct PhotoViewer: View {
                 ForEach(assets, id: \.localIdentifier) { a in
                     PhotoPage(asset: a, library: library, zoomed: $zoomed)
                         .tag(a.localIdentifier)
-                        .ignoresSafeArea()
+                        .ignoresSafeArea(edges: .vertical)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .ignoresSafeArea()
+            // Top to bottom, not side to side: a paging TabView run under side safe areas pages
+            // by the width between them while drawing across the whole screen, so each photo sat
+            // off to one side with the next one showing (iPhone Duo keeps a strip down the side).
+            .ignoresSafeArea(edges: .vertical)
             .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { chrome.toggle() } }
             if chrome && !zoomed {
                 VStack(spacing: 0) {
