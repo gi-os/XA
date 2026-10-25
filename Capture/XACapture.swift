@@ -18,16 +18,23 @@ struct LockedCameraView: View {
     @StateObject private var settings: AppSettings
     @StateObject private var camera: CameraModel
     @State private var started = false
+    /// The app's settings, asked for the moment this camera is made rather than once its first
+    /// screen is up, so the wait for them runs alongside everything else.
+    @State private var early: Task<LockSettings?, Never>
 
     init(session: LockedCameraCaptureSession) {
         self.session = session
         let s = AppSettings()
         let folder = session.sessionContentURL
+        _early = State(initialValue: Task { await Self.lockSettings(within: 0.6) })
         _settings = StateObject(wrappedValue: s)
-        // built once (a StateObject's value is made lazily, on first use)
+        // built once (a StateObject's value is made lazily, on first use), and the camera starts
+        // opening right then, as the app's does, not once the first screen has been drawn
         _camera = StateObject(wrappedValue: {
             let c = CameraModel(settings: s)
             c.fallbackFolder = folder
+            c.holdViewfinder(true)
+            c.openEarly()
             return c
         }())
     }
@@ -40,15 +47,15 @@ struct LockedCameraView: View {
                    onLink: { open("link", link: $0) })
         .environment(\.scenePhase, .active)
         .task {
-            CameraSounds.shared.prepare()
             // The camera opens at once, while the app's settings come in (it used to wait for
             // them, up to 0.6 s, before it even started). Until they're applied the viewfinder
             // stays dark, so it still opens in the right mode with the right film instead of
             // switching a moment later. The system ends a Lock Screen camera that isn't capturing
             // within a few seconds, so this never waits long.
-            camera.holdViewfinder(true)
             camera.start()
-            if let l = await Self.lockSettings(within: 0.6) { apply(l) }
+            // the shutter's sounds after the camera, not in its way
+            CameraSounds.shared.prepare()
+            if let l = await early.value { apply(l) }
             camera.holdViewfinder(false)
             started = true
             // A late answer still counts, as long as nothing has been shot yet.
