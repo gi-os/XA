@@ -35,6 +35,8 @@ struct CameraView: View {
     /// `screen` holding the inner display's size, and the outer display came up with the
     /// inner display's back turned sideways; the window's size is always the screen it is on.
     @State private var window: CGSize = .zero
+    /// Where the status bar ends, in the window (zero when it is hidden).
+    @State private var statusBottom: CGFloat = 0
     /// What picks the layout: the window's size, or the measured one until it is known.
     private var shape: CGSize { window == .zero ? screen : window }
 
@@ -66,9 +68,10 @@ struct CameraView: View {
                 .onChange(of: g.size) { _, s in screen = s }
         }
         .ignoresSafeArea())
-        .background(SceneOrientationReader { o, size in
+        .background(SceneOrientationReader { o, size, status in
             if o != sceneOrientation { sceneOrientation = o }
             if size != window { window = size }
+            if status != statusBottom { statusBottom = status }
         })
     }
 
@@ -111,15 +114,27 @@ struct CameraView: View {
                     finder
                     if camera.mode == .pro { LCDStrip(camera: camera, settings: settings, proField: $proField) }
                     modeRows
-                    deck {
-                        ShutterRow(camera: camera, settings: settings, onRoll: onRoll, flipButton: false) { corner }
+                    if fillsOuter {
+                        // FILM filling the screen: no shutter, the modes narrow between the roll
+                        // and the film, and the finder takes the shutter's row
+                        deck(ribbon: false) {
+                            ShutterRow(camera: camera, settings: settings, onRoll: onRoll, flipButton: false,
+                                       center: AnyView(ModeRibbon(camera: camera, modes: modes, drag: $ribbonDrag)
+                                                        .frame(width: Self.narrowRibbon))) { corner }
+                        }
+                    } else {
+                        deck {
+                            ShutterRow(camera: camera, settings: settings, onRoll: onRoll, flipButton: false) { corner }
+                        }
                     }
                 }
                 .padding(.bottom, 6)
+                .animation(.snappy(duration: 0.3), value: fillsOuter)
                 rail
                     .frame(width: inSidebar ? side : 56)
-                    // the clearance counts from the top of the screen, safe area included
-                    .padding(.top, max(0, Duo.statusClearance - g.safeAreaInsets.top))
+                    // Below the camera at the top of the sidebar, counted from the top of the
+                    // screen; lower if the status bar reaches further down.
+                    .padding(.top, max(0, max(Duo.statusClearance, statusBottom + 8) - g.safeAreaInsets.top))
             }
             .padding(.leading, 11)
             .padding(.trailing, inSidebar ? 0 : 11)
@@ -160,6 +175,12 @@ struct CameraView: View {
         .frame(width: 56)
         .animation(.snappy(duration: 0.3), value: camera.mode)
     }
+    /// FILM fills the outer display (see AppSettings.filmFillsOuter).
+    private var fillsOuter: Bool { camera.mode == .film && settings.filmFillsOuter }
+    /// The modes beside the roll and the film: narrow, like the iPhone camera's, the
+    /// neighbours showing either side.
+    private static let narrowRibbon: CGFloat = 190
+
     /// The screen strip's longest on its side in the rail: room for the film's whole name and the date.
     private static let railStrip: CGFloat = 260
 
@@ -210,11 +231,11 @@ struct CameraView: View {
     }
 
     /// The deck: `rows`, then the mode ribbon under them.
-    private func deck<Rows: View>(@ViewBuilder _ rows: () -> Rows) -> some View {
+    private func deck<Rows: View>(ribbon: Bool = true, @ViewBuilder _ rows: () -> Rows) -> some View {
         VStack(spacing: 8) {
             rows()
             // Under the shutter, in the space the home bar leaves: the viewfinder keeps the room.
-            ModeRibbon(camera: camera, modes: modes, drag: $ribbonDrag)
+            if ribbon { ModeRibbon(camera: camera, modes: modes, drag: $ribbonDrag) }
         }
         .animation(.snappy(duration: 0.3), value: camera.mode)
         .contentShape(Rectangle())
@@ -679,11 +700,13 @@ private struct ShutterRow<Trailing: View>: View {
     /// The flip button right of the shutter; without it, `trailing` sits there (the outer
     /// display's rail has the flip button).
     var flipButton = true
+    /// In the shutter's place (FILM filling the outer display: the modes, no shutter).
+    var center: AnyView? = nil
     @ViewBuilder var trailing: () -> Trailing
     var body: some View {
-        HStack(spacing: 28) {
+        HStack(spacing: center == nil ? 28 : 8) {
             if settings.showRollButton { rollButton } else { Color.clear.frame(width: 50, height: 50) }
-            shutter
+            if let center { center } else { shutter }
             if !flipButton {
                 trailing().frame(width: 80)
             } else if settings.showFlipButton {
@@ -691,7 +714,7 @@ private struct ShutterRow<Trailing: View>: View {
                     .accessibilityLabel("Switch camera")
             } else { Color.clear.frame(width: 50, height: 50) }
         }
-        .frame(height: 76)
+        .frame(height: center == nil ? 76 : 60)
     }
 
     private var shutter: some View {

@@ -40,6 +40,9 @@ struct CustomizeView: View {
                             Toggle("Flip button", isOn: $settings.showFlipButton).tint(XA.orange).font(.system(size: 15))
                             Text("Without them: swipe up for the roll, double-tap the viewfinder to flip.")
                                 .font(.system(size: 12)).foregroundStyle(XA.faint)
+                            Toggle("iPhone Duo folded: FILM fills the screen", isOn: $settings.filmFillsOuter).tint(XA.orange).font(.system(size: 15))
+                            Text("No shutter on the screen: Camera Control or a volume button takes the picture.")
+                                .font(.system(size: 12)).foregroundStyle(XA.faint)
                         }
                     }
                     group("APP ICON") { IconPicker() }
