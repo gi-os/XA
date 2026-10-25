@@ -91,73 +91,77 @@ struct RollTable: View {
 
     var body: some View {
         ZStack {
-            ScrollView {
-                LazyVStack(spacing: 18) {
-                    ForEach(library.days, id: \.title) { day in
-                        Tape(text: Self.tapeText(day.assets.first?.creationDate))
-                        Masonry(piles: piles(day.assets), columns: columns, library: library, onTap: { pile in
-                            if pile.fanOf == nil && pile.assets.count > 1 {
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { _ = fanned.insert(pile.id) }
-                            } else { onOpen(pile.top) }
-                        }, onAction: { pile, action in
-                            switch action {
-                            case .restack:
-                                if let k = pile.fanOf { withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { _ = fanned.remove(k) } }
-                            case .onTop:
-                                if let k = pile.fanOf {
-                                    RollPiles.setTop(pile.top.localIdentifier, for: k)
-                                    withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { _ = fanned.remove(k); version += 1 }
+            // The table is as wide as the scroll view showing it, read outside it: the columns can
+            // never be laid out wider than the screen they're on.
+            GeometryReader { g in
+                ScrollView {
+                    LazyVStack(spacing: 18) {
+                        ForEach(library.days, id: \.title) { day in
+                            Tape(text: Self.tapeText(day.assets.first?.creationDate))
+                            Masonry(piles: piles(day.assets), columns: columns, width: max(1, g.size.width - 24), library: library, onTap: { pile in
+                                if pile.fanOf == nil && pile.assets.count > 1 {
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { _ = fanned.insert(pile.id) }
+                                } else { onOpen(pile.top) }
+                            }, onAction: { pile, action in
+                                switch action {
+                                case .restack:
+                                    if let k = pile.fanOf { withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { _ = fanned.remove(k) } }
+                                case .onTop:
+                                    if let k = pile.fanOf {
+                                        RollPiles.setTop(pile.top.localIdentifier, for: k)
+                                        withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { _ = fanned.remove(k); version += 1 }
+                                    }
+                                case .unclip:
+                                    RollPiles.unclip(pile.assets.map(\.localIdentifier)); fanned.remove(pile.fanOf ?? pile.id)
+                                    withAnimation(.snappy) { version += 1 }
+                                case .deleteRest:
+                                    library.delete(pile.others); withAnimation(.snappy) { version += 1 }
                                 }
-                            case .unclip:
-                                RollPiles.unclip(pile.assets.map(\.localIdentifier)); fanned.remove(pile.fanOf ?? pile.id)
+                            }, onStep: { pile, by in
+                                // Swipe a pile sideways: the next shot in it comes to the top.
+                                let a = pile.assets
+                                guard a.count > 1, let i = a.firstIndex(where: { $0.localIdentifier == pile.top.localIdentifier }) else { return }
+                                let next = a[((i + by) % a.count + a.count) % a.count]
+                                RollPiles.setTop(next.localIdentifier, for: pile.id)
+                                UISelectionFeedbackGenerator().selectionChanged()
                                 withAnimation(.snappy) { version += 1 }
-                            case .deleteRest:
-                                library.delete(pile.others); withAnimation(.snappy) { version += 1 }
-                            }
-                        }, onStep: { pile, by in
-                            // Swipe a pile sideways: the next shot in it comes to the top.
-                            let a = pile.assets
-                            guard a.count > 1, let i = a.firstIndex(where: { $0.localIdentifier == pile.top.localIdentifier }) else { return }
-                            let next = a[((i + by) % a.count + a.count) % a.count]
-                            RollPiles.setTop(next.localIdentifier, for: pile.id)
-                            UISelectionFeedbackGenerator().selectionChanged()
-                            withAnimation(.snappy) { version += 1 }
-                        })
-                        .id("\(day.title)-\(columns)-\(version)")
+                            })
+                            .id("\(day.title)-\(columns)-\(version)")
+                        }
+                    }
+                    .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 60)
+                }
+                .background(Table())
+                .onScrollGeometryChange(for: CGFloat.self, of: { -($0.contentOffset.y + $0.contentInsets.top) }) { _, v in
+                    overscroll = max(0, v)
+                    if dragging {
+                        if overscroll > Self.pullToClose && pullPeak <= Self.pullToClose { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+                        pullPeak = max(pullPeak, overscroll)
                     }
                 }
-                .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 60)
-            }
-            .background(Table())
-            .onScrollGeometryChange(for: CGFloat.self, of: { -($0.contentOffset.y + $0.contentInsets.top) }) { _, v in
-                overscroll = max(0, v)
-                if dragging {
-                    if overscroll > Self.pullToClose && pullPeak <= Self.pullToClose { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-                    pullPeak = max(pullPeak, overscroll)
+                .onScrollPhaseChange { old, new in
+                    if new == .interacting { dragging = true; pullPeak = 0 }
+                    if old == .interacting && new != .interacting {
+                        dragging = false
+                        // Pulled down past the top and let go: back to the camera.
+                        if max(pullPeak, overscroll) > Self.pullToClose { onPullClose?() }
+                        pullPeak = 0
+                    }
                 }
+                .simultaneousGesture(MagnifyGesture()
+                    .onChanged { v in
+                        if pinchStart == nil { pinchStart = columns; withAnimation { showCols = true } }
+                        let start = pinchStart ?? columns
+                        let want = v.magnification < 0.8 ? start + 1 : (v.magnification > 1.25 ? start - 1 : start)
+                        let c = min(4, max(2, want))
+                        if c != columns { withAnimation(.snappy) { columns = c }; UISelectionFeedbackGenerator().selectionChanged() }
+                    }
+                    .onEnded { _ in
+                        pinchStart = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { withAnimation { showCols = false } }
+                    })
             }
-            .onScrollPhaseChange { old, new in
-                if new == .interacting { dragging = true; pullPeak = 0 }
-                if old == .interacting && new != .interacting {
-                    dragging = false
-                    // Pulled down past the top and let go: back to the camera.
-                    if max(pullPeak, overscroll) > Self.pullToClose { onPullClose?() }
-                    pullPeak = 0
-                }
-            }
-            .simultaneousGesture(MagnifyGesture()
-                .onChanged { v in
-                    if pinchStart == nil { pinchStart = columns; withAnimation { showCols = true } }
-                    let start = pinchStart ?? columns
-                    let want = v.magnification < 0.8 ? start + 1 : (v.magnification > 1.25 ? start - 1 : start)
-                    let c = min(4, max(2, want))
-                    if c != columns { withAnimation(.snappy) { columns = c }; UISelectionFeedbackGenerator().selectionChanged() }
-                }
-                .onEnded { _ in
-                    pinchStart = nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { withAnimation { showCols = false } }
-                })
             if overscroll > 8 {
                 VStack(spacing: 4) {
                     Image(systemName: overscroll > Self.pullToClose ? "camera.fill" : "chevron.down")
@@ -236,28 +240,19 @@ private struct ColumnPill: View {
 private struct Masonry: View {
     let piles: [Pile]
     let columns: Int
+    /// The table's width: the roll's scroll view's, less its margins.
+    let width: CGFloat
     let library: Library
     var onTap: (Pile) -> Void
     var onAction: (Pile, PileAction) -> Void = { _, _ in }
     var onStep: (Pile, Int) -> Void = { _, _ in }
     @Namespace private var table
-    /// The table's width, measured. (Inside a GeometryReader the piles had no height of their
-    /// own in the scroll view, so it was guessed, and a guess off by a print cut the day short
-    /// or left a hole under it.) Measured on an empty row that takes exactly the width it is
-    /// offered: measured on the columns themselves, a first guess wider than the room (the
-    /// main screen's width, on iPhone Duo wider than the roll) held the columns at that width
-    /// for good, prints cut off on both sides.
-    @State private var width: CGFloat = UIScreen.main.bounds.width - 24
 
     var body: some View {
         let gap: CGFloat = columns == 2 ? 16 : (columns == 3 ? 12 : 9)
         let cw = max(1, (width - gap * CGFloat(columns - 1)) / CGFloat(columns))
         let cols = layout(width: cw, gap: gap)
         VStack(alignment: .leading, spacing: 0) {
-            Color.clear.frame(height: 0)
-                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { w in
-                    if w > 0 && abs(w - width) > 0.5 { width = w }
-                }
             HStack(alignment: .top, spacing: gap) {
                 ForEach(0..<columns, id: \.self) { c in
                     VStack(spacing: gap + 8) {
