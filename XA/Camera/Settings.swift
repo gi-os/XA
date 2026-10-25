@@ -53,6 +53,9 @@ final class AppSettings: ObservableObject {
     @Published var sounds: Bool { didSet { d.set(sounds, forKey: "sounds") } }
     @Published var showRollButton: Bool { didSet { d.set(showRollButton, forKey: "showRollButton") } }
     @Published var showFlipButton: Bool { didSet { d.set(showFlipButton, forKey: "showFlipButton") } }
+    /// iPhone Duo folded, in FILM: no shutter on the screen (Camera Control or a volume button
+    /// takes the picture), the modes between the roll and the film, and the finder takes the rest.
+    @Published var filmFillsOuter: Bool { didSet { d.set(filmFillsOuter, forKey: "filmFillsOuter") } }
     /// DIGI's screen junk: battery, size, shots left, histogram, zoom bar, clock, like a 2005 digicam.
     @Published var digiOSD: Bool { didSet { d.set(digiOSD, forKey: "digiOSD") } }
     /// BOOTH: the skin setting and the sticker sheet's layout.
@@ -83,6 +86,7 @@ final class AppSettings: ObservableObject {
         afArea = AFArea(rawValue: d.string(forKey: "afArea") ?? "") ?? .auto
         showRollButton = d.object(forKey: "showRollButton") as? Bool ?? true
         showFlipButton = d.object(forKey: "showFlipButton") as? Bool ?? true
+        filmFillsOuter = d.object(forKey: "filmFillsOuter") as? Bool ?? true
         digiOSD = d.object(forKey: "digiOSD") as? Bool ?? true
         filmAlwaysOn = d.object(forKey: "filmAlwaysOn") as? Bool ?? false
         flash = FlashSetting(rawValue: d.string(forKey: "flash") ?? "") ?? .off

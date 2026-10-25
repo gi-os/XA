@@ -659,20 +659,23 @@ struct DuoFinder: View {
 /// Reports which way the window stands and how big it is, whenever it is laid out (a turn, or
 /// moving between iPhone Duo's displays, lays it out again), or its screen changes.
 struct SceneOrientationReader: UIViewRepresentable {
-    let changed: (UIInterfaceOrientation, CGSize) -> Void
+    /// Which way, how big, and where the status bar ends (zero when it is hidden).
+    let changed: (UIInterfaceOrientation, CGSize, CGFloat) -> Void
 
     final class Reader: UIView {
-        var changed: ((UIInterfaceOrientation, CGSize) -> Void)?
+        var changed: ((UIInterfaceOrientation, CGSize, CGFloat) -> Void)?
         override func didMoveToWindow() { super.didMoveToWindow(); report() }
         override func layoutSubviews() { super.layoutSubviews(); report() }
         override func traitCollectionDidChange(_ previous: UITraitCollection?) {
             super.traitCollectionDidChange(previous); report()
         }
         private func report() {
-            guard let w = window, let o = w.windowScene?.interfaceOrientation else { return }
+            guard let w = window, let scene = w.windowScene else { return }
+            let o = scene.interfaceOrientation
             let size = w.bounds.size
+            let status = scene.statusBarManager?.statusBarFrame.maxY ?? 0
             // not in the middle of a layout pass
-            DispatchQueue.main.async { [changed] in changed?(o, size) }
+            DispatchQueue.main.async { [changed] in changed?(o, size, status) }
         }
     }
 
