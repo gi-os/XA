@@ -1,11 +1,16 @@
 name: App Store
 
-# Run by hand. Uploads the store text in fastlane/metadata, the screenshots in
-# fastlane/screenshots/en-US and the App Review details, attaches the newest TestFlight build
-# of this version, and — if "submit" is ticked — sends it to App Review.
+# Run by hand. "release" uploads the store text (fastlane/metadata), screenshots and App Review
+# details and attaches the newest TestFlight build of this version, or with "submit" sends it to
+# App Review. "attach" only attaches the build.
 on:
   workflow_dispatch:
     inputs:
+      lane:
+        description: "What to do"
+        type: choice
+        options: [release, attach]
+        default: release
       submit:
         description: "Submit for review"
         type: boolean
@@ -16,23 +21,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-      SUBMIT: ${{ inputs.submit }}
-      REVIEW_FIRST_NAME: ${{ secrets.REVIEW_FIRST_NAME }}
-      REVIEW_LAST_NAME: ${{ secrets.REVIEW_LAST_NAME }}
-      REVIEW_EMAIL: ${{ secrets.REVIEW_EMAIL }}
-      REVIEW_PHONE: ${{ secrets.REVIEW_PHONE }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.3'
-          bundler-cache: true
-      - name: Upload to App Store Connect
-        run: bundle exec fastlane ios release
+  appstore:
+    uses: gi-os/.github/.github/workflows/ios-appstore.yml@main
+    with:
+      lane: ${{ inputs.lane }}
+      submit: ${{ inputs.submit }}
+    secrets: inherit
