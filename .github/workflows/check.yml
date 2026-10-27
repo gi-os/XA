@@ -1,8 +1,7 @@
 name: Check
 
-# Compiles and tests without publishing anything. A push to main ships to TestFlight, so
-# main is a bad place to find out something doesn't compile. Every other branch runs this:
-# the same build and tests, unsigned, with no upload.
+# Compiles and tests without publishing anything. A push to main ships to TestFlight, so main is
+# a bad place to find out something doesn't compile: every other branch and every PR runs this.
 on:
   push:
     branches-ignore: [main]
@@ -15,22 +14,4 @@ concurrency:
 
 jobs:
   check:
-    # The Xcode 27 image: Xcode 27.1 is the first that builds for iPhone Duo's full screens.
-    runs-on: xcode-27
-    timeout-minutes: 45
-    env:
-      XCODE_VERSION: "27.1"
-      # StoreKit's local test store hangs on this image's simulator (iOS 27.0 under Xcode 27.1):
-      # the purchase test never returns. It runs from Xcode.
-      SKIP_TESTS: "XATests/TipJarTests/testTipsLoadAndATipGoesThrough"
-    steps:
-      - uses: actions/checkout@v4
-      - name: Select Xcode
-        run: bash ci/select-xcode.sh
-      - name: Generate project
-        run: brew install xcodegen >/dev/null && xcodegen generate
-      - name: Unit tests
-        timeout-minutes: 35
-        run: bash ci/test.sh
-      - name: Compile for device (unsigned)
-        run: bash ci/build-unsigned.sh
+    uses: gi-os/.github/.github/workflows/ios-check.yml@main
