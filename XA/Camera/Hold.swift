@@ -106,3 +106,34 @@ struct HoldState: Equatable {
         if !flat, fromGravity == nil, let r = raw { confident = r }
     }
 }
+
+/// How the selfie camera's sensor is mounted: the clockwise turn that stands its frames upright
+/// for a portrait hold, before they are mirrored. 270 on every iPhone up to the 16; the iPhone 17
+/// line's square front sensor sits a quarter turn round from that (0), and a turn hard-coded for
+/// the old one sent its selfies out turned. Read from the cameras' rotation coordinators (see
+/// CameraModel.noteSelfieMount); the old phones' turn until they have said.
+enum SelfieMount {
+    private static let lock = NSLock()
+    private static var current: CGFloat = 270
+    static var angle: CGFloat {
+        get { lock.lock(); defer { lock.unlock() }; return current }
+        set { lock.lock(); current = Hold.norm(newValue); lock.unlock() }
+    }
+
+    /// From the two cameras' horizon-level capture angles read at the same moment. The back
+    /// camera's is 90 + the hold; the selfie camera's turns the other way with the hold and is
+    /// meant for frames the connection mirrors (mirrored, then turned), while XA turns first and
+    /// mirrors after: the mount is what is left once the hold is taken out, the other way round.
+    /// iPhone 16 and before, held upright: front 90, back 90 → 270. iPhone 17: front 0 → 0.
+    static func from(front: CGFloat, back: CGFloat) -> CGFloat { Hold.norm(90 - front - back) }
+
+    /// The Exif orientation for a sensor frame turned `r` clockwise, then mirrored.
+    static func exifTag(turnedThenMirrored r: CGFloat) -> Int {
+        switch Hold.norm(r) {
+        case 0: return 2
+        case 90: return 5
+        case 180: return 4
+        default: return 7
+        }
+    }
+}

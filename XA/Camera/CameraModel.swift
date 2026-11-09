@@ -140,6 +140,9 @@ final class CameraModel: NSObject, ObservableObject {
     private var frontFlag = false
     private var frameCount = 0
     private var angleObservation: NSKeyValueObservation?
+    /// The selfie camera's rotation coordinator: with the back camera's, how its sensor is
+    /// mounted (see SelfieMount). Under `lock`.
+    private var frontRotation: AVCaptureDevice.RotationCoordinator?
     /// How the phone is held (see Hold). Under `lock`.
     private var holdState = HoldState()
     /// iPhone Duo: the back of the camera is up on the inner display (see noteGravity). Under `lock`.
@@ -804,6 +807,21 @@ final class CameraModel: NSObject, ObservableObject {
             self.lock.lock(); self.holdState.coordinator(turn: t); self.lock.unlock()
         }
         lock.lock(); angleObservation = watch; lock.unlock()
+        // the selfie camera's coordinator too (outside the lock), for how its sensor is mounted
+        if let front = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) {
+            let fc = AVCaptureDevice.RotationCoordinator(device: front, previewLayer: nil)
+            lock.lock(); frontRotation = fc; lock.unlock()
+            noteSelfieMount()
+        }
+    }
+
+    /// How the selfie camera's sensor is mounted, from the two coordinators read together (see
+    /// SelfieMount). Any queue.
+    private func noteSelfieMount() {
+        lock.lock(); let back = rotation, front = frontRotation; lock.unlock()
+        guard let back, let front else { return }
+        SelfieMount.angle = SelfieMount.from(front: front.videoRotationAngleForHorizonLevelCapture,
+                                             back: back.videoRotationAngleForHorizonLevelCapture)
     }
 
     /// Gravity: how the phone is held, and whether it's flat (see Hold). Device motion's
@@ -824,6 +842,7 @@ final class CameraModel: NSObject, ObservableObject {
 
     /// The hold for a shot, read at the press, fresh. BOOTH's sheet is always portrait. Main thread.
     private func holdTurn(for m: CaptureMode) -> CGFloat {
+        noteSelfieMount()
         if m == .booth { return 0 }
         noteGravity()
         lock.lock(); let rc = rotation; lock.unlock()
@@ -843,11 +862,23 @@ final class CameraModel: NSObject, ObservableObject {
     }
     private var turn: CGFloat { lock.lock(); defer { lock.unlock() }; return frameTurnLocked() }
 
+    /// The selfie camera's sensor frame turned upright for a portrait hold, not yet mirrored: by
+    /// how its sensor is mounted (SelfieMount). A quarter turn only for a frame that still lies
+    /// on its side, as it always did; a half turn always.
+    static func selfieUpright(_ native: CIImage) -> CIImage {
+        let m = SelfieMount.angle
+        switch m {
+        case 0: return native
+        case 180: return rotated(native, clockwise: 180)
+        default: return native.extent.width > native.extent.height ? rotated(native, clockwise: m) : native
+        }
+    }
+
     /// Turn a frame clockwise by a multiple of 90°, keeping it at the origin.
     /// A viewfinder frame or a selfie made portrait and, for the selfie camera, mirrored the way
     /// a mirror shows you. The selfie camera's frames and photos arrive as its sensor reads them,
     /// landscape, and the same turn makes both upright, so what you see is what is saved. Its
-    /// sensor sits the other way round from the back camera's: a three-quarter turn, not a quarter.
+    /// sensor's mount differs between iPhones (see SelfieMount).
     /// How dark the scene is for POCKET 3D's little sensor, from the brightness the camera
     /// measured for this frame (APEX Bv, in the frame's Exif). Not there: bright.
     static func sceneDarkness(_ sb: CMSampleBuffer) -> Double {
@@ -860,7 +891,8 @@ final class CameraModel: NSObject, ObservableObject {
 
     static func upright(_ img: CIImage, mirror: Bool) -> CIImage {
         var out = img
-        if out.extent.width > out.extent.height { out = rotated(out, clockwise: mirror ? 270 : 90) }
+        if mirror { out = selfieUpright(out) }
+        else if out.extent.width > out.extent.height { out = rotated(out, clockwise: 90) }
         if mirror {
             let w = out.extent.width
             out = out.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: w + out.extent.minX * 2, ty: 0))
@@ -872,8 +904,7 @@ final class CameraModel: NSObject, ObservableObject {
     /// turn), turned with the hold, then mirrored. At a portrait hold it is exactly
     /// `upright(_, mirror: true)`.
     static func selfie(_ native: CIImage, turn: CGFloat) -> CIImage {
-        var out = native
-        if out.extent.width > out.extent.height { out = rotated(out, clockwise: 270) }
+        var out = selfieUpright(native)
         out = rotated(out, clockwise: Hold.norm(turn))
         let w = out.extent.width
         return out.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: w + out.extent.minX * 2, ty: 0))
@@ -1755,14 +1786,8 @@ final class CameraModel: NSObject, ObservableObject {
     /// shows the way the viewfinder did: turned for the hold and mirrored. Lossless (only the
     /// orientation changes); the file as it was if it can't be re-tagged. Any queue.
     static func selfieOriginal(_ data: Data, turn: CGFloat) -> Data {
-        // the sensor frame turned 270° + the hold clockwise, then mirrored
-        let tag: Int
-        switch Hold.norm(turn) {
-        case 90: tag = 2
-        case 180: tag = 5
-        case 270: tag = 4
-        default: tag = 7
-        }
+        // the sensor frame turned by its mount + the hold clockwise, then mirrored
+        let tag = SelfieMount.exifTag(turnedThenMirrored: SelfieMount.angle + turn)
         guard let src = CGImageSourceCreateWithData(data as CFData, nil), let type = CGImageSourceGetType(src) else { return data }
         let out = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(out, type, 1, nil) else { return data }
